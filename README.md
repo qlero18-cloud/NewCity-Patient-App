@@ -33,6 +33,20 @@ Todo lo que depende de esto sigue marcado `[POR CONFIRMAR]` / `unconfirmed: true
 
 Además, sin resolver entre fases ya aprobadas: "tienda de conveniencia" aparece como contenido confirmado en `phase-03-fixtures.md` pero no tiene un `mapPointId` en los 7 fijos de `phase-04-map-svg.md` (D17) — falta que el cliente decida cómo se resuelve.
 
+## Prototipo publicado
+
+**https://nchpatient.netlify.app/**
+
+Página estática autocontenida (CSP estricta, sin peticiones a dominios externos — confirmado en el panel de red), publicada en Netlify a partir del mismo repositorio de GitHub. GitHub Pages fue la primera opción, pero su primer deploy se quedó atorado en la cola de Actions sin completarse ni fallar explícitamente; Netlify construye en su propia infraestructura y no depende de esa cola (`docs/DECISIONS.md` D23).
+
+Enlace corto para demo — apunta a la fixture `v_demo1` con `now` fijado, vía una redirección propia del sitio (`_redirects`, mismo origen, no es un acortador de terceros):
+
+```
+https://nchpatient.netlify.app/demo
+```
+
+`qr-demo.png` codifica ese enlace corto (el largo con `?p=` y `now=` no cabe en los 42 bytes del generador de QR de la fase 06 — D21 — que se acotó a propósito a un tamaño conservador).
+
 ## Cómo correrlo localmente
 
 Este proyecto no tiene dependencias (ni `npm install` que correr). Sirve los archivos con cualquier servidor estático — **no lo abras como `file://` directo**: la mayoría de navegadores (confirmado en el navegador integrado de este entorno) descartan la query string en esa modalidad, y `?p=` es obligatorio para ver algo.
@@ -63,4 +77,4 @@ node test/e2e/patient-journey.mjs     # los 10 pasos del recorrido, fase 07
 Lo que ningún comando automatizado cubre, y que sigue pendiente:
 
 - **Prueba física con una lectora real** contra la pantalla del QPASS (fase 06) — sin ella esa fase no se considera terminada, es la única forma de saber si el pase realmente abre la puerta.
-- **Publicación y prueba en un teléfono real** (iPhone y Android, "Agregar a inicio", el QR de `qr-demo.png` escaneado con cámara real) — fase 07. Este prototipo no se ha publicado en una URL pública todavía; hace falta decidir dónde antes de generar `qr-demo.png` y de que esta verificación se pueda hacer.
+- **Prueba en un teléfono real** (iPhone y Android): que la URL publicada cargue, que "Agregar a inicio" produzca ícono y nombre correctos, y que `qr-demo.png` abra el prototipo al escanearlo con la cámara del teléfono — fase 07. La publicación en sí ya está hecha y verificada en navegador (carga correcta, cero peticiones externas, símbolo del pase, cambio de idioma); lo que falta es específicamente la prueba en hardware real, que solo el cliente puede hacer.
