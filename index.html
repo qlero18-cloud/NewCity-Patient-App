@@ -1,0 +1,3022 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<!--
+  INV-6: el título es una constante fija ("NewCity") puesta también por
+  src/ui/app.js en cada render — nunca nombre de paciente ni de estudio.
+  build.py envuelve este archivo tal cual en index.html; no agrega ni
+  quita meta tags de este <head>.
+-->
+<title>NewCity</title>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function () {
+// --- src/data/fixtures.js ---
+// Visitas ficticias para el prototipo y las pruebas (PRD §7 Visit /
+// Appointment / QPass / Lodging). En el MVP real esto lo sustituye el
+// panel de coordinadores (fase 08).
+//
+// TODOS los pacientes de este archivo son ficticios. Los nombres
+// (María, Roberto, Consuelo, Fernando, Alejandra) son nombres de pila
+// genéricos elegidos sin ninguna relación con pacientes reales de
+// NewCity — igual que los tokens, que son cadenas de ejemplo, no valores
+// aleatorios de 128 bits como pide el PRD §6.1 para producción.
+//
+// `Visit.expiresAt` (PRD §7: "derivado, ver R1") se omite a propósito en
+// estos objetos: guardar un valor calculado a mano junto a las citas que
+// lo determinan es la fuente de bugs que R1 ya advierte ("se recalcula
+// cada vez que se agrega, mueve o cancela una cita"). Quien necesite
+// expiresAt lo pide con computeExpiresAt(visit, appointments, lodging)
+// (fase 01) — una sola fuente de verdad, nunca un valor que se puede
+// desincronizar.
+
+function appointment(id, visitId, startsAt, durationMin, serviceName, locationId, status, updatedAt) {
+  return { id, visitId, startsAt, durationMin, serviceName, locationId, status, updatedAt };
+}
+
+function pass(id, visitId, scope, format, validFrom, options = {}) {
+  return {
+    id,
+    visitId,
+    appointmentId: null,
+    format,
+    payload: `payload-${id}`,
+    scope,
+    validFrom,
+    validUntil: options.validUntil ?? null,
+    revokedAt: options.revokedAt ?? null,
+    issuedAt: options.issuedAt ?? validFrom,
+  };
+}
+
+// ---------------------------------------------------------------------
+// v_demo1 — la visita del PRD §8, dato por dato. Es la que enseña el
+// prototipo, y las pruebas de fase 01 la reproducen inline: si algo aquí
+// se desalinea con el PRD, las pruebas de expiry/nextStep/passes de fase
+// 01 y las de esta fase dejan de coincidir.
+// ---------------------------------------------------------------------
+const v_demo1 = {
+  visit: {
+    id: 'v_demo1',
+    token: 'fixture-token-v-demo1',
+    patientFirstName: 'María',
+    lang: 'es',
+    startsAt: '2026-03-10T08:00-07:00',
+    endsAt: '2026-03-11T09:30-07:00',
+    status: 'active',
+  },
+  appointments: [
+    appointment('a1', 'v_demo1', '2026-03-10T08:00-07:00', 45, 'Laboratorio', 'compass', 'scheduled', '2026-03-01T00:00-08:00'),
+    appointment('a2', 'v_demo1', '2026-03-10T09:30-07:00', 60, 'Resonancia magnética', 'compass', 'scheduled', '2026-03-01T00:00-08:00'),
+    appointment('a3', 'v_demo1', '2026-03-10T12:00-07:00', 30, 'Consulta de Medicina Interna', 'piso27', 'scheduled', '2026-03-01T00:00-08:00'),
+    appointment('a4', 'v_demo1', '2026-03-11T09:00-07:00', 30, 'Consulta de Cardiología', 'piso27', 'scheduled', '2026-03-01T00:00-08:00'),
+  ],
+  passes: [
+    pass('q1', 'v_demo1', 'torre', 'qr', '2026-03-10T06:00-07:00'),
+    pass('q2', 'v_demo1', 'estacionamiento', 'code128', '2026-03-10T06:00-07:00'),
+  ],
+  lodging: {
+    visitId: 'v_demo1',
+    hotel: 'Quartz Hotel & Spa',
+    reservationCode: 'QZ-8841-MX',
+    checkIn: '2026-03-10T15:00-07:00',
+    checkOut: '2026-03-11T12:00-07:00',
+    breakfastIncluded: true,
+    recoveryRoom: false,
+  },
+};
+
+// ---------------------------------------------------------------------
+// v_demo2 — sin hospedaje, un solo día, una cancelada (b2) y una movida
+// (b3, con updatedAt reflejando el cambio). Ejercita "Mi estancia no
+// aparece", la cita tachada, el distintivo "actualizado" y R1 caso 1g.
+// ---------------------------------------------------------------------
+const v_demo2 = {
+  visit: {
+    id: 'v_demo2',
+    token: 'fixture-token-v-demo2',
+    patientFirstName: 'Roberto',
+    lang: 'es',
+    startsAt: '2026-04-06T09:00-07:00',
+    endsAt: '2026-04-06T13:30-07:00',
+    status: 'active',
+  },
+  appointments: [
+    appointment('b1', 'v_demo2', '2026-04-06T09:00-07:00', 30, 'Laboratorio', 'compass', 'scheduled', '2026-04-01T00:00-07:00'),
+    appointment('b2', 'v_demo2', '2026-04-06T10:00-07:00', 30, 'Estudios de imagen', 'compass', 'cancelled', '2026-04-05T18:00-07:00'),
+    // b3 se movió de 11:00 a 13:00 la mañana de la visita: updatedAt es
+    // posterior a cuando un paciente normalmente ya habría visto su
+    // itinerario, para que el distintivo "actualizado" tenga sentido.
+    appointment('b3', 'v_demo2', '2026-04-06T13:00-07:00', 30, 'Consulta con especialista', 'piso27', 'scheduled', '2026-04-06T08:30-07:00'),
+  ],
+  passes: [pass('qb1', 'v_demo2', 'torre', 'qr', '2026-04-06T07:00-07:00')],
+  lodging: null,
+};
+
+// ---------------------------------------------------------------------
+// v_longstay — última cita el día 2, checkout el día 5. Ejercita el caso
+// 1f de R1 (el checkout manda por mucho margen) y que el pase sin
+// caducidad siga visible el último día de una estancia larga.
+// ---------------------------------------------------------------------
+const v_longstay = {
+  visit: {
+    id: 'v_longstay',
+    token: 'fixture-token-v-longstay',
+    patientFirstName: 'Consuelo',
+    lang: 'es',
+    startsAt: '2026-05-04T10:00-07:00',
+    endsAt: '2026-05-05T09:30-07:00',
+    status: 'active',
+  },
+  appointments: [
+    appointment('c1', 'v_longstay', '2026-05-04T10:00-07:00', 45, 'Laboratorio', 'compass', 'scheduled', '2026-05-01T00:00-07:00'),
+    appointment('c2', 'v_longstay', '2026-05-05T09:00-07:00', 30, 'Consulta con especialista', 'piso27', 'scheduled', '2026-05-01T00:00-07:00'),
+  ],
+  passes: [pass('qc1', 'v_longstay', 'torre', 'qr', '2026-05-04T08:00-07:00')],
+  lodging: {
+    visitId: 'v_longstay',
+    hotel: 'Quartz Hotel & Spa',
+    reservationCode: 'QZ-9012-MX',
+    checkIn: '2026-05-04T15:00-07:00',
+    checkOut: '2026-05-08T12:00-07:00', // día 5 (día 1 = 4 de mayo)
+    breakfastIncluded: true,
+    recoveryRoom: true,
+  },
+};
+
+// ---------------------------------------------------------------------
+// v_expired — expiresAt ya pasó. Sirve para probar la pantalla neutra
+// (INV-3). Fecha en enero (horario estándar, -08:00) a propósito: da
+// cobertura real de horario estándar además de la de verano de v_demo1.
+// ---------------------------------------------------------------------
+const v_expired = {
+  visit: {
+    id: 'v_expired',
+    token: 'fixture-token-v-expired',
+    patientFirstName: 'Fernando',
+    lang: 'es',
+    startsAt: '2026-01-12T09:00-08:00',
+    endsAt: '2026-01-12T09:30-08:00',
+    status: 'active',
+  },
+  appointments: [appointment('e1', 'v_expired', '2026-01-12T09:00-08:00', 30, 'Laboratorio', 'compass', 'scheduled', '2026-01-01T00:00-08:00')],
+  passes: [pass('qe1', 'v_expired', 'torre', 'qr', '2026-01-12T07:00-08:00')],
+  lodging: null,
+};
+
+// ---------------------------------------------------------------------
+// v_revoked — un QPASS revocado (qf1) y uno activo (qf2). Ejercita INV-4
+// y el caso 3b: el revocado no debe verse ni desde caché.
+// ---------------------------------------------------------------------
+const v_revoked = {
+  visit: {
+    id: 'v_revoked',
+    token: 'fixture-token-v-revoked',
+    patientFirstName: 'Alejandra',
+    lang: 'en',
+    startsAt: '2026-06-09T10:00-07:00',
+    endsAt: '2026-06-09T10:30-07:00',
+    status: 'active',
+  },
+  appointments: [appointment('f1', 'v_revoked', '2026-06-09T10:00-07:00', 30, 'Laboratorio', 'compass', 'scheduled', '2026-06-01T00:00-07:00')],
+  passes: [
+    pass('qf1', 'v_revoked', 'torre', 'qr', '2026-06-09T06:00-07:00', { revokedAt: '2026-06-09T14:00-07:00' }),
+    pass('qf2', 'v_revoked', 'estacionamiento', 'code128', '2026-06-09T06:00-07:00'),
+  ],
+  lodging: null,
+};
+
+const fixtures = { v_demo1, v_demo2, v_longstay, v_expired, v_revoked };
+const FIXTURE_IDS = Object.keys(fixtures);
+
+// --- src/domain/time.js ---
+// Formato y aritmética de horas en America/Tijuana (PRD §7.1 INV-5, R6).
+//
+// Regla de esta fase: ninguna función de este archivo consulta el reloj
+// del sistema (INV-1) ni la zona horaria del proceso (INV-5). Toda lectura
+// de "qué hora es en Tijuana" pasa por Intl.DateTimeFormat con
+// timeZone: 'America/Tijuana' explícito — eso es independiente de
+// process.env.TZ, a diferencia de Date#getHours/getMinutes/getDay/getDate,
+// que sí leen la zona local del proceso y por eso están prohibidas aquí.
+//
+// `new Date(iso)` con argumento es aritmética de instante (milisegundos
+// desde epoch, siempre UTC internamente) y no depende de ninguna zona
+// horaria: es distinto de `new Date()` sin argumento, que sí lee el reloj
+// del sistema y está prohibido por INV-1.
+
+const TZ = 'America/Tijuana';
+const HOUR_MS = 60 * 60 * 1000;
+
+const WEEKDAYS_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const WEEKDAYS_EN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+const PARTS_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: TZ,
+  hour12: false,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  weekday: 'long',
+});
+
+// Descompone un instante en sus campos de calendario/reloj vistos desde
+// America/Tijuana. No usa Date#getHours ni similares: todo sale de
+// Intl.DateTimeFormat con timeZone explícito.
+function tijuanaParts(date) {
+  const raw = Object.fromEntries(PARTS_FORMATTER.formatToParts(date).map((p) => [p.type, p.value]));
+  const hour = raw.hour === '24' ? 0 : Number(raw.hour); // ICU a veces da "24" para medianoche
+  return {
+    year: Number(raw.year),
+    month: Number(raw.month),
+    day: Number(raw.day),
+    hour,
+    minute: Number(raw.minute),
+    second: Number(raw.second),
+    weekdayEn: raw.weekday,
+  };
+}
+
+// Offset UTC vigente en America/Tijuana para ese instante (en minutos,
+// negativo porque Tijuana siempre está al oeste de UTC). Se deriva
+// comparando el instante real contra el mismo instante interpretado como
+// si sus campos de calendario fueran UTC — funciona en cualquier lado del
+// cambio de horario de verano sin tabla de reglas propia.
+function tijuanaOffsetMinutes(date) {
+  const p = tijuanaParts(date);
+  const asIfUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  return Math.round((asIfUtc - date.getTime()) / 60000);
+}
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function formatOffset(minutes) {
+  const sign = minutes <= 0 ? '-' : '+';
+  const abs = Math.abs(minutes);
+  return `${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`;
+}
+
+// Convierte cualquier ISO con desplazamiento explícito a milisegundos desde
+// epoch. Es aritmética de instante pura, no lectura de reloj (INV-1: el
+// argumento siempre llega desde afuera).
+function instantMs(iso) {
+  return new Date(iso).getTime();
+}
+
+// Suma milisegundos a un instante y lo serializa como ISO 8601 con el
+// desplazamiento que America/Tijuana tenga vigente en ese instante
+// resultante (nunca 'Z', nunca sin zona — PRD §7).
+function toTijuanaIso(ms) {
+  const date = new Date(ms);
+  const p = tijuanaParts(date);
+  const offset = tijuanaOffsetMinutes(date);
+  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}T${pad2(p.hour)}:${pad2(p.minute)}:${pad2(p.second)}${formatOffset(offset)}`;
+}
+
+// Clave de día de calendario en America/Tijuana, ordenable como string
+// ("2026-03-10"). Se usa para agrupar (itinerary.js) y para medir
+// diferencia de días.
+function dayKeyTijuana(iso) {
+  const p = tijuanaParts(new Date(iso));
+  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
+}
+
+// Diferencia en días de calendario (Tijuana) entre iso y referenceIso:
+// 0 = mismo día, 1 = el día siguiente, -1 = el día anterior, etc.
+function dayDiffTijuana(iso, referenceIso) {
+  const a = tijuanaParts(new Date(iso));
+  const b = tijuanaParts(new Date(referenceIso));
+  const utcA = Date.UTC(a.year, a.month - 1, a.day);
+  const utcB = Date.UTC(b.year, b.month - 1, b.day);
+  return Math.round((utcA - utcB) / 86400000);
+}
+
+// formatTimeTijuana(iso, lang) -> "9:00 AM" (en) / "9:00 a.m." (es)
+// Reloj de 12 horas sin cero a la izquierda en la hora, minutos siempre a
+// dos dígitos. "a.m./p.m." en minúsculas con puntos es la convención
+// habitual en español de México; no la dicta el PRD de forma literal, así
+// que queda documentada aquí como decisión de implementación, no de
+// producto.
+function formatTimeTijuana(iso, lang) {
+  const { hour, minute } = tijuanaParts(new Date(iso));
+  const isAm = hour < 12;
+  const period = lang === 'es' ? (isAm ? 'a.m.' : 'p.m.') : isAm ? 'AM' : 'PM';
+  let hour12 = hour % 12;
+  if (hour12 === 0) hour12 = 12;
+  return `${hour12}:${pad2(minute)} ${period}`;
+}
+
+// isOpenNow(hours, now) -> true | false | null
+//
+// Añadido en la fase 05 (pantalla "Horarios"): la fase pide un indicador
+// "abierto ahora / cerrado" "calculado con now inyectado, nunca con el
+// reloj leído dentro de la vista" — eso es una regla de dominio (lee hora
+// de Tijuana, compara contra un horario), no una decisión de presentación,
+// así que vive aquí y no en src/ui/screens/hours.js, igual que el resto de
+// este archivo.
+//
+// hours.weekly[].day usa la misma convención que Date#getUTCDay():
+// 0 = domingo … 6 = sábado. Ningún dato real del proyecto lo confirma
+// todavía (locations.js, support.js y plaza.js traen el mismo horario
+// placeholder los 7 días, así que el número en sí es indistinguible en la
+// práctica) — queda documentada aquí como la convención a seguir cuando
+// haya horario real distinto por día.
+//
+// hours.exceptions no se consulta: ninguna fixture ni contenido real lo
+// puebla todavía (siempre `[]`) y el PRD no fija su forma. Inventar una
+// forma sin dato real que la respalde sería peor que dejarlo pendiente —
+// mismo criterio que ya se aplicó en fase 03 para amenidades y farmacia.
+function isOpenNow(hours, now) {
+  if (!hours || !Array.isArray(hours.weekly)) return null;
+  const p = tijuanaParts(new Date(now));
+  const dow = WEEKDAYS_EN.indexOf(p.weekdayEn); // 0=domingo..6=sábado
+  const today = hours.weekly.find((w) => w.day === dow);
+  if (!today) return false;
+  const hm = `${pad2(p.hour)}:${pad2(p.minute)}`;
+  return hm >= today.open && hm <= today.close;
+}
+
+// formatDayLabel(iso, now, lang) -> { es, en }
+// Devuelve SIEMPRE ambos idiomas (igual que groupByDay's `label`): la UI
+// puede alternar ES/EN sin volver a llamar al dominio. El parámetro `lang`
+// se acepta por simetría con formatTimeTijuana y porque quien llama ya lo
+// tiene a mano, pero no cambia qué se calcula.
+function formatDayLabel(iso, now, _lang) {
+  const diff = dayDiffTijuana(iso, now);
+  const { day, weekdayEn } = tijuanaParts(new Date(iso));
+  const idx = WEEKDAYS_EN.indexOf(weekdayEn);
+  const weekdayEs = WEEKDAYS_ES[idx];
+
+  const es = diff === 0 ? `Hoy · ${weekdayEs} ${day}` : diff === 1 ? `Mañana · ${weekdayEs} ${day}` : `${weekdayEs} ${day}`;
+  const en = diff === 0 ? `Today · ${weekdayEn} ${day}` : diff === 1 ? `Tomorrow · ${weekdayEn} ${day}` : `${weekdayEn} ${day}`;
+
+  return { es, en };
+}
+
+// --- src/domain/expiry.js ---
+// R1 — Caducidad del enlace (PRD §8).
+//
+//   expiresAt = max( última cita no cancelada , checkout del hospedaje ) + 24h
+//
+// `lodging` puede ser null (visita sin hospedaje, caso 1g). Si además no
+// hay ninguna cita no cancelada, no hay de dónde tomar el máximo: cae al
+// caso degenerado 1e (visit.startsAt + 24h) para que el enlace no quede
+// vivo para siempre.
+
+
+function lastNonCancelledAppointmentEndMs(appointments) {
+  const ends = appointments
+    .filter((a) => a.status !== 'cancelled')
+    .map((a) => instantMs(a.startsAt) + a.durationMin * 60 * 1000);
+  return ends.length > 0 ? Math.max(...ends) : null;
+}
+
+function computeExpiresAt(visit, appointments, lodging) {
+  const lastAppointmentEndMs = lastNonCancelledAppointmentEndMs(appointments);
+  const checkoutMs = lodging ? instantMs(lodging.checkOut) : null;
+
+  const candidates = [lastAppointmentEndMs, checkoutMs].filter((v) => v !== null);
+  const baseMs = candidates.length > 0 ? Math.max(...candidates) : instantMs(visit.startsAt);
+
+  return toTijuanaIso(baseMs + 24 * HOUR_MS);
+}
+
+function isExpired(visit, appointments, lodging, now) {
+  const expiresAt = computeExpiresAt(visit, appointments, lodging);
+  return instantMs(now) > instantMs(expiresAt);
+}
+
+// --- src/domain/itinerary.js ---
+// R5 — Cita movida (PRD §8) y agrupado del itinerario por día (PRD §9,
+// "Visita de varios días").
+//
+// groupByDay incluye TODAS las citas, también las cancelled (§9 "Cita
+// cancelada": permanece en la línea de tiempo, tachada y en gris). Que una
+// cancelled quede fuera de "tu siguiente paso" lo decide nextStep.js, no
+// este módulo.
+
+
+function groupByDay(appointments, now) {
+  const sorted = [...appointments].sort((a, b) => instantMs(a.startsAt) - instantMs(b.startsAt));
+
+  const groups = new Map();
+  for (const appointment of sorted) {
+    const key = dayKeyTijuana(appointment.startsAt);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        dayKey: key,
+        label: formatDayLabel(appointment.startsAt, now),
+        items: [],
+      });
+    }
+    groups.get(key).items.push(appointment);
+  }
+
+  return [...groups.values()].sort((a, b) => a.dayKey.localeCompare(b.dayKey));
+}
+
+// El distintivo "actualizado" se muestra si el cambio es posterior a la
+// última vez que el paciente vio el itinerario en este dispositivo. Sin
+// una marca previa (dispositivo nuevo, caso 5c) no se inventa una
+// referencia: no hay distintivos.
+function isUpdated(appointment, lastViewedItineraryAt) {
+  if (lastViewedItineraryAt === null || lastViewedItineraryAt === undefined) return false;
+  return instantMs(appointment.updatedAt) > instantMs(lastViewedItineraryAt);
+}
+
+// --- src/domain/nextStep.js ---
+// R2 — "Tu siguiente paso" (PRD §8).
+//
+// Si existe una cita in_progress, esa es el siguiente paso. Si no, la
+// scheduled más próxima con startsAt >= now. cancelled y done nunca son
+// candidatas. Desempate determinista: startsAt, luego locationId, luego id.
+
+
+function byTiebreak(a, b) {
+  const byStart = instantMs(a.startsAt) - instantMs(b.startsAt);
+  if (byStart !== 0) return byStart;
+  const byLocation = a.locationId.localeCompare(b.locationId);
+  if (byLocation !== 0) return byLocation;
+  return a.id.localeCompare(b.id);
+}
+
+function nextStep(appointments, now) {
+  const inProgress = appointments.filter((a) => a.status === 'in_progress');
+  if (inProgress.length > 0) {
+    return [...inProgress].sort(byTiebreak)[0];
+  }
+
+  const nowMs = instantMs(now);
+  const upcoming = appointments.filter((a) => a.status === 'scheduled' && instantMs(a.startsAt) >= nowMs);
+  if (upcoming.length === 0) return null;
+
+  return [...upcoming].sort(byTiebreak)[0];
+}
+
+// --- src/domain/passes.js ---
+// R3 — Qué QPASS se muestra (PRD §8, §6.5).
+//
+// Visible si se cumplen las tres:
+//   1. now >= validFrom
+//   2. validUntil == null (no caduca) O now <= validUntil
+//   3. revokedAt == null
+//
+// `revokedAt` no es "revocado a partir de esa hora": es la marca de que YA
+// se revocó. Cualquier valor no nulo lo apaga de inmediato, sin comparar
+// contra `now` — es el único mecanismo de invalidación de un pase sin
+// caducidad (INV-4, §6.5).
+//
+// Orden en pantalla: torre → piso27 → estacionamiento.
+
+
+const SCOPE_ORDER = { torre: 0, piso27: 1, estacionamiento: 2 };
+
+function isRevoked(pass) {
+  return pass.revokedAt !== null && pass.revokedAt !== undefined;
+}
+
+function hasStarted(pass, nowMs) {
+  return instantMs(pass.validFrom) <= nowMs;
+}
+
+function notYetExpired(pass, nowMs) {
+  if (pass.validUntil === null || pass.validUntil === undefined) return true; // no caduca — §6.5
+  return instantMs(pass.validUntil) >= nowMs;
+}
+
+function visiblePasses(passes, now) {
+  const nowMs = instantMs(now);
+
+  return passes
+    .filter((p) => !isRevoked(p) && hasStarted(p, nowMs) && notYetExpired(p, nowMs))
+    .sort((a, b) => {
+      const byScope = SCOPE_ORDER[a.scope] - SCOPE_ORDER[b.scope];
+      if (byScope !== 0) return byScope;
+      return a.id.localeCompare(b.id);
+    });
+}
+
+// --- src/domain/index.js ---
+// Superficie pública del dominio (Fase 01). Todo lo que vive fuera de
+// src/domain/ debe importar de aquí, no de los archivos internos, salvo
+// las propias pruebas de fase 01 (que verifican cada módulo por separado).
+
+// --- src/ui/util.js ---
+// Fase 05 — utilidades compartidas de presentación. Sin lógica de fechas ni
+// de negocio (eso vive en src/domain/): solo escapado de texto y armado de
+// atributos, que es responsabilidad legítima de la capa de UI.
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// classNames(['a', cond && 'b', 'c']) -> "a c"  (omite valores falsy)
+function classNames(list) {
+  return list.filter(Boolean).join(' ');
+}
+
+// Nombre de ubicación en el idioma activo, con reserva razonable si el id
+// no existiera en el catálogo (no debería pasar — probado en fase 03/04 —
+// pero una pantalla nunca debe reventar por un locationId huérfano).
+function locationName(locations, locationId, lang) {
+  const loc = locations.find((l) => l.id === locationId);
+  if (!loc) return locationId;
+  return loc.name[lang] ?? loc.name.es;
+}
+
+// --- src/ui/components/badge.js ---
+// Distintivo reusable: [POR CONFIRMAR] (unconfirmed: true en cualquier
+// dato de src/data/) y "actualizado" (R5, cita movida). Mismo componente,
+// variantes distintas de color — nunca texto libre inventado por cada
+// pantalla por separado.
+
+
+function renderBadge(text, variant = 'neutral') {
+  return `<span class="nc-badge nc-badge--${escapeHtml(variant)}">${escapeHtml(text)}</span>`;
+}
+
+function renderUnconfirmedBadge(t) {
+  return renderBadge(t('common.unconfirmedBadge'), 'unconfirmed');
+}
+
+const BADGE_CSS = `
+.nc-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 6px; line-height: 1.4; white-space: nowrap; }
+.nc-badge--unconfirmed { background: #FBEBD2; color: #8A5A00; }
+.nc-badge--updated { background: #DFF3EE; color: #106657; }
+.nc-badge--cancelled { background: #F4E1E1; color: #8A2A2A; }
+@media (prefers-color-scheme: dark) {
+  .nc-badge--unconfirmed { background: #4A3110; color: #F2C97D; }
+  .nc-badge--updated { background: #103B32; color: #8FDFCB; }
+  .nc-badge--cancelled { background: #3B1F1F; color: #E9A9A9; }
+}
+`;
+
+// --- src/ui/components/card.js ---
+// Tarjeta genérica: contenedor con esquinas redondeadas y sombra sutil,
+// reusado por Inicio (siguiente paso), Itinerario (cada cita), Plaza (cada
+// venue) y Mi estancia. `variant` solo cambia acento visual, nunca texto.
+
+
+function renderCard(innerHtml, { variant = 'default', extraClass = '' } = {}) {
+  return `<div class="${classNames(['nc-card', `nc-card--${variant}`, extraClass])}">${innerHtml}</div>`;
+}
+
+const CARD_CSS = `
+.nc-card { background: var(--nc-card-bg); border: 1px solid var(--nc-card-border); border-radius: 14px; padding: 14px 16px; }
+.nc-card--accent { border-color: var(--nc-teal); border-width: 2px; }
+.nc-card--muted { opacity: 0.7; }
+`;
+
+// --- src/ui/components/ficha.js ---
+// Ficha genérica de información: título + líneas de detalle + distintivo
+// opcional. Reusa el mismo patrón visual que la ficha de un punto del mapa
+// (fase 04, src/map/complexMap.js renderFichaHtml) pero para contenido que
+// no es un punto del mapa (venue de Plaza, entrada de Horarios) — no
+// importa esa función aquí para no acoplar UI a un módulo de otra capa por
+// una coincidencia de forma; son dos cosas distintas que se parecen.
+
+
+
+
+function renderFicha({ title, lines = [], unconfirmed = false, t, extra = '' }) {
+  const badge = unconfirmed ? ` ${renderUnconfirmedBadge(t)}` : '';
+  const linesHtml = lines
+    .filter(Boolean)
+    .map((l) => `<p class="nc-ficha-line">${escapeHtml(l)}</p>`)
+    .join('\n');
+  return renderCard(`
+    <h3 class="nc-ficha-title">${escapeHtml(title)}${badge}</h3>
+    ${linesHtml}
+    ${extra}
+  `);
+}
+
+const FICHA_CSS = `
+.nc-ficha-title { margin: 0 0 6px; font-size: 16px; font-weight: 700; }
+.nc-ficha-line { margin: 0 0 4px; font-size: 13px; opacity: 0.85; }
+`;
+
+// --- src/ui/components/tabs.js ---
+// Navegación inferior de 5 pestañas (PRD/fase 05): Inicio · Itinerario ·
+// Mapa · Plaza · Ayuda. Horarios y Mi estancia NO son pestañas propias —
+// cuelgan de Inicio y Plaza (ver src/ui/app.js) — a propósito no están
+// aquí.
+//
+// Cada botón mide al menos 44×44px de área tocable (criterio de
+// aceptación de la fase 05, mismo mínimo que la fase 04).
+
+
+const TAB_ORDER = ['home', 'itinerary', 'map', 'plaza', 'help'];
+
+function renderTabBar(activeTab, t) {
+  const items = TAB_ORDER.map((id) => {
+    const isActive = id === activeTab;
+    return `
+      <button type="button" class="${classNames(['nc-tab', isActive && 'nc-tab--active'])}" data-tab="${id}" role="tab" aria-selected="${isActive}">
+        <span class="nc-tab-label">${escapeHtml(t(`tabs.${id}`))}</span>
+      </button>`;
+  }).join('\n');
+  return `<nav class="nc-tabbar" role="tablist" aria-label="Navegación principal">${items}</nav>`;
+}
+
+const TABS_CSS = `
+.nc-tabbar { position: sticky; bottom: 0; display: flex; background: var(--nc-surface); border-top: 1px solid var(--nc-card-border); padding-bottom: env(safe-area-inset-bottom, 0); }
+.nc-tab { flex: 1; min-height: 52px; min-width: 44px; border: none; background: none; color: var(--nc-ink); opacity: 0.6; font: 500 12px Barlow, system-ui, sans-serif; cursor: pointer; padding: 8px 4px; }
+.nc-tab--active { opacity: 1; color: var(--nc-teal-ink); font-weight: 700; }
+`;
+
+// --- src/ui/i18n.js ---
+// Fase 05 — cadenas es/en de las 7 pantallas del paciente. `STRINGS.es` y
+// `STRINGS.en` deben tener exactamente el mismo árbol de llaves (probado
+// en test/ui/i18n.test.js con un barrido recursivo, no solo de primer
+// nivel) — así una llave nueva agregada a un idioma y olvidada en el otro
+// rompe la prueba en vez de aparecer en blanco en producción.
+//
+// Contenido ya confirmado por el cliente (nombres de ubicaciones, menús,
+// horarios reales) NO vive aquí: viene de src/data/*.js y ya trae su
+// propio es/en. Este archivo es solo texto de interfaz — títulos, botones,
+// estados — que no depende de ningún dato del paciente.
+
+const SUPPORTED_LANGS = ['es', 'en'];
+const DEFAULT_LANG = 'es';
+
+const STRINGS = {
+  es: {
+    common: {
+      appName: 'NewCity',
+      langToggle: 'English',
+      unconfirmedBadge: 'POR CONFIRMAR',
+      backButton: 'Atrás',
+      loading: 'Cargando…',
+      neutralTitle: 'Este enlace no está disponible',
+      neutralBody: 'Si tu visita sigue vigente, pide a coordinación un enlace nuevo.',
+    },
+    tabs: {
+      home: 'Inicio',
+      itinerary: 'Itinerario',
+      map: 'Mapa',
+      plaza: 'Plaza',
+      help: 'Ayuda',
+    },
+    home: {
+      greeting: (name) => `Hola, ${name}`,
+      nextStepLabel: 'Tu siguiente paso',
+      nextStepCta: 'Ver mi pase',
+      nextStepEmptyTitle: 'Completaste tu itinerario',
+      nextStepEmptyBody: 'No tienes más citas programadas en esta visita.',
+      quickAccessMap: 'Mapa',
+      quickAccessStay: 'Mi estancia',
+      quickAccessHelp: 'Ayuda',
+      hoursLink: 'Horarios de Compass y Piso 27',
+    },
+    itinerary: {
+      title: 'Mi itinerario',
+      updatedBadge: 'actualizado',
+      status: {
+        scheduled: 'Programada',
+        in_progress: 'En curso',
+        done: 'Completada',
+        moved: 'Reprogramada',
+        cancelled: 'Cancelada',
+      },
+      empty: 'No hay citas registradas en esta visita.',
+    },
+    map: {
+      title: 'Mapa y accesos',
+      directionsButton: 'Cómo llegar',
+      routeTitle: (from, to) => `${from} → ${to}`,
+      routeStep: (current, total) => `Paso ${current} de ${total}`,
+      routePrev: 'Anterior',
+      routeNext: 'Siguiente',
+      routeNone: 'Todavía no hay una ruta redactada entre estos dos puntos.',
+      chooseDestination: 'Elige un punto del mapa para ver cómo llegar',
+      sameLocation: 'Ya estás en el punto de tu próxima cita.',
+    },
+    plaza: {
+      title: 'Plaza',
+      restaurantsTitle: 'Restaurantes',
+      amenitiesTitle: 'Amenidades',
+      amenitiesEmpty: 'Sin amenidades confirmadas todavía.',
+      cuisineFilterAll: 'Todos',
+      cuisineUnknown: 'Tipo de comida por confirmar',
+    },
+    hours: {
+      title: 'Horarios',
+      openNow: 'Abierto ahora',
+      closedNow: 'Cerrado ahora',
+      unknown: 'Horario sin confirmar',
+    },
+    stay: {
+      title: 'Mi estancia',
+      hotel: 'Hotel',
+      reservationCode: 'Código de reservación',
+      copyButton: 'Copiar',
+      copied: 'Copiado',
+      checkIn: 'Check-in',
+      checkOut: 'Check-out',
+      breakfastIncluded: 'Desayuno incluido',
+      recoveryRoom: 'Habitación recovery',
+      yes: 'Sí',
+      no: 'No',
+    },
+    help: {
+      title: 'Ayuda',
+      whatsappButton: 'Escribir por WhatsApp',
+      callButton: 'Llamar',
+      hoursTitle: 'Horario de atención de coordinación',
+    },
+    pass: {
+      title: 'Mi pase',
+      empty: 'No tienes ningún pase visible en este momento.',
+      scope: { torre: 'Torre Médica', piso27: 'Piso 27', estacionamiento: 'Estacionamiento' },
+      brightnessHint: 'Sube el brillo de tu pantalla para que se lea mejor en el acceso.',
+      offline: 'Sin conexión',
+      savedAt: (time) => `guardado a las ${time}`,
+      validUntil: (time) => `Válido hasta las ${time}`,
+      noExpiry: 'Sin fecha de caducidad',
+    },
+  },
+  en: {
+    common: {
+      appName: 'NewCity',
+      langToggle: 'Español',
+      unconfirmedBadge: 'TO CONFIRM',
+      backButton: 'Back',
+      loading: 'Loading…',
+      neutralTitle: 'This link isn’t available',
+      neutralBody: 'If your visit is still active, ask coordination for a new link.',
+    },
+    tabs: {
+      home: 'Home',
+      itinerary: 'Itinerary',
+      map: 'Map',
+      plaza: 'Plaza',
+      help: 'Help',
+    },
+    home: {
+      greeting: (name) => `Hi, ${name}`,
+      nextStepLabel: 'Your next step',
+      nextStepCta: 'View my pass',
+      nextStepEmptyTitle: 'You completed your itinerary',
+      nextStepEmptyBody: 'You have no more scheduled appointments on this visit.',
+      quickAccessMap: 'Map',
+      quickAccessStay: 'My stay',
+      quickAccessHelp: 'Help',
+      hoursLink: 'Compass and Floor 27 hours',
+    },
+    itinerary: {
+      title: 'My itinerary',
+      updatedBadge: 'updated',
+      status: {
+        scheduled: 'Scheduled',
+        in_progress: 'In progress',
+        done: 'Done',
+        moved: 'Rescheduled',
+        cancelled: 'Cancelled',
+      },
+      empty: 'No appointments on record for this visit.',
+    },
+    map: {
+      title: 'Map & access',
+      directionsButton: 'Get directions',
+      routeTitle: (from, to) => `${from} → ${to}`,
+      routeStep: (current, total) => `Step ${current} of ${total}`,
+      routePrev: 'Previous',
+      routeNext: 'Next',
+      routeNone: 'There isn’t a written route between these two points yet.',
+      chooseDestination: 'Choose a point on the map to see directions',
+      sameLocation: 'You’re already at the point of your next appointment.',
+    },
+    plaza: {
+      title: 'Plaza',
+      restaurantsTitle: 'Restaurants',
+      amenitiesTitle: 'Amenities',
+      amenitiesEmpty: 'No confirmed amenities yet.',
+      cuisineFilterAll: 'All',
+      cuisineUnknown: 'Cuisine to be confirmed',
+    },
+    hours: {
+      title: 'Hours',
+      openNow: 'Open now',
+      closedNow: 'Closed now',
+      unknown: 'Hours not confirmed',
+    },
+    stay: {
+      title: 'My stay',
+      hotel: 'Hotel',
+      reservationCode: 'Reservation code',
+      copyButton: 'Copy',
+      copied: 'Copied',
+      checkIn: 'Check-in',
+      checkOut: 'Check-out',
+      breakfastIncluded: 'Breakfast included',
+      recoveryRoom: 'Recovery room',
+      yes: 'Yes',
+      no: 'No',
+    },
+    help: {
+      title: 'Help',
+      whatsappButton: 'Message on WhatsApp',
+      callButton: 'Call',
+      hoursTitle: 'Coordination support hours',
+    },
+    pass: {
+      title: 'My pass',
+      empty: 'You have no visible pass right now.',
+      scope: { torre: 'Medical Tower', piso27: 'Floor 27', estacionamiento: 'Parking' },
+      brightnessHint: 'Turn up your screen brightness so it scans well at the access point.',
+      offline: 'Offline',
+      savedAt: (time) => `saved at ${time}`,
+      validUntil: (time) => `Valid until ${time}`,
+      noExpiry: 'No expiration date',
+    },
+  },
+};
+
+function resolveInitialLang(navigatorLanguage, storedLang) {
+  if (storedLang && SUPPORTED_LANGS.includes(storedLang)) return storedLang;
+  if (navigatorLanguage && navigatorLanguage.toLowerCase().startsWith('en')) return 'en';
+  return DEFAULT_LANG;
+}
+
+// Acceso por ruta de puntos ("home.nextStepCta"). Lanza si la llave no
+// existe en vez de devolver undefined en silencio: una llave mal escrita
+// debe romper visiblemente en desarrollo, no aparecer como "undefined" en
+// pantalla.
+//
+// Se llama "translate", no "t": src/ui/app.js necesita el nombre corto "t"
+// para la función local que cada pantalla recibe como ctx.t (usada por
+// docenas de llamadas en los 7 archivos de src/ui/screens/), y build.py
+// (fase 05) no soporta "import { t as translate }" — aplana los módulos a
+// un solo scope por nombre declarado, sin manejar alias. Dos nombres
+// distintos de origen evita necesitar un alias en primer lugar.
+function translate(lang, path) {
+  const dict = STRINGS[SUPPORTED_LANGS.includes(lang) ? lang : DEFAULT_LANG];
+  const value = path.split('.').reduce((node, key) => {
+    if (node === undefined) throw new Error(`i18n: falta la llave "${path}" en "${lang}"`);
+    return node[key];
+  }, dict);
+  if (value === undefined) throw new Error(`i18n: falta la llave "${path}" en "${lang}"`);
+  return value;
+}
+
+// --- src/data/support.js ---
+// Canal de soporte (PRD §7 SupportChannel). El único dato real disponible
+// es un número sacado de los flyers del cliente: (619) 324.3116. El PRD
+// §15.5 deja explícito que no se sabe cuál número es WhatsApp y cuál
+// Google Voice — puede incluso ser el mismo número para ambos roles.
+//
+// Se usa ese número real en los dos campos en vez de inventar un segundo
+// número que no existe. `unconfirmed: true` cubre tanto esa ambigüedad de
+// rol como el horario de coordinación, que tampoco está confirmado
+// (PRD §15.4).
+
+const supportChannel = {
+  whatsappNumber: '+16193243116',
+  voiceNumber: '+16193243116',
+  hours: {
+    tz: 'America/Tijuana',
+    weekly: [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, open: '07:00', close: '20:00' })),
+    exceptions: [],
+    unconfirmed: true,
+  },
+  unconfirmed: true,
+};
+
+// --- src/ui/screens/help.js ---
+// Ayuda — WhatsApp, llamada y horario de atención de coordinación (fase 05).
+// wa.me exige solo dígitos (sin "+"); tel: sí conserva el "+" (E.164
+// estándar) — por eso hay dos formatos derivados del mismo número, no dos
+// números distintos.
+
+
+
+
+
+
+
+function digitsOnly(e164) {
+  return e164.replace(/[^\d]/g, '');
+}
+
+function renderHelpScreen(ctx) {
+  const { now, t } = ctx;
+  const waHref = `https://wa.me/${digitsOnly(supportChannel.whatsappNumber)}`;
+  const telHref = `tel:${supportChannel.voiceNumber}`;
+  const open = isOpenNow(supportChannel.hours, now);
+  const statusBadge = open === null ? '' : open ? renderBadge(t('hours.openNow'), 'updated') : renderBadge(t('hours.closedNow'), 'cancelled');
+
+  return `
+    <section class="nc-screen">
+      <h1 class="nc-screen-title">${escapeHtml(t('help.title'))}</h1>
+      ${renderCard(`
+        <a class="nc-button nc-button--primary nc-button--block" href="${escapeHtml(waHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t('help.whatsappButton'))}</a>
+        <a class="nc-button nc-button--block" href="${escapeHtml(telHref)}">${escapeHtml(t('help.callButton'))}</a>
+      `, { variant: 'accent' })}
+      ${renderFicha({
+        title: t('help.hoursTitle'),
+        lines: [],
+        unconfirmed: supportChannel.hours?.unconfirmed === true,
+        t,
+        extra: statusBadge,
+      })}
+    </section>
+  `;
+}
+
+const HELP_CSS = `
+.nc-button--block { display: block; width: 100%; text-align: center; text-decoration: none; box-sizing: border-box; margin-bottom: 8px; }
+`;
+
+// --- src/data/locations.js ---
+// Ubicaciones del complejo (PRD §7 Location, §13 nomenclatura confirmada
+// por el cliente). Contenido real de NewCity — a diferencia de
+// src/data/fixtures.js, esto sobrevive al prototipo.
+//
+// Los 7 id de aquí coinciden a propósito con los locationId que ya usa el
+// catálogo de rutas (src/data/routes.js, fase 02) y con los 7 mapPointId
+// de docs/phases/phase-04-map-svg.md. Las tres listas se prueban cruzadas
+// en test/data/fixtures.test.js: si una cambia sin las otras, la prueba
+// lo detecta.
+//
+// El PRD §15 no trae ningún horario confirmado por el cliente para NINGÚN
+// punto del complejo — el ítem 4 lo dice explícito para Compass/Piso
+// 27/coordinación, pero tampoco hay dato real para el resto. Por eso
+// `hours` va unconfirmed: true en las 7, con un horario placeholder
+// razonable (07:00–20:00 todos los días) que la UI debe mostrar con el
+// distintivo [POR CONFIRMAR], nunca como si fuera un dato real.
+//
+// NOTA — hueco entre fases: phase-03-fixtures.md menciona "tienda de
+// conveniencia" como contenido confirmado, pero phase-04-map-svg.md fija
+// exactamente 7 mapPointId y ninguno le corresponde. No se inventa aquí
+// un mapPointId nuevo (esa lista la fija la fase 04, no esta) ni se
+// fuerza la tienda dentro de un punto existente por adivinar. Queda fuera
+// de este archivo hasta que se resuelva esa inconsistencia entre fases.
+
+// Nombre único a propósito (no solo "openingHours"): src/data/plaza.js
+// tiene un helper privado con la misma forma, y build.py (fase 05) aplana
+// todos los módulos a un solo scope al empaquetar — dos declaraciones
+// top-level con el mismo nombre chocarían ahí aunque nunca chocan como
+// módulos ES sueltos. Comportamiento idéntico, solo el nombre cambia.
+function locationsOpeningHours() {
+  return {
+    tz: 'America/Tijuana',
+    weekly: [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, open: '07:00', close: '20:00' })),
+    exceptions: [],
+    unconfirmed: true,
+  };
+}
+
+function loc(id, nameEs, nameEn, kind, floor, mapPointId, options = {}) {
+  return {
+    id,
+    name: { es: nameEs, en: nameEn },
+    kind,
+    floor,
+    hours: locationsOpeningHours(),
+    mapPointId,
+    ...options,
+  };
+}
+
+const locations = [
+  loc('estacionamiento', 'Estacionamiento', 'Parking', 'parking', 'P', 'mp_parking'),
+  loc('lobby_torre', 'Lobby Torre Médica · Acceso general', 'Medical Tower Lobby · General Access', 'lobby', 'PB', 'mp_lobby'),
+  loc('compass', 'Compass · Laboratorio e imagenología', 'Compass · Lab & Imaging', 'lab_imaging', 'N1', 'mp_compass'),
+  loc('piso27', 'Piso 27 · Consultorios', 'Floor 27 · Consultation Offices', 'consultorios', '27', 'mp_floor27'),
+  loc('quartz', 'Quartz Hotel & Spa', 'Quartz Hotel & Spa', 'hotel', 'N1', 'mp_quartz'),
+  loc('nivel1', "Nivel 1 · Gastronomía (Farmer's Table, The Yard)", 'Level 1 · Dining (Farmer\'s Table, The Yard)', 'dining', 'N1', 'mp_level1'),
+  // Nombre y ubicación exacta de la farmacia sin confirmar (PRD §15.6):
+  // aquí va marcada unconfirmed a nivel de ubicación completa, no solo el
+  // horario, porque más que el horario está pendiente.
+  loc('farmacia', 'Farmacia', 'Pharmacy', 'pharmacy', 'PB', 'mp_pharmacy', { unconfirmed: true }),
+];
+
+const LOCATION_IDS = locations.map((l) => l.id);
+
+// --- src/ui/screens/home.js ---
+// Inicio — saludo, "tu siguiente paso" (R2) y accesos rápidos a mapa,
+// estancia y ayuda (fase 05, texto literal de "Detalles por pantalla").
+// Horarios NO está en ese renglón de accesos rápidos según la propia fase,
+// así que vive como un enlace más discreto aparte (ver comentario en
+// app.js sobre "cuelgan de Inicio y Plaza").
+
+
+
+
+
+function renderHomeScreen(ctx) {
+  const { visit, appointments, now, lang, t } = ctx;
+  const dayLabel = formatDayLabel(now, now, lang)[lang];
+  const step = nextStep(appointments, now);
+
+  const nextStepHtml = step
+    ? `
+      <p class="nc-home-next-when">${escapeHtml(formatTimeTijuana(step.startsAt, lang))} · ${escapeHtml(locationName(locations, step.locationId, lang))}</p>
+      <p class="nc-home-next-what">${escapeHtml(step.serviceName)}</p>
+      <button type="button" class="nc-button nc-button--primary" data-nav="pass">${escapeHtml(t('home.nextStepCta'))}</button>
+    `
+    : `
+      <p class="nc-home-next-what">${escapeHtml(t('home.nextStepEmptyTitle'))}</p>
+      <p class="nc-home-next-when">${escapeHtml(t('home.nextStepEmptyBody'))}</p>
+    `;
+
+  const quickAccess = [
+    { nav: 'map', label: t('home.quickAccessMap') },
+    ctx.lodging ? { nav: 'stay', label: t('home.quickAccessStay') } : null,
+    { nav: 'help', label: t('home.quickAccessHelp') },
+  ]
+    .filter(Boolean)
+    .map((item) => `<button type="button" class="nc-quick-access-item" data-nav="${item.nav}">${escapeHtml(item.label)}</button>`)
+    .join('\n');
+
+  return `
+    <section class="nc-screen nc-home">
+      <h1 class="nc-greeting">${escapeHtml(t('home.greeting')(visit.patientFirstName))}</h1>
+      <p class="nc-home-date">${escapeHtml(dayLabel)}</p>
+
+      <h2 class="nc-section-title">${escapeHtml(t('home.nextStepLabel'))}</h2>
+      ${renderCard(nextStepHtml, { variant: 'accent' })}
+
+      <div class="nc-quick-access">${quickAccess}</div>
+
+      <button type="button" class="nc-link-button" data-nav="hours">${escapeHtml(t('home.hoursLink'))}</button>
+    </section>
+  `;
+}
+
+const HOME_CSS = `
+.nc-greeting { margin: 4px 0 0; font-size: 22px; }
+.nc-home-date { margin: 0 0 16px; opacity: 0.7; font-size: 13px; }
+.nc-section-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; margin: 0 0 8px; }
+.nc-home-next-when { margin: 0 0 2px; font-size: 13px; opacity: 0.8; }
+.nc-home-next-what { margin: 0 0 10px; font-size: 17px; font-weight: 700; }
+.nc-quick-access { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
+.nc-quick-access-item { min-height: 44px; min-width: 44px; flex: 1; border-radius: 10px; border: 1px solid var(--nc-card-border); background: var(--nc-card-bg); color: var(--nc-ink); font: 600 13px Barlow, system-ui, sans-serif; cursor: pointer; }
+.nc-link-button { min-height: 44px; background: none; border: none; color: var(--nc-teal-ink); font: 600 13px Barlow, system-ui, sans-serif; text-decoration: underline; cursor: pointer; padding: 0; }
+`;
+
+// --- src/ui/screens/hours.js ---
+// Horarios — Compass, Piso 27 y coordinación, con "abierto ahora / cerrado"
+// calculado con `now` inyectado (isOpenNow, src/domain/time.js) — nunca
+// leyendo el reloj aquí, tal como pide la fase 05 de forma literal.
+
+
+
+
+
+
+
+function statusBadge(open, t) {
+  if (open === null) return renderBadge(t('hours.unknown'), 'neutral');
+  return open ? renderBadge(t('hours.openNow'), 'updated') : renderBadge(t('hours.closedNow'), 'cancelled');
+}
+
+function entryHtml(name, hours, now, t) {
+  const open = isOpenNow(hours, now);
+  return renderFicha({
+    title: name,
+    lines: [],
+    unconfirmed: hours?.unconfirmed === true,
+    t,
+    extra: statusBadge(open, t),
+  });
+}
+
+function renderHoursScreen(ctx) {
+  const { now, lang, t } = ctx;
+  const compass = locations.find((l) => l.id === 'compass');
+  const piso27 = locations.find((l) => l.id === 'piso27');
+
+  const entries = [
+    entryHtml(compass.name[lang], compass.hours, now, t),
+    entryHtml(piso27.name[lang], piso27.hours, now, t),
+    entryHtml(t('help.hoursTitle'), supportChannel.hours, now, t),
+  ].join('\n');
+
+  return `
+    <section class="nc-screen">
+      <h1 class="nc-screen-title">${escapeHtml(t('hours.title'))}</h1>
+      <div class="nc-venue-list">${entries}</div>
+    </section>
+  `;
+}
+
+// --- src/ui/screens/itinerary.js ---
+// Mi itinerario — línea de tiempo agrupada por día (R5, PRD §9 "visita de
+// varios días"). Incluye canceladas (tachadas, en gris) porque
+// groupByDay ya las incluye a propósito (ver comentario de
+// src/domain/itinerary.js) — este archivo no filtra nada, solo pinta.
+//
+// `lastViewedItineraryAt` decide el distintivo "actualizado" (R5, isUpdated)
+// y viene de localStorage — leído y actualizado por src/ui/app.js, no
+// aquí: esta pantalla no toca localStorage directamente, solo recibe el
+// valor ya resuelto.
+
+
+
+
+
+
+function renderAppointmentCard(appointment, ctx) {
+  const { now, lang, t, lastViewedItineraryAt } = ctx;
+  const cancelled = appointment.status === 'cancelled';
+  const updated = !cancelled && isUpdated(appointment, lastViewedItineraryAt);
+  const statusLabel = t(`itinerary.status.${appointment.status}`);
+
+  const badges = [
+    updated ? renderBadge(t('itinerary.updatedBadge'), 'updated') : '',
+    cancelled ? renderBadge(statusLabel, 'cancelled') : '',
+  ].join(' ');
+
+  return renderCard(`
+    <p class="nc-itin-when">${escapeHtml(formatTimeTijuana(appointment.startsAt, lang))} · ${escapeHtml(locationName(locations, appointment.locationId, lang))}</p>
+    <p class="${classNames(['nc-itin-what', cancelled && 'nc-itin-what--cancelled'])}">${escapeHtml(appointment.serviceName)}</p>
+    <p class="nc-itin-status">${!cancelled ? escapeHtml(statusLabel) : ''} ${badges}</p>
+  `, { extraClass: cancelled ? 'nc-card--muted' : '' });
+}
+
+function renderItineraryScreen(ctx) {
+  const { appointments, now, lang, t } = ctx;
+  const groups = groupByDay(appointments, now);
+
+  if (groups.length === 0) {
+    return `<section class="nc-screen"><h1 class="nc-screen-title">${escapeHtml(t('itinerary.title'))}</h1><p>${escapeHtml(t('itinerary.empty'))}</p></section>`;
+  }
+
+  const groupsHtml = groups
+    .map(
+      (g) => `
+      <h2 class="nc-day-header">${escapeHtml(g.label[lang])}</h2>
+      <div class="nc-day-items">${g.items.map((a) => renderAppointmentCard(a, ctx)).join('\n')}</div>
+    `
+    )
+    .join('\n');
+
+  return `
+    <section class="nc-screen">
+      <h1 class="nc-screen-title">${escapeHtml(t('itinerary.title'))}</h1>
+      ${groupsHtml}
+    </section>
+  `;
+}
+
+const ITINERARY_CSS = `
+.nc-screen-title { font-size: 20px; margin: 4px 0 16px; }
+.nc-day-header { font-size: 14px; font-weight: 700; margin: 18px 0 8px; }
+.nc-day-items { display: flex; flex-direction: column; gap: 8px; }
+.nc-itin-when { margin: 0 0 2px; font-size: 12px; opacity: 0.7; }
+.nc-itin-what { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.nc-itin-what--cancelled { text-decoration: line-through; opacity: 0.6; }
+.nc-itin-status { margin: 0; font-size: 12px; display: flex; gap: 6px; align-items: center; opacity: 0.8; }
+`;
+
+// --- src/data/routes.js ---
+// Catálogo de rutas redactadas — PROVISIONAL (PRD §15.1, phase-02 §"Catálogo
+// provisional de rutas"). El motor que consume este catálogo (routing.js)
+// es definitivo; el contenido de aquí NO lo es: depende de los planos
+// oficiales del complejo y de un recorrido físico que todavía no se hace.
+// Por eso cada Route lleva `unconfirmed: true` y cada texto de paso incluye
+// "[POR CONFIRMAR]" de forma visible.
+//
+// Convención de mapHighlightId (elección de esta fase, documentada aquí
+// porque el PRD no la fija): en una ruta de 2 pasos, el primer paso resalta
+// el mapPointId del origen y el último resalta el del destino. Los 7
+// mapPointId vienen de docs/phases/phase-04-map-svg.md — si esa lista
+// cambia, MAP_HIGHLIGHT_IDS y este catálogo deben actualizarse juntos.
+//
+// locationId aquí es un slug provisional propio de esta fase (fase 03 aún
+// no define src/data/locations.js). Cuando fase 03 se construya, sus
+// Location.id deben coincidir exactamente con estos slugs:
+// estacionamiento, lobby_torre, compass, piso27, nivel1, farmacia, quartz.
+
+const MAP_HIGHLIGHT_IDS = ['mp_parking', 'mp_lobby', 'mp_compass', 'mp_floor27', 'mp_quartz', 'mp_level1', 'mp_pharmacy'];
+
+function route(id, fromLocationId, toLocationId, estimatedMinutes, steps) {
+  return { id, fromLocationId, toLocationId, estimatedMinutes, unconfirmed: true, steps };
+}
+
+function step(order, es, en, mapHighlightId) {
+  return { order, instruction: { es: `[POR CONFIRMAR] ${es}`, en: `[TO CONFIRM] ${en}`, }, mapHighlightId };
+}
+
+const routes = [
+  route('r_estacionamiento_lobby_torre', 'estacionamiento', 'lobby_torre', 4, [
+    step(1, 'Sal del estacionamiento hacia la entrada principal de la Torre Médica.', 'Exit the parking area toward the Medical Tower main entrance.', 'mp_parking'),
+    step(2, 'Entra por el lobby de acceso general.', 'Enter through the general-access lobby.', 'mp_lobby'),
+  ]),
+
+  route('r_estacionamiento_compass', 'estacionamiento', 'compass', 6, [
+    step(1, 'Sal del estacionamiento hacia la entrada principal de la Torre Médica.', 'Exit the parking area toward the Medical Tower main entrance.', 'mp_parking'),
+    step(2, 'Sigue las señales de Compass (laboratorio e imagenología) en Nivel 1.', 'Follow the signs for Compass (lab and imaging) on Level 1.', 'mp_compass'),
+  ]),
+
+  route('r_lobby_torre_compass', 'lobby_torre', 'compass', 3, [
+    step(1, 'Desde el lobby, dirígete a Compass en Nivel 1.', 'From the lobby, head to Compass on Level 1.', 'mp_compass'),
+  ]),
+
+  route('r_lobby_torre_piso27', 'lobby_torre', 'piso27', 3, [
+    step(1, 'Desde el lobby, toma el elevador de la Torre Médica al piso 27.', 'From the lobby, take the Medical Tower elevator to floor 27.', 'mp_floor27'),
+  ]),
+
+  route('r_compass_piso27', 'compass', 'piso27', 5, [
+    step(1, 'Sal de Compass hacia los elevadores de la Torre Médica.', 'Exit Compass toward the Medical Tower elevators.', 'mp_compass'),
+    step(2, 'Sube al piso 27 (consultorios).', 'Go up to floor 27 (consultation offices).', 'mp_floor27'),
+  ]),
+
+  route('r_compass_nivel1', 'compass', 'nivel1', 4, [
+    step(1, 'Sal de Compass hacia el Nivel 1.', 'Exit Compass toward Level 1.', 'mp_compass'),
+    step(2, 'Encontrarás Farmer\'s Table y The Yard en Nivel 1.', 'You\'ll find Farmer\'s Table and The Yard on Level 1.', 'mp_level1'),
+  ]),
+
+  route('r_piso27_nivel1', 'piso27', 'nivel1', 5, [
+    step(1, 'Desde el piso 27, baja en el elevador de la Torre Médica.', 'From floor 27, take the Medical Tower elevator down.', 'mp_floor27'),
+    step(2, 'Nivel 1 tiene Farmer\'s Table y The Yard.', 'Level 1 has Farmer\'s Table and The Yard.', 'mp_level1'),
+  ]),
+
+  route('r_piso27_farmacia', 'piso27', 'farmacia', 5, [
+    step(1, 'Desde el piso 27, baja en el elevador de la Torre Médica.', 'From floor 27, take the Medical Tower elevator down.', 'mp_floor27'),
+    step(2, 'La farmacia está cerca del lobby de acceso general.', 'The pharmacy is near the general-access lobby.', 'mp_pharmacy'),
+  ]),
+
+  route('r_quartz_lobby_torre', 'quartz', 'lobby_torre', 4, [
+    step(1, 'Sal del Quartz Hotel & Spa hacia la Torre Médica.', 'Exit Quartz Hotel & Spa toward the Medical Tower.', 'mp_quartz'),
+    step(2, 'Entra por el lobby de acceso general.', 'Enter through the general-access lobby.', 'mp_lobby'),
+  ]),
+
+  route('r_lobby_torre_quartz', 'lobby_torre', 'quartz', 4, [
+    step(1, 'Desde el lobby, dirígete al Quartz Hotel & Spa.', 'From the lobby, head to Quartz Hotel & Spa.', 'mp_quartz'),
+  ]),
+];
+
+// --- src/domain/routing.js ---
+// R7 — Origen por defecto de la ruta (PRD §8) + resolución de rutas
+// origen→destino (fase 02). Sin posicionamiento en vivo (PRD §6.3): la app
+// propone el origen, nunca lo detecta.
+
+
+// defaultOrigin(appointment, appointments, lodging) -> locationId | null
+//
+// Regla: la ubicación de la cita anterior del mismo día (Tijuana),
+// ignorando canceladas. Si no hay ninguna anterior (primera cita del día),
+// el origen es Quartz cuando el paciente ya tiene el hospedaje activo a
+// esa hora (checkIn <= startsAt <= checkOut) — si no, Estacionamiento.
+// Devuelve null si `appointment` no aparece en `appointments` (no hay
+// forma confiable de determinar "la anterior").
+function defaultOrigin(appointment, appointments, lodging) {
+  const found = appointments.some((a) => a.id === appointment.id);
+  if (!found) return null;
+
+  const sameDayKey = dayKeyTijuana(appointment.startsAt);
+  const startMs = instantMs(appointment.startsAt);
+
+  const priorSameDay = appointments
+    .filter((a) => a.id !== appointment.id)
+    .filter((a) => a.status !== 'cancelled')
+    .filter((a) => dayKeyTijuana(a.startsAt) === sameDayKey)
+    .filter((a) => instantMs(a.startsAt) < startMs)
+    .sort((a, b) => instantMs(b.startsAt) - instantMs(a.startsAt)); // más reciente primero
+
+  if (priorSameDay.length > 0) {
+    return priorSameDay[0].locationId;
+  }
+
+  // Primera cita (no cancelada) del día: ¿el paciente ya está hospedado?
+  if (lodging) {
+    const checkInMs = instantMs(lodging.checkIn);
+    const checkOutMs = instantMs(lodging.checkOut);
+    if (checkInMs <= startMs && startMs <= checkOutMs) {
+      return 'quartz';
+    }
+  }
+
+  return 'estacionamiento';
+}
+
+// resolveRoute(fromLocationId, toLocationId, routes) -> Route | SameLocation | null
+function resolveRoute(fromLocationId, toLocationId, routes) {
+  if (fromLocationId === toLocationId) {
+    return { kind: 'same_location', locationId: fromLocationId };
+  }
+
+  const match = routes.find((r) => r.fromLocationId === fromLocationId && r.toLocationId === toLocationId);
+  return match ?? null;
+}
+
+// --- src/map/complexMap.js ---
+// Fase 04 — mapa esquemático del complejo en SVG en línea (no PNG: los
+// puntos tienen que ser tocables, resaltables y escalables, y el archivo
+// se publica bajo una CSP estricta). PRD §15.1: no hay planos oficiales
+// todavía, así que esto es un esquema referencial, no un plano a escala —
+// se etiqueta así en pantalla a propósito, en es y en.
+//
+// mapa.py (el generador de la presentación, mencionado en esta fase como
+// la fuente a portar) no está disponible en este proyecto — solo su salida
+// ya renderizada ("Presentacion Checkup/Recursos/Mapa_complejo_ES.png").
+// La geometría de aquí se portó leyendo esa imagen (misma idea de tres
+// columnas — Estacionamiento · Quartz · Torre Médica — con una fila
+// secundaria debajo), no el código fuente de mapa.py. El CONTENIDO sí es
+// el ya corregido y aprobado, nunca el que la imagen de referencia todavía
+// muestra:
+//   - Compass = laboratorio e imagenología, no "Nivel 1 · Gastronomía"
+//   - The Yard existe (la imagen de referencia solo mostraba Farmer's Table)
+//   - Piso 27 y Farmacia son puntos propios de esta fase, no una nota al
+//     pie ("línea de apoyo" / "bloque de la torre", según la corrección ya
+//     confirmada por el cliente)
+//
+// mapPointId comparte espacio de nombres uno a uno con locationId
+// (src/data/locations.js, fase 03) y con mapHighlightId
+// (src/data/routes.js, fase 02) — probado de forma cruzada y genérica en
+// test/map/ids.test.js.
+
+
+
+const MAP_POINT_IDS = ['mp_parking', 'mp_lobby', 'mp_compass', 'mp_floor27', 'mp_quartz', 'mp_level1', 'mp_pharmacy'];
+
+const MAP_VIEWBOX = '0 0 420 380';
+const [, , VB_WIDTH, VB_HEIGHT] = MAP_VIEWBOX.split(' ').map(Number);
+
+// "Qué hay ahí" por punto (ficha, PRD/fase 04) — texto tomado literal de la
+// propia tabla de docs/phases/phase-04-map-svg.md (columna "Qué es"), no
+// inventado aquí. Location (fase 03) no tiene un campo dedicado a esto: su
+// `name` ya combina nombre y contenido para las ubicaciones compuestas
+// (p. ej. "Compass · Laboratorio e imagenología"), pero no para todas —
+// Quartz en locations.js es solo "Quartz Hotel & Spa", mientras que la
+// tabla de esta fase sí detalla "hospedaje, recovery y Boka". En vez de
+// tocar locations.js (fase ya aprobada, fuera de alcance de esta fase) o
+// duplicar de forma inconsistente, este texto se toma de la tabla ya
+// aprobada de la fase 04.
+const POINT_BLURB = {
+  mp_parking: { es: 'Acceso vehicular y valet', en: 'Vehicle access and valet' },
+  mp_lobby: { es: 'Acceso general', en: 'General access' },
+  mp_compass: { es: 'Laboratorio e imagenología', en: 'Lab and imaging' },
+  mp_floor27: { es: 'Consultorios', en: 'Consultation offices' },
+  mp_quartz: { es: 'Hospedaje, recovery y Boka', en: 'Lodging, recovery, and Boka' },
+  mp_level1: { es: "Farmer's Table y The Yard", en: "Farmer's Table and The Yard" },
+  mp_pharmacy: { es: 'Farmacia', en: 'Pharmacy' },
+};
+
+// Geometría del esquema — coordenadas propias de este SVG (viewBox
+// 420×380), sin relación con escala real (PRD §15.1: "no es un plano a
+// escala"). Radio 32 en las 7: si el SVG ocupara los 375px completos de
+// viewport, 32 × 2 × (375/420) ≈ 57px de diámetro tocable. En la práctica
+// ningún contenedor real es borde a borde — se midió con
+// getBoundingClientRect() en src/map/demo.html dentro de su propio padding
+// (SVG efectivo de 343px, no 375) y dio 52.3px, todavía con margen sano
+// sobre el mínimo de 44px pedido. Un radio de 28 medía apenas 45.7px en
+// ese mismo contenedor — de ahí el ajuste a 32: la aritmética sola no
+// bastaba, hacía falta medir el caso real y corregir.
+const POINT_LAYOUT = {
+  mp_parking: { x: 70, y: 80, r: 32 },
+  mp_quartz: { x: 200, y: 80, r: 32 },
+  mp_lobby: { x: 330, y: 80, r: 32 },
+  mp_pharmacy: { x: 70, y: 190, r: 32 },
+  mp_level1: { x: 200, y: 190, r: 32 },
+  mp_floor27: { x: 330, y: 190, r: 32 },
+  mp_compass: { x: 265, y: 290, r: 32 },
+};
+
+const CAPTION = {
+  es: 'Esquema referencial — sujeto a los planos oficiales',
+  en: 'Reference schematic — subject to official floor plans',
+};
+
+const ARIA_MAP_LABEL = {
+  es: 'Mapa esquemático del complejo NewCity',
+  en: 'Schematic map of the NewCity complex',
+};
+
+function escapeXml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function shortLabel(location, lang) {
+  // Etiqueta corta bajo cada punto: primera parte del nombre bilingüe
+  // (antes del " · "), para no saturar un círculo de 56 unidades con el
+  // nombre completo de ubicaciones compuestas como "Nivel 1 · Gastronomía
+  // (Farmer's Table, The Yard)".
+  const full = location.name[lang] ?? location.name.es;
+  return full.split(' · ')[0];
+}
+
+function getMapPointMeta(mapPointId, lang = 'es') {
+  const location = locations.find((l) => l.mapPointId === mapPointId);
+  if (!location) return null;
+  const blurb = POINT_BLURB[mapPointId]?.[lang] ?? POINT_BLURB[mapPointId]?.es ?? '';
+  return {
+    id: mapPointId,
+    locationId: location.id,
+    name: location.name[lang] ?? location.name.es,
+    blurb,
+    hours: location.hours,
+    unconfirmed: location.unconfirmed === true,
+  };
+}
+
+function pointGroupSvg(mapPointId, lang) {
+  const layout = POINT_LAYOUT[mapPointId];
+  const location = locations.find((l) => l.mapPointId === mapPointId);
+  if (!layout || !location) return '';
+  const label = escapeXml(shortLabel(location, lang));
+  const ariaLabel = escapeXml(location.name[lang] ?? location.name.es);
+  const labelY = layout.y + layout.r + 16;
+  return `
+    <g class="nc-map-point" data-map-point-id="${mapPointId}" role="button" tabindex="0" aria-label="${ariaLabel}">
+      <circle class="nc-map-point-hit" cx="${layout.x}" cy="${layout.y}" r="${layout.r}"></circle>
+      <text class="nc-map-point-label" x="${layout.x}" y="${labelY}" text-anchor="middle">${label}</text>
+    </g>`;
+}
+
+// Líneas conectoras decorativas — no interactivas, solo dan idea de
+// "todos los puntos están conectados dentro del mismo complejo" (misma
+// leyenda que ya traía la imagen de referencia). Se derivan del catálogo
+// real de rutas (src/data/routes.js) en vez de inventar qué conecta con
+// qué: cada par from→to del catálogo dibuja una línea entre sus dos
+// mapPointId, sin duplicar cuando el catálogo trae ambos sentidos (p. ej.
+// quartz→lobby_torre y lobby_torre→quartz son la misma línea visual).
+function connectorsSvg() {
+  const mapPointIdByLocationId = new Map(locations.map((l) => [l.id, l.mapPointId]));
+  const seen = new Set();
+  const lines = [];
+  for (const route of routes) {
+    const fromId = mapPointIdByLocationId.get(route.fromLocationId);
+    const toId = mapPointIdByLocationId.get(route.toLocationId);
+    if (!fromId || !toId || fromId === toId) continue;
+    const key = [fromId, toId].sort().join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const a = POINT_LAYOUT[fromId];
+    const b = POINT_LAYOUT[toId];
+    if (!a || !b) continue;
+    lines.push(`<line class="nc-map-connector" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"></line>`);
+  }
+  return lines.join('\n    ');
+}
+
+// Colores: navy #1C2B53, teal #14BCC4, tinte #EEF3F8 (misma paleta de
+// marca que la presentación). Contraste verificado a mano (fórmula WCAG de
+// luminancia relativa) antes de fijar esta hoja de estilos, no solo
+// elegido a ojo:
+//   - texto navy sobre fondo blanco/tinte: ~12.4:1
+//   - texto claro sobre fondo navy oscuro: ~13.8:1 (claro) / ~16:1 (oscuro)
+//   - texto navy sobre relleno teal (usado en el punto resaltado y en la
+//     etiqueta): ~5.9:1
+//   - un color que SÍ se descartó por no pasar 4.5:1: texto blanco sobre
+//     relleno teal da ~2.3:1 — por eso el punto resaltado usa texto/trazo
+//     navy sobre teal, nunca blanco sobre teal, en ningún tema.
+const STYLE = `
+  .nc-map-root { --nc-navy: #1C2B53; --nc-teal: #14BCC4; --nc-bg: #EEF3F8; --nc-ink: #1C2B53; --nc-connector: #B9C6DA; }
+  @media (prefers-color-scheme: dark) {
+    .nc-map-root { --nc-bg: #10192E; --nc-ink: #F2F5FA; --nc-connector: #33415E; }
+  }
+  .nc-map-bg { fill: var(--nc-bg); }
+  .nc-map-connector { stroke: var(--nc-connector); stroke-width: 2; stroke-dasharray: 4 5; }
+  .nc-map-point-hit { fill: var(--nc-teal); stroke: var(--nc-ink); stroke-width: 2; cursor: pointer; }
+  .nc-map-point:focus-visible .nc-map-point-hit { outline: none; stroke-width: 4; }
+  .nc-map-point-label { fill: var(--nc-ink); font: 600 13px Barlow, system-ui, sans-serif; }
+  .nc-map-point.nc-map-highlight .nc-map-point-hit { fill: var(--nc-navy); stroke: var(--nc-teal); stroke-width: 5; }
+  .nc-map-point.nc-map-highlight .nc-map-point-label { font-weight: 700; }
+  .nc-map-caption { fill: var(--nc-ink); font: 500 11px Barlow, system-ui, sans-serif; opacity: 0.75; }
+`;
+
+function renderComplexMapSvg({ lang = 'es' } = {}) {
+  const points = MAP_POINT_IDS.map((id) => pointGroupSvg(id, lang)).join('\n');
+  const connectors = connectorsSvg();
+  const caption = escapeXml(CAPTION[lang] ?? CAPTION.es);
+  const ariaLabel = escapeXml(ARIA_MAP_LABEL[lang] ?? ARIA_MAP_LABEL.es);
+  return `<svg class="nc-map-root" viewBox="${MAP_VIEWBOX}" role="img" aria-label="${ariaLabel}" xmlns="http://www.w3.org/2000/svg">
+  <style>${STYLE}</style>
+  <rect class="nc-map-bg" x="0" y="0" width="${VB_WIDTH}" height="${VB_HEIGHT}"></rect>
+  <g class="nc-map-connectors">
+    ${connectors}
+  </g>
+  <g class="nc-map-points">${points}
+  </g>
+  <text class="nc-map-caption" x="${VB_WIDTH / 2}" y="${VB_HEIGHT - 15}" text-anchor="middle">${caption}</text>
+</svg>`;
+}
+
+function renderFichaHtml(mapPointId, lang = 'es') {
+  const meta = getMapPointMeta(mapPointId, lang);
+  if (!meta) return null;
+  const confirmar = lang === 'en' ? 'TO CONFIRM' : 'POR CONFIRMAR';
+  const horarioBadge = meta.hours?.unconfirmed ? ` <span class="nc-ficha-badge">[${confirmar}]</span>` : '';
+  const fichaBadge = meta.unconfirmed ? ` <span class="nc-ficha-badge">[${confirmar}]</span>` : '';
+  const horarioLabel = lang === 'en' ? 'Hours' : 'Horario';
+  const directionsLabel = lang === 'en' ? 'Get directions' : 'Cómo llegar';
+  const weekly = meta.hours?.weekly?.[0];
+  const horarioText = weekly ? `${weekly.open}–${weekly.close}` : '—';
+  return `
+    <div class="nc-ficha" data-ficha-for="${escapeXml(mapPointId)}">
+      <h3 class="nc-ficha-title">${escapeXml(meta.name)}${fichaBadge}</h3>
+      <p class="nc-ficha-blurb">${escapeXml(meta.blurb)}</p>
+      <p class="nc-ficha-hours">${escapeXml(horarioLabel)}: ${escapeXml(horarioText)}${horarioBadge}</p>
+      <button type="button" class="nc-ficha-directions" data-directions-for="${escapeXml(mapPointId)}">${escapeXml(directionsLabel)}</button>
+    </div>`;
+}
+
+// --- src/map/highlights.js ---
+// Fase 04 — resaltado del mapa. `highlightStep(mapHighlightId)` debe
+// "resaltar el tramo correspondiente y quitar el resaltado anterior"
+// (criterio de aceptación de la fase). mapHighlightId y mapPointId
+// comparten el mismo espacio de 7 valores (routes.js reusa a propósito el
+// vocabulario de mapPointId para resaltar, ver su comentario de cabecera),
+// así que "resaltar un tramo" en la práctica es resaltar el punto del mapa
+// asociado al paso de ruta actual.
+//
+// División deliberada en dos partes:
+//   - computeHighlightChange: pura, decide QUÉ cambia (qué se quita, qué se
+//     agrega). Se prueba con node:test sin ningún DOM.
+//   - createHighlighter: envoltorio delgado que aplica ese cambio sobre un
+//     `root` real (clases CSS en el SVG vivo). No asume el DOM completo del
+//     navegador — solo pide un objeto con getElementsByMapPointId(id), que
+//     el propio SVG generado por complexMap.js implementa vía
+//     querySelectorAll y que un doble de prueba puede implementar con un
+//     Map en memoria (ver test/map/ids.test.js). Así "quita el resaltado
+//     anterior" queda probado con node:test puro; solo la verificación de
+//     que el SVG *vivo* en un navegador real de verdad se ve resaltado
+//     queda para el navegador integrado, como pide la fase 04 en su propia
+//     sección de Verificación.
+
+const HIGHLIGHT_CLASS = 'nc-map-highlight';
+
+function computeHighlightChange(previousId, nextId) {
+  return {
+    remove: previousId ?? null,
+    add: nextId,
+  };
+}
+
+function createHighlighter(root) {
+  let currentId = null;
+  return {
+    highlightStep(mapHighlightId) {
+      const change = computeHighlightChange(currentId, mapHighlightId);
+      if (change.remove !== null) {
+        for (const el of root.getElementsByMapPointId(change.remove)) {
+          el.classList.remove(HIGHLIGHT_CLASS);
+        }
+      }
+      for (const el of root.getElementsByMapPointId(change.add)) {
+        el.classList.add(HIGHLIGHT_CLASS);
+      }
+      currentId = change.add;
+      return change;
+    },
+    currentHighlightId() {
+      return currentId;
+    },
+  };
+}
+
+// Adaptador de conveniencia para usar createHighlighter contra un SVG real
+// insertado en el DOM del navegador (elementNode = <svg> o cualquier
+// contenedor que lo envuelva). No se prueba con node:test (no hay DOM ahí);
+// lo ejercita src/map/demo.html a mano en el navegador integrado.
+function highlighterForSvgElement(svgElement) {
+  return createHighlighter({
+    getElementsByMapPointId(id) {
+      return Array.from(svgElement.querySelectorAll(`[data-map-point-id="${id}"]`));
+    },
+  });
+}
+
+// --- src/ui/screens/map.js ---
+// Mapa y accesos — el mapa de la fase 04 más la ruta paso a paso (fase 05).
+// Ruta por defecto: origen = R7 (defaultOrigin) a partir de "tu siguiente
+// paso" (R2); destino = la ubicación de esa cita. Tocar cualquier otro
+// punto del mapa recalcula la ruta hacia ESE punto sin cambiar el origen.
+//
+// Esta pantalla no decide nada de dominio por sí misma: nextStep,
+// defaultOrigin y resolveRoute son las tres únicas fuentes de verdad, y
+// las tres vienen de src/domain/.
+
+
+
+
+
+
+
+
+function mapPointIdForLocation(locationId) {
+  return locations.find((l) => l.id === locationId)?.mapPointId ?? null;
+}
+
+function renderMapScreen(ctx) {
+  const { t, lang } = ctx;
+  return `
+    <section class="nc-screen nc-map-screen">
+      <h1 class="nc-screen-title">${escapeHtml(t('map.title'))}</h1>
+      <div class="nc-map-mount"></div>
+      <div class="nc-route-panel" data-role="route-panel"></div>
+      <div class="nc-ficha-slot" data-role="ficha-slot"></div>
+    </section>
+  `;
+}
+
+// Llamado después de insertar renderMapScreen en el DOM: monta el SVG,
+// calcula la ruta por defecto y engancha la interacción. Toda la parte
+// "esto se resalta al tocar" es DOM real (igual que src/map/demo.html en
+// fase 04) — no se puede probar con node:test, por eso no hay
+// test/ui/map.test.js: el criterio de la fase 05 para esta pantalla se
+// cumple en el recorrido de navegador, no con una prueba automatizada.
+function attachMapScreen(rootEl, ctx) {
+  const { appointments, lodging, now, lang, t } = ctx;
+  const mount = rootEl.querySelector('.nc-map-mount');
+  mount.innerHTML = renderComplexMapSvg({ lang });
+  const svgEl = mount.querySelector('svg');
+  const highlighter = highlighterForSvgElement(svgEl);
+
+  const routePanel = rootEl.querySelector('[data-role="route-panel"]');
+  const fichaSlot = rootEl.querySelector('[data-role="ficha-slot"]');
+
+  const focusedAppointment = nextStep(appointments, now);
+  const origin = focusedAppointment ? defaultOrigin(focusedAppointment, appointments, lodging) : 'estacionamiento';
+
+  let stepIndex = 0;
+
+  function renderRouteFor(destinationLocationId) {
+    if (!destinationLocationId) {
+      routePanel.innerHTML = `<p class="nc-route-empty">${escapeHtml(t('map.chooseDestination'))}</p>`;
+      return;
+    }
+    const result = resolveRoute(origin, destinationLocationId, routes);
+    stepIndex = 0;
+    if (result === null) {
+      routePanel.innerHTML = `<p class="nc-route-empty">${escapeHtml(t('map.routeNone'))}</p>`;
+      return;
+    }
+    if (result.kind === 'same_location') {
+      routePanel.innerHTML = `<p class="nc-route-empty">${escapeHtml(t('map.sameLocation'))}</p>`;
+      const mp = mapPointIdForLocation(result.locationId);
+      if (mp) highlighter.highlightStep(mp);
+      return;
+    }
+    renderStepPanel(result);
+  }
+
+  function renderStepPanel(route) {
+    const step = route.steps[stepIndex];
+    highlighter.highlightStep(step.mapHighlightId);
+    routePanel.innerHTML = `
+      <p class="nc-route-step-count">${escapeHtml(t('map.routeStep')(stepIndex + 1, route.steps.length))}</p>
+      <p class="nc-route-step-text">${escapeHtml(step.instruction[lang])}</p>
+      <div class="nc-route-nav">
+        <button type="button" class="nc-button" data-role="prev" ${stepIndex === 0 ? 'disabled' : ''}>${escapeHtml(t('map.routePrev'))}</button>
+        <button type="button" class="nc-button" data-role="next" ${stepIndex === route.steps.length - 1 ? 'disabled' : ''}>${escapeHtml(t('map.routeNext'))}</button>
+      </div>
+    `;
+    routePanel.querySelector('[data-role="prev"]')?.addEventListener('click', () => {
+      if (stepIndex > 0) {
+        stepIndex -= 1;
+        renderStepPanel(route);
+      }
+    });
+    routePanel.querySelector('[data-role="next"]')?.addEventListener('click', () => {
+      if (stepIndex < route.steps.length - 1) {
+        stepIndex += 1;
+        renderStepPanel(route);
+      }
+    });
+  }
+
+  function openFicha(mapPointId) {
+    fichaSlot.innerHTML = renderFichaHtml(mapPointId, lang);
+    const meta = getMapPointMeta(mapPointId, lang);
+    fichaSlot.querySelector('[data-directions-for]')?.addEventListener('click', () => {
+      renderRouteFor(meta.locationId);
+    });
+  }
+
+  for (const id of MAP_POINT_IDS) {
+    const group = svgEl.querySelector(`[data-map-point-id="${id}"]`);
+    if (!group) continue;
+    group.addEventListener('click', () => openFicha(id));
+    group.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        openFicha(id);
+      }
+    });
+  }
+
+  renderRouteFor(focusedAppointment ? focusedAppointment.locationId : null);
+}
+
+const MAP_SCREEN_CSS = `
+.nc-map-mount svg { width: 100%; height: auto; display: block; }
+.nc-route-panel { margin-top: 12px; background: var(--nc-card-bg); border: 1px solid var(--nc-card-border); border-radius: 12px; padding: 12px 14px; min-height: 44px; }
+.nc-route-step-count { margin: 0 0 4px; font-size: 12px; opacity: 0.7; }
+.nc-route-step-text { margin: 0 0 10px; font-size: 14px; }
+.nc-route-nav { display: flex; gap: 8px; }
+.nc-route-empty { margin: 0; font-size: 13px; opacity: 0.75; }
+.nc-ficha-slot { margin-top: 12px; }
+`;
+
+// --- src/render/code128.js ---
+// Fase 06 — generador de Code128 (subset B) sin dependencias externas.
+//
+// Solo Code Set B: cubre ASCII imprimible 32–126 (`valor = código - 32`),
+// que es todo lo que produce src/data/fixtures.js hoy (`payload-${id}`).
+// A diferencia de qr.js (modo byte, acepta UTF-8 arbitrario), Code128 no
+// tiene un "modo byte" universal — un payload con acentos simplemente no
+// es representable en subset B y esta función lo rechaza con un mensaje
+// claro en vez de corromperlo o transliterarlo por su cuenta.
+//
+// La tabla de 107 patrones de barras (CODES) y el algoritmo de checksum
+// (start + Σ valor_i × posición_i, mod 103) se verificaron leyendo el
+// código fuente de la librería de referencia python-barcode (MIT, PyPI)
+// instalada en este entorno — no de memoria — y el símbolo resultante se
+// decodificó con éxito con cv2.barcode_BarcodeDetector de OpenCV
+// (independiente de este archivo y de esa librería) para varios textos.
+
+const CODES = [
+  '11011001100', '11001101100', '11001100110', '10010011000', '10010001100',
+  '10001001100', '10011001000', '10011000100', '10001100100', '11001001000',
+  '11001000100', '11000100100', '10110011100', '10011011100', '10011001110',
+  '10111001100', '10011101100', '10011100110', '11001110010', '11001011100',
+  '11001001110', '11011100100', '11001110100', '11101101110', '11101001100',
+  '11100101100', '11100100110', '11101100100', '11100110100', '11100110010',
+  '11011011000', '11011000110', '11000110110', '10100011000', '10001011000',
+  '10001000110', '10110001000', '10001101000', '10001100010', '11010001000',
+  '11000101000', '11000100010', '10110111000', '10110001110', '10001101110',
+  '10111011000', '10111000110', '10001110110', '11101110110', '11010001110',
+  '11000101110', '11011101000', '11011100010', '11011101110', '11101011000',
+  '11101000110', '11100010110', '11101101000', '11101100010', '11100011010',
+  '11101111010', '11001000010', '11110001010', '10100110000', '10100001100',
+  '10010110000', '10010000110', '10000101100', '10000100110', '10110010000',
+  '10110000100', '10011010000', '10011000010', '10000110100', '10000110010',
+  '11000010010', '11001010000', '11110111010', '11000010100', '10001111010',
+  '10100111100', '10010111100', '10010011110', '10111100100', '10011110100',
+  '10011110010', '11110100100', '11110010100', '11110010010', '11011011110',
+  '11011110110', '11110110110', '10101111000', '10100011110', '10001011110',
+  '10111101000', '10111100010', '11110101000', '11110100010', '10111011110',
+  '10111101110', '11101011110', '11110101110', '11010000100', '11010010000',
+  '11010011100',
+];
+const STOP_PATTERN = '11000111010' + '11'; // patrón de paro + barra final ancha
+
+const START_B = 104;
+const MIN_CHAR = 32;
+const MAX_CHAR = 126;
+
+function charValueB(char) {
+  const code = char.charCodeAt(0);
+  if (code < MIN_CHAR || code > MAX_CHAR) {
+    throw new Error(`code128: el carácter "${char}" (código ${code}) no está en el subset B (ASCII ${MIN_CHAR}–${MAX_CHAR})`);
+  }
+  return code - MIN_CHAR;
+}
+
+function encodedValues(text) {
+  const values = [START_B];
+  for (const char of text) values.push(charValueB(char));
+  let checksum = values[0];
+  for (let i = 1; i < values.length; i++) checksum += i * values[i];
+  values.push(checksum % 103);
+  return values;
+}
+
+// generateCode128Bars(text) -> string de '1'/'0' (ancho de barra=1 unidad
+// por carácter), sin margen quieto. El renderer decide unidades por
+// símbolo y margen.
+function generateCode128Bars(text) {
+  const values = encodedValues(text);
+  return values.map((v) => CODES[v]).join('') + STOP_PATTERN;
+}
+
+function renderCode128Svg(text, { quietZone = 10, unitWidth = 2, height = 80 } = {}) {
+  const bars = generateCode128Bars(text);
+  const totalUnits = bars.length + quietZone * 2;
+  const px = totalUnits * unitWidth;
+  let rects = '';
+  let x = quietZone * unitWidth;
+  for (const bit of bars) {
+    if (bit === '1') rects += `<rect x="${x}" y="0" width="${unitWidth}" height="${height}"/>`;
+    x += unitWidth;
+  }
+  // Sin width/height explícitos en el <svg>: "auto" no es un valor válido
+  // para el atributo SVG height (a diferencia de CSS) — el viewBox solo ya
+  // alcanza para que escale, y el ancho/alto real lo pone el CSS del
+  // contenedor (.nc-pass-symbol svg en src/ui/screens/pass.js).
+  return `<svg viewBox="0 0 ${px} ${height}" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges"><rect x="0" y="0" width="${px}" height="${height}" fill="#FFFFFF"/><g fill="#000000">${rects}</g></svg>`;
+}
+
+// decodeCode128Bars — SOLO para el redondeo de las pruebas de esta fase,
+// igual que decodeQrMatrix en qr.js: no es un lector general (asume un
+// símbolo bien formado, subset B puro, sin corrección de errores — Code128
+// no la tiene, a diferencia de QR).
+function decodeCode128Bars(bars) {
+  if (!bars.endsWith(STOP_PATTERN)) {
+    throw new Error('code128 decode: no termina en el patrón de paro esperado');
+  }
+  const body = bars.slice(0, -STOP_PATTERN.length);
+  if (body.length % 11 !== 0) {
+    throw new Error('code128 decode: longitud de cuerpo no es múltiplo de 11');
+  }
+  const values = [];
+  for (let i = 0; i < body.length; i += 11) {
+    const chunk = body.slice(i, i + 11);
+    const idx = CODES.indexOf(chunk);
+    if (idx === -1) throw new Error(`code128 decode: patrón de 11 bits no reconocido en la posición ${i}`);
+    values.push(idx);
+  }
+  if (values[0] !== START_B) throw new Error('code128 decode: no empieza con START B — este decodificador solo entiende subset B');
+  const dataValues = values.slice(1, -1);
+  const checksum = values[values.length - 1];
+  let expected = values[0];
+  for (let i = 0; i < dataValues.length; i++) expected += (i + 1) * dataValues[i];
+  if (expected % 103 !== checksum) throw new Error('code128 decode: checksum no coincide');
+  return dataValues.map((v) => String.fromCharCode(v + MIN_CHAR)).join('');
+}
+
+const CODE128_CONFIG = { minChar: MIN_CHAR, maxChar: MAX_CHAR };
+
+// --- src/render/qr.js ---
+// Fase 06 — generador de QR sin dependencias externas (ISO/IEC 18004).
+//
+// ALCANCE DELIBERADAMENTE ACOTADO, no un generador general: Versión 3
+// (29×29), nivel de corrección de errores M, modo byte, un solo bloque
+// (sin entrelazado). PRD §15.7 no tiene todavía el formato real del
+// payload del QPASS confirmado — en vez de construir las 40 versiones ×
+// 4 niveles del spec completo sin saber qué hace falta de verdad,
+// se acota a una configuración que cubre payloads cortos (hasta 42 bytes
+// UTF-8) y se documenta el límite: un payload real más largo obliga a
+// ampliar esto, no a que el generador falle en silencio (por eso
+// generateQrMatrix lanza una excepción clara si no cabe, en vez de
+// truncar o corromper el símbolo).
+//
+// Verificación real de este archivo (no solo que mi propio decodificador
+// esté de acuerdo consigo mismo, que es una prueba débil — encoder y
+// decoder comparten código, así que un error sistemático en los dos se
+// disfraza de éxito): se instaló la librería de referencia
+// nayuki/QR-Code-generator (MIT, PyPI: qrcodegen) y OpenCV, y se comparó
+// byte a byte / módulo a módulo contra ella para la misma versión, nivel
+// y máscara — 0 diferencias tras la corrección final — y por separado se
+// decodificó el símbolo generado por ESTE archivo con QRCodeDetector de
+// OpenCV (independiente de nayuki y de mi propio código) para varios
+// textos, incluyendo no-ASCII y el largo máximo: los 6 casos coincidieron
+// exactos. En el camino aparecieron y se corrigieron cuatro bugs reales
+// que las pruebas de redondeo propias NUNCA habrían detectado por sí
+// solas (compartían el mismo malentendido en encode y decode): el
+// recorrido en zigzag de columnas, las dos copias de información de
+// formato con fila/columna transpuestas, y — el más caro de encontrar —
+// que `FORMAT_INFO_M` está indexado bit-más-significativo-primero (como
+// lo publica thonky.com y como lo da mi propio cálculo de BCH) mientras
+// que el algoritmo de referencia coloca los bits contando desde el menos
+// significativo; bitAt() traduce entre las dos convenciones.
+//
+// Lo que esta verificación NO cubre: una prueba contra un lector físico
+// real, que es justo lo que el archivo de esta fase exige antes de darla
+// por terminada — un símbolo que decodifica bien en dos programas no
+// garantiza que se lea bien desde la pantalla de un teléfono a brillo
+// normal.
+
+const GF_EXP = new Array(512);
+const GF_LOG = new Array(256);
+(function initGaloisField() {
+  let x = 1;
+  for (let i = 0; i < 255; i++) {
+    GF_EXP[i] = x;
+    GF_LOG[x] = i;
+    x <<= 1;
+    if (x & 0x100) x ^= 0x11d; // x^8 + x^4 + x^3 + x^2 + 1
+  }
+  for (let i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255];
+})();
+
+function gfMul(a, b) {
+  if (a === 0 || b === 0) return 0;
+  return GF_EXP[GF_LOG[a] + GF_LOG[b]];
+}
+
+// Multiplica dos polinomios (coeficientes de mayor a menor grado) en GF(256).
+function polyMulGf(a, b) {
+  const result = new Array(a.length + b.length - 1).fill(0);
+  for (let i = 0; i < a.length; i++) {
+    for (let j = 0; j < b.length; j++) {
+      result[i + j] ^= gfMul(a[i], b[j]);
+    }
+  }
+  return result;
+}
+
+function rsGeneratorPoly(numEccCodewords) {
+  let g = [1];
+  for (let i = 0; i < numEccCodewords; i++) {
+    g = polyMulGf(g, [1, GF_EXP[i]]);
+  }
+  return g;
+}
+
+// Codewords de corrección de error para un solo bloque de datos, vía
+// división polinomial "sintética" (LFSR) — algoritmo estándar de
+// libro de texto para codificar Reed-Solomon sistemático.
+function rsComputeEcc(dataCodewords, numEccCodewords) {
+  const generator = rsGeneratorPoly(numEccCodewords);
+  const remainder = dataCodewords.concat(new Array(numEccCodewords).fill(0));
+  for (let i = 0; i < dataCodewords.length; i++) {
+    const factor = remainder[i];
+    if (factor === 0) continue;
+    for (let j = 0; j < generator.length; j++) {
+      remainder[i + j] ^= gfMul(generator[j], factor);
+    }
+  }
+  return remainder.slice(dataCodewords.length);
+}
+
+// --- Versión 3 / nivel M — constantes verificadas, ver comentario de cabecera ---
+const SIZE = 29;
+const DATA_CODEWORDS = 44;
+const ECC_CODEWORDS = 26;
+const MAX_BYTES = Math.floor((DATA_CODEWORDS * 8 - 4 - 8) / 8); // 4 bits modo + 8 bits contador (bytes, versión ≤9) — 42
+
+// Strings de información de formato (15 bits, ya con BCH + máscara XOR
+// aplicados) para nivel M, índice = patrón de máscara 0–7. Verificados por
+// partida doble: coinciden con thonky.com/qr-code-tutorial/format-version-tables
+// Y con un cálculo propio de BCH(15,5) (generador 0x537, máscara 0x5412).
+const FORMAT_INFO_M = [
+  '101010000010010',
+  '101000100100101',
+  '101111001111100',
+  '101101101001011',
+  '100010111111001',
+  '100000011001110',
+  '100111110010111',
+  '100101010100000',
+];
+
+// Posiciones del patrón de alineación — fórmula de
+// nayuki/QR-Code-generator (getAlignmentPatternPositions), no una tabla
+// copiada a mano. Para versión 3 da [6, 22]; se excluyen las
+// combinaciones que caen sobre un patrón buscador, dejando un único
+// patrón de alineación en (22, 22).
+function alignmentPatternCenters(version) {
+  if (version === 1) return [];
+  const numAlign = Math.floor(version / 7) + 2;
+  const size = 17 + version * 4;
+  const step = Math.floor((version * 8 + numAlign * 3 + 5) / (numAlign * 4 - 4)) * 2;
+  const positions = [6];
+  for (let pos = size - 7; positions.length < numAlign; pos -= step) {
+    positions.splice(1, 0, pos);
+  }
+  return positions;
+}
+
+function isNearFinder(r, c) {
+  const inTopLeft = r < 9 && c < 9;
+  const inTopRight = r < 9 && c >= SIZE - 8;
+  const inBottomLeft = r >= SIZE - 8 && c < 9;
+  return inTopLeft || inTopRight || inBottomLeft;
+}
+
+function createGrid(fill) {
+  return Array.from({ length: SIZE }, () => new Array(SIZE).fill(fill));
+}
+
+function stampFinderPattern(modules, reserved, topRow, leftCol) {
+  for (let r = -1; r <= 7; r++) {
+    for (let c = -1; c <= 7; c++) {
+      const rr = topRow + r;
+      const cc = leftCol + c;
+      if (rr < 0 || rr >= SIZE || cc < 0 || cc >= SIZE) continue;
+      reserved[rr][cc] = true;
+      if (r < 0 || r > 6 || c < 0 || c > 6) {
+        modules[rr][cc] = false; // separador
+      } else {
+        const onRing = r === 0 || r === 6 || c === 0 || c === 6;
+        const onCore = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+        modules[rr][cc] = onRing || onCore;
+      }
+    }
+  }
+}
+
+function stampAlignmentPattern(modules, reserved, centerRow, centerCol) {
+  for (let r = -2; r <= 2; r++) {
+    for (let c = -2; c <= 2; c++) {
+      const rr = centerRow + r;
+      const cc = centerCol + c;
+      reserved[rr][cc] = true;
+      const onRing = r === -2 || r === 2 || c === -2 || c === 2;
+      modules[rr][cc] = onRing || (r === 0 && c === 0);
+    }
+  }
+}
+
+function buildFunctionPatterns() {
+  const modules = createGrid(false);
+  const reserved = createGrid(false);
+
+  stampFinderPattern(modules, reserved, 0, 0);
+  stampFinderPattern(modules, reserved, 0, SIZE - 7);
+  stampFinderPattern(modules, reserved, SIZE - 7, 0);
+
+  // Patrón de temporización (timing): fila 6 y columna 6, alternando,
+  // entre los separadores de los tres buscadores.
+  for (let i = 8; i < SIZE - 8; i++) {
+    modules[6][i] = i % 2 === 0;
+    reserved[6][i] = true;
+    modules[i][6] = i % 2 === 0;
+    reserved[i][6] = true;
+  }
+
+  const centers = alignmentPatternCenters(3);
+  for (const cr of centers) {
+    for (const cc of centers) {
+      if (isNearFinder(cr, cc)) continue;
+      stampAlignmentPattern(modules, reserved, cr, cc);
+    }
+  }
+
+  // Módulo oscuro fijo, versión V: (4V+9, 8) en (fila, columna).
+  modules[4 * 3 + 9][8] = true;
+  reserved[4 * 3 + 9][8] = true;
+
+  // Áreas reservadas para información de formato (se rellenan después de
+  // elegir máscara): franjas junto a los tres buscadores. Deben calzar
+  // EXACTO con dónde escribe stampFormatInfo — de ahí el error real que
+  // tuvo esta fase: un `i <= 8` simétrico para las cuatro franjas parecía
+  // razonable pero reservaba una celda de más en cada una de las dos
+  // mitades de la segunda copia (columna 8 fila 8, y fila 8 columna 20),
+  // celdas que en realidad le tocaban a los datos — verificado generando
+  // 12 símbolos con codewords aleatorios vía la librería de referencia de
+  // nayuki y viendo cuáles celdas nunca cambiaban.
+  for (let i = 0; i <= 8; i++) {
+    reserved[8][i] = true; // copia 1, primera mitad: fila 8, columnas 0–8
+    reserved[i][8] = true; // copia 1, segunda mitad: columna 8, filas 0–8
+  }
+  for (let i = 0; i < 8; i++) {
+    reserved[8][SIZE - 1 - i] = true; // copia 2, primera mitad: fila 8, columnas 21–28
+  }
+  for (let i = 8; i < 15; i++) {
+    reserved[SIZE - 15 + i][8] = true; // copia 2, segunda mitad: columna 8, filas 22–28
+  }
+
+  return { modules, reserved };
+}
+
+// FORMAT_INFO_M[m][0] es el bit MÁS significativo (así se publican en
+// thonky.com y así los devuelve mi propio cálculo de BCH). El algoritmo de
+// referencia (nayuki) coloca los bits con `(valor >> i) & 1` — es decir,
+// i=0 es el bit MENOS significativo. bitAt(bits, i) traduce entre las dos
+// convenciones; usarla en vez de `bits[i]` directo en todo este archivo es
+// justo lo que faltaba — confirmado leyendo el algoritmo verbatim con
+// marcadores de índice en vez de booleanos (no hay forma de que ese
+// resultado sea ambiguo) y viéndolo coincidir bit a bit contra
+// FORMAT_INFO_M solo después de invertir el índice.
+function bitAt(bits, i) {
+  return bits[14 - i] === '1';
+}
+
+function stampFormatInfo(modules, maskPattern) {
+  const bits = FORMAT_INFO_M[maskPattern];
+  // Copia 1 — envuelve la esquina del buscador superior izquierdo: baja
+  // por la columna 8 (bits 0–5, filas 0–5), gira en (7,8)/(8,8) [bits
+  // 6–7], gira otra vez en (8,7) [bit 8] y cruza la fila 8 hacia la
+  // izquierda (bits 9–14, columnas 5..0).
+  for (let i = 0; i < 6; i++) modules[i][8] = bitAt(bits, i);
+  modules[7][8] = bitAt(bits, 6);
+  modules[8][8] = bitAt(bits, 7);
+  modules[8][7] = bitAt(bits, 8);
+  for (let i = 9; i < 15; i++) modules[8][14 - i] = bitAt(bits, i);
+
+  // Copia 2: fila 8 cerca del buscador superior derecho (bits 0–7,
+  // columnas 28..21), luego columna 8 cerca del buscador inferior
+  // izquierdo (bits 8–14, filas 22..28).
+  for (let i = 0; i < 8; i++) modules[8][SIZE - 1 - i] = bitAt(bits, i);
+  for (let i = 8; i < 15; i++) modules[SIZE - 15 + i][8] = bitAt(bits, i);
+}
+
+function encodeDataCodewords(bytes) {
+  if (bytes.length > MAX_BYTES) {
+    throw new Error(`qr: el payload mide ${bytes.length} bytes UTF-8, el máximo para esta configuración (versión 3, nivel M, modo byte) es ${MAX_BYTES}`);
+  }
+  const bits = [];
+  const pushBits = (value, len) => {
+    for (let i = len - 1; i >= 0; i--) bits.push((value >> i) & 1);
+  };
+  pushBits(0b0100, 4); // indicador de modo: byte
+  pushBits(bytes.length, 8); // contador de caracteres, 8 bits (versión ≤9, modo byte)
+  for (const b of bytes) pushBits(b, 8);
+
+  const capacityBits = DATA_CODEWORDS * 8;
+  for (let i = 0; i < 4 && bits.length < capacityBits; i++) bits.push(0); // terminador, hasta 4 ceros
+  while (bits.length % 8 !== 0) bits.push(0); // relleno a byte completo
+
+  const codewords = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    let byte = 0;
+    for (let j = 0; j < 8; j++) byte = (byte << 1) | bits[i + j];
+    codewords.push(byte);
+  }
+  const pads = [0xec, 0x11];
+  let padIndex = 0;
+  while (codewords.length < DATA_CODEWORDS) {
+    codewords.push(pads[padIndex % 2]);
+    padIndex++;
+  }
+  return codewords;
+}
+
+// Recorre las columnas de derecha a izquierda en pares, de abajo hacia
+// arriba y luego de arriba hacia abajo alternando, saltando la columna de
+// temporización (6) sin perder ni duplicar ninguna otra. Antes esto se
+// resolvía sustituyendo col=5 solo en la iteración de colPair=6 sin
+// arrastrar el ajuste a las iteraciones siguientes: la columna 4 quedaba
+// escrita dos veces y la columna 0 nunca se tocaba. Verificado con
+// OpenCV (QRCodeDetector, fuera de este proyecto) contra el bug original:
+// ubicaba el símbolo (los patrones buscadores estaban bien) pero no podía
+// decodificar el contenido — exactamente el síntoma de un mapeo de bits
+// de datos incorrecto. Con el puntero `right` mutable y arrastrado entre
+// iteraciones, las 28 columnas de datos (todas menos la 6) se visitan
+// una vez cada una.
+function walkColumnPairs(callback) {
+  let upward = true;
+  let right = SIZE - 1;
+  while (right >= 1) {
+    if (right === 6) right = 5;
+    for (let step = 0; step < SIZE; step++) {
+      const row = upward ? SIZE - 1 - step : step;
+      callback(row, right);
+      callback(row, right - 1);
+    }
+    upward = !upward;
+    right -= 2;
+  }
+}
+
+function placeDataBits(modules, reserved, allCodewords) {
+  const bits = [];
+  for (const byte of allCodewords) {
+    for (let i = 7; i >= 0; i--) bits.push((byte >> i) & 1);
+  }
+  let bitIndex = 0;
+  walkColumnPairs((row, c) => {
+    if (reserved[row][c]) return;
+    const bit = bitIndex < bits.length ? bits[bitIndex] : 0;
+    modules[row][c] = bit === 1;
+    bitIndex++;
+  });
+  return modules;
+}
+
+function applyMask(modules, reserved, maskPattern) {
+  const maskFn = MASK_FUNCTIONS[maskPattern];
+  const out = createGrid(false);
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const bit = modules[r][c];
+      out[r][c] = reserved[r][c] ? bit : bit !== maskFn(r, c);
+    }
+  }
+  return out;
+}
+
+const MASK_FUNCTIONS = [
+  (r, c) => (r + c) % 2 === 0,
+  (r, c) => r % 2 === 0,
+  (r, c) => c % 3 === 0,
+  (r, c) => (r + c) % 3 === 0,
+  (r, c) => (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0,
+  (r, c) => ((r * c) % 2) + ((r * c) % 3) === 0,
+  (r, c) => (((r * c) % 2) + ((r * c) % 3)) % 2 === 0,
+  (r, c) => (((r + c) % 2) + ((r * c) % 3)) % 2 === 0,
+];
+
+// Puntuación de penalización (ISO/IEC 18004 §8.8.2), las 4 reglas
+// estándar — más bajo es mejor. Se usa para elegir, de las 8 máscaras
+// posibles, la que produce el símbolo más "parejo" (mejor fiabilidad de
+// lectura real, aunque cualquiera de las 8 sea técnicamente decodificable).
+function maskPenalty(modules) {
+  let penalty = 0;
+
+  // Regla 1: 5+ módulos iguales seguidos, por fila y por columna.
+  for (let r = 0; r < SIZE; r++) {
+    penalty += runPenalty(Array.from({ length: SIZE }, (_, c) => modules[r][c]));
+  }
+  for (let c = 0; c < SIZE; c++) {
+    penalty += runPenalty(Array.from({ length: SIZE }, (_, r) => modules[r][c]));
+  }
+
+  // Regla 2: bloques 2×2 del mismo color.
+  for (let r = 0; r < SIZE - 1; r++) {
+    for (let c = 0; c < SIZE - 1; c++) {
+      const v = modules[r][c];
+      if (v === modules[r][c + 1] && v === modules[r + 1][c] && v === modules[r + 1][c + 1]) {
+        penalty += 3;
+      }
+    }
+  }
+
+  // Regla 3: patrón 1:1:3:1:1 (como un buscador) con margen de 4 claros.
+  const finderLike = [true, false, true, true, true, false, true, false, false, false, false];
+  const finderLikeRev = [...finderLike].reverse();
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c <= SIZE - 11; c++) {
+      const window = Array.from({ length: 11 }, (_, i) => modules[r][c + i]);
+      if (arraysEqual(window, finderLike) || arraysEqual(window, finderLikeRev)) penalty += 40;
+    }
+  }
+  for (let c = 0; c < SIZE; c++) {
+    for (let r = 0; r <= SIZE - 11; r++) {
+      const window = Array.from({ length: 11 }, (_, i) => modules[r + i][c]);
+      if (arraysEqual(window, finderLike) || arraysEqual(window, finderLikeRev)) penalty += 40;
+    }
+  }
+
+  // Regla 4: qué tan lejos del 50% está la proporción de módulos oscuros.
+  let dark = 0;
+  for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) if (modules[r][c]) dark++;
+  const percent = (dark * 100) / (SIZE * SIZE);
+  penalty += Math.floor(Math.abs(percent - 50) / 5) * 10;
+
+  return penalty;
+}
+
+function runPenalty(line) {
+  let penalty = 0;
+  let runLen = 1;
+  for (let i = 1; i < line.length; i++) {
+    if (line[i] === line[i - 1]) {
+      runLen++;
+    } else {
+      if (runLen >= 5) penalty += runLen - 2;
+      runLen = 1;
+    }
+  }
+  if (runLen >= 5) penalty += runLen - 2;
+  return penalty;
+}
+
+function arraysEqual(a, b) {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+function utf8Bytes(text) {
+  return Array.from(new TextEncoder().encode(text));
+}
+
+// generateQrMatrix(text) -> { size: 29, modules: boolean[29][29] }
+// modules[row][col] === true significa módulo oscuro.
+function generateQrMatrix(text) {
+  const bytes = utf8Bytes(text);
+  const dataCodewords = encodeDataCodewords(bytes);
+  const eccCodewords = rsComputeEcc(dataCodewords, ECC_CODEWORDS);
+  const allCodewords = dataCodewords.concat(eccCodewords);
+
+  const { modules: base, reserved } = buildFunctionPatterns();
+  const withData = placeDataBits(base, reserved, allCodewords);
+
+  let best = null;
+  for (let mask = 0; mask < 8; mask++) {
+    const masked = applyMask(withData, reserved, mask);
+    stampFormatInfo(masked, mask);
+    const penalty = maskPenalty(masked);
+    if (best === null || penalty < best.penalty) best = { mask, modules: masked, penalty };
+  }
+
+  return { size: SIZE, modules: best.modules, maskPattern: best.mask };
+}
+
+function renderQrSvg(matrix, { quietZone = 4, moduleSize = 8 } = {}) {
+  const total = matrix.size + quietZone * 2;
+  const px = total * moduleSize;
+  let rects = '';
+  for (let r = 0; r < matrix.size; r++) {
+    for (let c = 0; c < matrix.size; c++) {
+      if (!matrix.modules[r][c]) continue;
+      const x = (c + quietZone) * moduleSize;
+      const y = (r + quietZone) * moduleSize;
+      rects += `<rect x="${x}" y="${y}" width="${moduleSize}" height="${moduleSize}"/>`;
+    }
+  }
+  return `<svg viewBox="0 0 ${px} ${px}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges"><rect x="0" y="0" width="${px}" height="${px}" fill="#FFFFFF"/><g fill="#000000">${rects}</g></svg>`;
+}
+
+// --- decodeQrMatrix — SOLO para probar el redondeo encode→decode en las
+// pruebas de esta fase (test/render/qr.test.js). No es un lector general:
+// no corrige errores (no usa los codewords EC para reparar nada), asume
+// exactamente la versión 3 / nivel M / modo byte que este archivo genera.
+// Un lector real de verdad es justo lo que la fase deja para la prueba
+// física con lectora, no algo que este archivo deba reemplazar.
+function decodeQrMatrix(matrix) {
+  const maskPattern = detectMaskPattern(matrix);
+  const { reserved } = buildFunctionPatterns();
+  const maskFn = MASK_FUNCTIONS[maskPattern];
+  const unmasked = createGrid(false);
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      unmasked[r][c] = reserved[r][c] ? matrix.modules[r][c] : matrix.modules[r][c] !== maskFn(r, c);
+    }
+  }
+  const bits = readDataBits(unmasked, reserved);
+  const codewordsBits = bits.slice(0, DATA_CODEWORDS * 8);
+  const dataCodewords = [];
+  for (let i = 0; i < codewordsBits.length; i += 8) {
+    let byte = 0;
+    for (let j = 0; j < 8; j++) byte = (byte << 1) | codewordsBits[i + j];
+    dataCodewords.push(byte);
+  }
+  const mode = dataCodewords[0] >> 4;
+  if (mode !== 0b0100) throw new Error(`qr decode: modo inesperado ${mode.toString(2)}, este decodificador solo entiende modo byte`);
+  const length = ((dataCodewords[0] & 0x0f) << 4) | (dataCodewords[1] >> 4);
+  const outBytes = [];
+  for (let i = 0; i < length; i++) {
+    const hi = dataCodewords[1 + i] & 0x0f;
+    const lo = dataCodewords[2 + i] >> 4;
+    outBytes.push((hi << 4) | lo);
+  }
+  return new TextDecoder().decode(new Uint8Array(outBytes));
+}
+
+function detectMaskPattern(matrix) {
+  // Se lee por posición (i=0..14, igual que stampFormatInfo escribe) y
+  // luego se arma el string en el orden MSB-primero de FORMAT_INFO_M
+  // (byI[14] primero) — el mismo giro de índice que bitAt(), en la
+  // dirección contraria.
+  const byI = new Array(15);
+  for (let i = 0; i < 6; i++) byI[i] = matrix.modules[i][8] ? '1' : '0';
+  byI[6] = matrix.modules[7][8] ? '1' : '0';
+  byI[7] = matrix.modules[8][8] ? '1' : '0';
+  byI[8] = matrix.modules[8][7] ? '1' : '0';
+  for (let i = 9; i < 15; i++) byI[i] = matrix.modules[8][14 - i] ? '1' : '0';
+  const str = byI.slice().reverse().join('');
+  const idx = FORMAT_INFO_M.indexOf(str);
+  if (idx === -1) throw new Error('qr decode: información de formato no reconocida (¿matriz corrupta o de otra versión/nivel?)');
+  return idx;
+}
+
+function readDataBits(modules, reserved) {
+  const bits = [];
+  walkColumnPairs((row, c) => {
+    if (reserved[row][c]) return;
+    bits.push(modules[row][c] ? 1 : 0);
+  });
+  return bits;
+}
+
+const QR_CONFIG = { size: SIZE, dataCodewords: DATA_CODEWORDS, eccCodewords: ECC_CODEWORDS, maxBytes: MAX_BYTES };
+
+// --- src/ui/passCache.js ---
+// Fase 06 — guarda el último estado de pases conocido en el dispositivo
+// para que "sin conexión" siga mostrando algo (PRD/fase 06). Guarda los
+// pases CRUDOS (con su propio revokedAt/validUntil), no un resultado ya
+// filtrado: filtra de nuevo con visiblePasses (R3, fase 01) usando el
+// `now` de cada apertura, nunca el guardado — así un pase revocado
+// DESPUÉS de guardarse en caché deja de verse la próxima vez que se
+// evalúa, en vez de quedar "congelado" como válido para siempre (INV-4).
+//
+// JSON.stringify/parse preserva `null` como `null` (no como string ni
+// como campo ausente), así que `validUntil: null` sobrevive el viaje
+// completo por localStorage sin ambigüedad — es el caso que el archivo de
+// esta fase marca como "el fallo más caro": un null mal interpretado como
+// fecha inválida apagaría un pase que en realidad nunca caduca.
+
+
+const CACHE_KEY_PREFIX = 'nc_pass_cache:';
+
+function savePassCache(visitId, passes, now) {
+  const record = { visitId, passes, savedAt: now };
+  localStorage.setItem(CACHE_KEY_PREFIX + visitId, JSON.stringify(record));
+}
+
+function loadPassCache(visitId) {
+  const raw = localStorage.getItem(CACHE_KEY_PREFIX + visitId);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.passes) || typeof parsed.savedAt !== 'string') return null;
+    return parsed;
+  } catch {
+    return null; // JSON corrupto: se trata como "sin caché", no rompe la pantalla
+  }
+}
+
+// getCachedVisiblePasses(visitId, now) -> { passes: Pass[], savedAt } | null
+// Los `passes` ya vienen filtrados por R3 evaluado con el `now` de AHORA,
+// no con el que tenía el dispositivo cuando se guardó la caché.
+function getCachedVisiblePasses(visitId, now) {
+  const cache = loadPassCache(visitId);
+  if (!cache) return null;
+  return { passes: visiblePasses(cache.passes, now), savedAt: cache.savedAt };
+}
+
+// --- src/ui/screens/pass.js ---
+// Fase 06 — pantalla completa del QPASS. Reemplaza el placeholder de la
+// fase 05 (que solo probaba R3 con texto plano). Comportamiento pedido
+// por la fase:
+//   - símbolo lo más grande posible, margen quieto, negro sobre blanco
+//     puro — ESTA pantalla nunca usa tema oscuro, a propósito
+//   - debajo: para qué acceso sirve y hasta qué hora vale
+//   - varios pases válidos: deslizar entre ellos
+//   - sin conexión: último pase guardado, con aviso "guardado a las HH:MM"
+//   - Wake Lock mientras la pantalla esté abierta, si el navegador lo
+//     soporta
+//
+// Brillo de pantalla al máximo: NO existe una API web estándar para
+// controlarlo (por diseño — ninguna página puede subir el brillo del
+// teléfono de alguien sin su permiso explícito fuera de flujos muy
+// específicos). Se le pide al paciente que lo suba él mismo con un aviso
+// en pantalla, en vez de fingir que la app lo hace.
+//
+// "Sin conexión" en ESTE prototipo: no hay backend real (fase 08, fuera
+// de alcance) — nunca hay una petición de red que de verdad pueda
+// fallar. El mecanismo de caché (src/ui/passCache.js) SÍ es real y está
+// probado, pero no hay forma honesta de ejercitar "modo avión" sin una
+// fuente de datos viva de la que desconectarse; por eso showFallback se
+// deja disponible para cuando exista un backend, no se simula aquí.
+
+
+
+
+
+
+function renderSymbol(pass) {
+  try {
+    if (pass.format === 'code128') {
+      return renderCode128Svg(pass.payload);
+    }
+    return renderQrSvg(generateQrMatrix(pass.payload));
+  } catch (err) {
+    // Un payload real que no quepa (QR) o tenga caracteres fuera de
+    // subset B (Code128) no debe tumbar la pantalla completa — se avisa
+    // en vez de dejar una página en blanco justo donde el paciente más
+    // la necesita.
+    return `<p class="nc-pass-error">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderPassScreen(ctx) {
+  const { t } = ctx;
+  return `
+    <section class="nc-screen nc-pass-screen">
+      <h1 class="nc-screen-title">${escapeHtml(t('pass.title'))}</h1>
+      <p class="nc-pass-brightness-hint">${escapeHtml(t('pass.brightnessHint'))}</p>
+      <div data-role="pass-mount"></div>
+    </section>
+  `;
+}
+
+function attachPassScreen(rootEl, ctx) {
+  const { visit, passes, now, lang, t } = ctx;
+  const mount = rootEl.querySelector('[data-role="pass-mount"]');
+
+  const live = visiblePasses(passes, now);
+  let source, savedAt;
+  if (live.length > 0) {
+    savePassCache(visit.id, passes, now);
+    source = live;
+    savedAt = null;
+  } else {
+    const cached = getCachedVisiblePasses(visit.id, now);
+    source = cached ? cached.passes : [];
+    savedAt = cached ? cached.savedAt : null;
+  }
+
+  let index = 0;
+  requestWakeLock();
+
+  function render() {
+    if (source.length === 0) {
+      mount.innerHTML = `<p class="nc-pass-empty">${escapeHtml(t('pass.empty'))}</p>`;
+      return;
+    }
+    const pass = source[index];
+    const offlineNotice = savedAt
+      ? `<p class="nc-pass-offline">${escapeHtml(t('pass.offline'))} · ${escapeHtml(t('pass.savedAt')(formatSavedAt(savedAt)))}</p>`
+      : '';
+    const validUntilText = pass.validUntil ? t('pass.validUntil')(formatSavedAt(pass.validUntil)) : t('pass.noExpiry');
+    const nav =
+      source.length > 1
+        ? `<div class="nc-pass-nav">
+            <button type="button" class="nc-button" data-role="pass-prev" ${index === 0 ? 'disabled' : ''}>${escapeHtml(t('map.routePrev'))}</button>
+            <span class="nc-pass-count">${index + 1} / ${source.length}</span>
+            <button type="button" class="nc-button" data-role="pass-next" ${index === source.length - 1 ? 'disabled' : ''}>${escapeHtml(t('map.routeNext'))}</button>
+          </div>`
+        : '';
+    mount.innerHTML = `
+      ${offlineNotice}
+      <div class="nc-pass-symbol">${renderSymbol(pass)}</div>
+      <p class="nc-pass-scope">${escapeHtml(t(`pass.scope.${pass.scope}`))}</p>
+      <p class="nc-pass-expiry">${escapeHtml(validUntilText)}</p>
+      ${nav}
+    `;
+    mount.querySelector('[data-role="pass-prev"]')?.addEventListener('click', () => {
+      if (index > 0) { index--; render(); }
+    });
+    mount.querySelector('[data-role="pass-next"]')?.addEventListener('click', () => {
+      if (index < source.length - 1) { index++; render(); }
+    });
+  }
+
+  render();
+}
+
+function formatSavedAt(iso) {
+  // Solo hora, formato de reloj de 24h simple para el aviso "guardado a
+  // las HH:MM" — no usa formatTimeTijuana (esa función es AM/PM, fase 01)
+  // para no forzar una convención horaria distinta a la de esta nota
+  // corta; es texto de UI, no una regla de dominio.
+  const d = new Date(iso);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
+let wakeLockSentinel = null;
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLockSentinel = await navigator.wakeLock.request('screen');
+  } catch {
+    // Puede fallar por permisos, pestaña no visible, etc. — no es un
+    // error que deba interrumpir la pantalla del pase.
+  }
+}
+
+const PASS_SCREEN_CSS = `
+.nc-pass-screen { background: #FFFFFF; color: #000000; margin: -16px; padding: 16px; min-height: 100%; }
+.nc-pass-brightness-hint { font-size: 12px; opacity: 0.7; margin: 0 0 12px; }
+.nc-pass-symbol { background: #FFFFFF; padding: 12px; max-width: 320px; margin: 0 auto; }
+.nc-pass-symbol svg { display: block; width: 100%; height: auto; }
+.nc-pass-scope { text-align: center; font-size: 20px; font-weight: 700; margin: 16px 0 4px; }
+.nc-pass-expiry { text-align: center; font-size: 13px; opacity: 0.75; margin: 0; }
+.nc-pass-offline { text-align: center; font-size: 12px; background: #FBEBD2; color: #8A5A00; padding: 6px; border-radius: 8px; margin: 0 0 12px; }
+.nc-pass-nav { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 20px; }
+.nc-pass-count { font-size: 13px; opacity: 0.7; }
+.nc-pass-empty, .nc-pass-error { text-align: center; font-size: 14px; opacity: 0.75; }
+`;
+
+// --- src/data/plaza.js ---
+// Restaurantes de la Plaza (PRD §7 PlazaVenue, §13). Confirmado por el
+// cliente: Farmer's Table y The Yard están en Nivel 1; Boka está DENTRO
+// del Hotel Quartz, no en Nivel 1 (corrección explícita del cliente sobre
+// el primer borrador de la presentación — ver docs/DECISIONS.md D14 y la
+// nota de nomenclatura del PRD §13).
+//
+// Tipo de comida y horario de los tres siguen sin confirmar (PRD §15.2:
+// "¿Hay algo más en Nivel 1?" tampoco tiene respuesta todavía), así que
+// los tres venues van unconfirmed: true completos, no solo en hours.
+//
+// Amenidades (cajeros, wifi, sanitarios, zonas pet-friendly — PRD §15.3)
+// NO están representadas aquí: no hay ni nombre ni ubicación real de
+// ninguna. Inventar entradas placeholder sería peor que no tenerlas.
+// Cuando el cliente confirme, se agregan como PlazaVenue type: "amenity".
+
+// Nombre único a propósito, ver el mismo comentario en
+// src/data/locations.js: build.py (fase 05) aplana todos los módulos a un
+// solo scope, y ese archivo tiene un helper privado con la misma forma.
+function plazaOpeningHours() {
+  return {
+    tz: 'America/Tijuana',
+    weekly: [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, open: '07:00', close: '20:00' })),
+    exceptions: [],
+    unconfirmed: true,
+  };
+}
+
+function venue(id, name, level, mapPointId) {
+  return {
+    id,
+    name,
+    type: 'restaurant',
+    cuisine: [], // PRD §15.2: tipo de comida sin confirmar
+    level,
+    hours: plazaOpeningHours(),
+    mapPointId,
+    unconfirmed: true,
+  };
+}
+
+const plazaVenues = [
+  venue('farmers_table', "Farmer's Table", 'N1', 'mp_level1'),
+  venue('the_yard', 'The Yard', 'N1', 'mp_level1'),
+  venue('boka', 'Boka', 'Quartz', 'mp_quartz'),
+];
+
+// --- src/ui/screens/plaza.js ---
+// Plaza — restaurantes (Farmer's Table, The Yard, Boka) con filtro por
+// tipo de comida, más amenidades en sección aparte (fase 05). Fase 03 no
+// confirmó ningún tipo de comida todavía (cuisine: [] en las tres) ni
+// ninguna amenidad real — el filtro se arma leyendo los tags que de verdad
+// existan en los datos (hoy: ninguno además de "Todos"), listo para cuando
+// haya dato real sin tocar este archivo otra vez.
+
+
+
+
+function allCuisineTags() {
+  return [...new Set(plazaVenues.flatMap((v) => v.cuisine))].sort();
+}
+
+function venueLines(venue, t, lang) {
+  const cuisineLine = venue.cuisine.length > 0 ? venue.cuisine.join(', ') : t('plaza.cuisineUnknown');
+  const levelLine = venue.level;
+  return [cuisineLine, levelLine];
+}
+
+function renderPlazaScreen(ctx) {
+  const { t, lang } = ctx;
+  const tags = allCuisineTags();
+
+  const filterHtml = `
+    <div class="nc-cuisine-filter" role="group" aria-label="${escapeHtml(t('plaza.restaurantsTitle'))}">
+      <button type="button" class="nc-chip nc-chip--active" data-cuisine="">${escapeHtml(t('plaza.cuisineFilterAll'))}</button>
+      ${tags.map((tag) => `<button type="button" class="nc-chip" data-cuisine="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`).join('\n')}
+    </div>
+  `;
+
+  const venuesHtml = plazaVenues
+    .map((v) =>
+      `<div data-venue-cuisines="${escapeHtml(v.cuisine.join('|'))}">${renderFicha({
+        title: v.name,
+        lines: venueLines(v, t, lang),
+        unconfirmed: v.unconfirmed === true,
+        t,
+      })}</div>`
+    )
+    .join('\n');
+
+  return `
+    <section class="nc-screen">
+      <h1 class="nc-screen-title">${escapeHtml(t('plaza.title'))}</h1>
+      <h2 class="nc-section-title">${escapeHtml(t('plaza.restaurantsTitle'))}</h2>
+      ${filterHtml}
+      <div class="nc-venue-list" data-role="venue-list">${venuesHtml}</div>
+
+      <h2 class="nc-section-title">${escapeHtml(t('plaza.amenitiesTitle'))}</h2>
+      <p class="nc-empty-state">${escapeHtml(t('plaza.amenitiesEmpty'))}</p>
+    </section>
+  `;
+}
+
+function attachPlazaScreen(rootEl) {
+  const chips = rootEl.querySelectorAll('.nc-chip');
+  const venues = rootEl.querySelectorAll('[data-venue-cuisines]');
+  chips.forEach((chip) => {
+    chip.addEventListener('click', () => {
+      chips.forEach((c) => c.classList.remove('nc-chip--active'));
+      chip.classList.add('nc-chip--active');
+      const wanted = chip.dataset.cuisine;
+      venues.forEach((v) => {
+        const cuisines = v.dataset.venueCuisines.split('|').filter(Boolean);
+        v.style.display = !wanted || cuisines.includes(wanted) ? '' : 'none';
+      });
+    });
+  });
+}
+
+const PLAZA_CSS = `
+.nc-cuisine-filter { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.nc-chip { min-height: 44px; min-width: 44px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--nc-card-border); background: var(--nc-card-bg); color: var(--nc-ink); font: 600 12px Barlow, system-ui, sans-serif; cursor: pointer; }
+.nc-chip--active { background: var(--nc-teal); color: var(--nc-navy); border-color: var(--nc-teal); }
+.nc-venue-list { display: flex; flex-direction: column; gap: 8px; }
+.nc-empty-state { font-size: 13px; opacity: 0.65; }
+`;
+
+// --- src/ui/screens/stay.js ---
+// Mi estancia — reservación de Quartz con botón copiar (fase 05). "Si la
+// visita no tiene hospedaje, la pantalla y su acceso no existen — no se
+// muestra vacía": src/ui/app.js nunca enruta aquí sin lodging, y esta
+// función además se niega a pintar algo si de todos modos la llaman así
+// (defensa en profundidad, no el único lugar que decide).
+
+
+
+
+function renderStayScreen(ctx) {
+  const { lodging, now, lang, t } = ctx;
+  if (!lodging) return '';
+
+  const checkInLabel = `${formatDayLabel(lodging.checkIn, now, lang)[lang]} · ${formatTimeTijuana(lodging.checkIn, lang)}`;
+  const checkOutLabel = `${formatDayLabel(lodging.checkOut, now, lang)[lang]} · ${formatTimeTijuana(lodging.checkOut, lang)}`;
+  const yesNo = (v) => (v ? t('stay.yes') : t('stay.no'));
+
+  return `
+    <section class="nc-screen">
+      <h1 class="nc-screen-title">${escapeHtml(t('stay.title'))}</h1>
+      ${renderCard(`
+        <p class="nc-stay-hotel">${escapeHtml(lodging.hotel)}</p>
+        <p class="nc-stay-row"><span>${escapeHtml(t('stay.reservationCode'))}</span> <strong data-role="res-code">${escapeHtml(lodging.reservationCode)}</strong></p>
+        <button type="button" class="nc-button" data-role="copy-code" data-code="${escapeHtml(lodging.reservationCode)}">${escapeHtml(t('stay.copyButton'))}</button>
+        <p class="nc-copy-feedback" data-role="copy-feedback" hidden>${escapeHtml(t('stay.copied'))}</p>
+      `, { variant: 'accent' })}
+      ${renderCard(`
+        <p class="nc-stay-row"><span>${escapeHtml(t('stay.checkIn'))}</span> ${escapeHtml(checkInLabel)}</p>
+        <p class="nc-stay-row"><span>${escapeHtml(t('stay.checkOut'))}</span> ${escapeHtml(checkOutLabel)}</p>
+        <p class="nc-stay-row"><span>${escapeHtml(t('stay.breakfastIncluded'))}</span> ${escapeHtml(yesNo(lodging.breakfastIncluded))}</p>
+        <p class="nc-stay-row"><span>${escapeHtml(t('stay.recoveryRoom'))}</span> ${escapeHtml(yesNo(lodging.recoveryRoom))}</p>
+      `)}
+    </section>
+  `;
+}
+
+function attachStayScreen(rootEl) {
+  const btn = rootEl.querySelector('[data-role="copy-code"]');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const feedback = rootEl.querySelector('[data-role="copy-feedback"]');
+    try {
+      await navigator.clipboard.writeText(btn.dataset.code);
+    } catch {
+      // Clipboard API puede requerir permiso/gesto del usuario según el
+      // navegador — si falla, no rompemos la pantalla, solo no mostramos
+      // la retroalimentación de éxito.
+      return;
+    }
+    if (feedback) {
+      feedback.hidden = false;
+      setTimeout(() => { feedback.hidden = true; }, 2000);
+    }
+  });
+}
+
+const STAY_CSS = `
+.nc-stay-hotel { font-size: 18px; font-weight: 700; margin: 0 0 10px; }
+.nc-stay-row { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; margin: 0 0 8px; }
+.nc-stay-row span { opacity: 0.7; }
+.nc-copy-feedback { margin: 8px 0 0; font-size: 12px; color: var(--nc-teal-ink); font-weight: 700; }
+`;
+
+// --- src/ui/theme.js ---
+// Tokens de marca (mismos que la presentación: navy #1C2B53, teal #14BCC4,
+// blanco, tinte #EEF3F8, Barlow) más el armazón de layout. `--nc-teal-ink`
+// es el color de texto/ícono que SÍ pasa 4.5:1 sobre relleno teal — blanco
+// sobre teal da ~2.3:1 (no pasa), navy sobre teal da ~5.9:1 (si pasa);
+// mismo cálculo ya documentado en src/map/complexMap.js, reusado aquí para
+// que ningún botón o distintivo de esta fase cometa el mismo error.
+//
+// Barlow (Presentacion Checkup/Recursos/Tipografia Barlow/*.ttf) no se
+// embebe como @font-face: son 4 archivos .ttf (~400KB en total) y esta
+// fase no tiene todavía un paso de optimización de assets — embeberlos sin
+// comprimir infla el index.html autocontenido de build.py de forma
+// desproporcionada para un prototipo. Se usa como preferencia con caída a
+// system-ui, que ya se ve suficientemente cercano; queda anotado como
+// pendiente, no como decisión definitiva.
+
+const THEME_CSS = `
+:root {
+  --nc-navy: #1C2B53;
+  --nc-teal: #14BCC4;
+  --nc-teal-ink: #0E7378;
+  --nc-bg: #EEF3F8;
+  --nc-surface: #FFFFFF;
+  --nc-ink: #1C2B53;
+  --nc-card-bg: #FFFFFF;
+  --nc-card-border: #D7E1EE;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --nc-bg: #0E1830;
+    --nc-surface: #152040;
+    --nc-ink: #F2F5FA;
+    --nc-card-bg: #182449;
+    --nc-card-border: #2C3B63;
+    --nc-teal-ink: #6FE0E6;
+  }
+}
+/* La pantalla del pase (fase 06) nunca usa tema oscuro — necesita el
+   contraste máximo para que una lectora la lea bien. Esta clase, puesta
+   por src/ui/app.js solo en la ruta #/pass, gana sobre la media query de
+   arriba sin importar el tema del sistema. */
+.nc-force-light {
+  --nc-bg: #EEF3F8;
+  --nc-surface: #FFFFFF;
+  --nc-ink: #1C2B53;
+  --nc-card-bg: #FFFFFF;
+  --nc-card-border: #D7E1EE;
+  --nc-teal-ink: #0E7378;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--nc-bg); color: var(--nc-ink);
+  font-family: Barlow, system-ui, -apple-system, sans-serif;
+  min-height: 100vh; display: flex; flex-direction: column;
+}
+#app { flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+.nc-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; background: var(--nc-surface); border-bottom: 1px solid var(--nc-card-border); }
+.nc-header-brand { display: flex; align-items: center; gap: 8px; }
+.nc-header-icon { display: block; border-radius: 6px; }
+.nc-header-title { font-weight: 700; font-size: 15px; letter-spacing: 0.02em; }
+.nc-lang-toggle { min-height: 44px; min-width: 44px; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--nc-card-border); background: none; color: var(--nc-ink); font: 600 12px Barlow, system-ui, sans-serif; cursor: pointer; }
+.nc-main { flex: 1; padding: 16px; padding-bottom: 24px; max-width: 480px; width: 100%; margin: 0 auto; overflow-x: hidden; }
+.nc-screen { display: flex; flex-direction: column; }
+.nc-button { min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 10px; border: 1px solid var(--nc-card-border); background: var(--nc-card-bg); color: var(--nc-ink); font: 600 14px Barlow, system-ui, sans-serif; cursor: pointer; }
+.nc-button--primary { background: var(--nc-teal); border-color: var(--nc-teal); color: var(--nc-teal-ink); }
+.nc-neutral { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 32px; gap: 8px; }
+.nc-neutral-title { font-size: 18px; font-weight: 700; margin: 0; }
+.nc-neutral-body { font-size: 14px; opacity: 0.75; margin: 0; max-width: 320px; }
+`;
+
+// --- src/ui/app.js ---
+// Enrutador y estado de pantalla (fase 05). Único lugar de toda la UI que
+// puede leer el reloj real del sistema o `location`/`localStorage`
+// directamente — todo lo que cuelga de src/ui/screens/ recibe `now`, `lang`
+// y los datos de la visita ya resueltos, nunca los lee por su cuenta.
+//
+// Contrato de URL de este prototipo (no hay backend real — PRD: en el MVP
+// esto lo resuelve el panel de coordinadores, fase 08, fuera de alcance).
+// `p` (no `token`) porque así lo fija phase-07-e2e.md ("?p=<token de
+// v_demo1>") — fase 05 no dejó el nombre del parámetro por escrito en
+// ningún archivo aprobado, así que se alinea al primero que sí lo hace en
+// vez de mantener dos convenciones distintas dentro del mismo prototipo:
+//   ?p=<Visit.token>       obligatorio en la práctica — sin token
+//                          coincidente se ve la misma pantalla neutra que
+//                          un token vencido (INV-3: no debe distinguirse)
+//   ?now=<ISO con offset>  opcional, solo para este prototipo: ancla "now"
+//                          a la fecha de la fixture en vez de la fecha real
+//                          del sistema. Sin esto, cualquier fixture cargada
+//                          después de sus propias citas (que es HOY para
+//                          casi cualquier fecha real, dado que las cinco
+//                          fixtures están fechadas en 2026) se vería
+//                          siempre vencida — inútil para recorrer el
+//                          prototipo. Se descarta un valor no parseable en
+//                          vez de romper la app.
+//   ?lang=es|en            opcional, conveniencia para verificación manual
+//                          — la fuente de verdad real es localStorage +
+//                          navigator.language (resolveInitialLang).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const ALL_CSS = [THEME_CSS, TABS_CSS, CARD_CSS, BADGE_CSS, FICHA_CSS, HOME_CSS, ITINERARY_CSS, MAP_SCREEN_CSS, PLAZA_CSS, STAY_CSS, HELP_CSS, PASS_SCREEN_CSS].join('\n');
+
+function injectStylesOnce() {
+  if (document.getElementById('nc-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'nc-styles';
+  style.textContent = ALL_CSS;
+  document.head.appendChild(style);
+}
+
+const LANG_STORAGE_KEY = 'nc_lang';
+const LAST_VIEWED_ITINERARY_KEY_PREFIX = 'nc_last_viewed_itinerary_at:';
+
+const TAB_ROUTES = new Set(['home', 'itinerary', 'map', 'plaza', 'help']);
+const SCREENS = {
+  home: { render: renderHomeScreen, tab: 'home' },
+  itinerary: { render: renderItineraryScreen, tab: 'itinerary' },
+  map: { render: renderMapScreen, attach: attachMapScreen, tab: 'map' },
+  plaza: { render: renderPlazaScreen, attach: attachPlazaScreen, tab: 'plaza' },
+  hours: { render: renderHoursScreen, tab: null },
+  stay: { render: renderStayScreen, attach: attachStayScreen, tab: null },
+  help: { render: renderHelpScreen, tab: 'help' },
+  pass: { render: renderPassScreen, attach: attachPassScreen, tab: null },
+};
+
+function currentRoute() {
+  const hash = location.hash.replace(/^#\/?/, '');
+  return SCREENS[hash] ? hash : 'home';
+}
+
+function parseNowOverride(raw) {
+  if (!raw) return null;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : raw;
+}
+
+function resolveVisitContext(token) {
+  const match = Object.values(fixtures).find((f) => f.visit.token === token);
+  return match ?? null;
+}
+
+function renderNeutralScreen(root, lang) {
+  // INV-3: idéntica sin importar si el token nunca existió o ya venció —
+  // un solo camino de código para las dos situaciones, para que no puedan
+  // divergir por accidente en el futuro.
+  document.title = STRINGS[lang].common.appName;
+  root.innerHTML = `
+    <div class="nc-neutral">
+      <p class="nc-neutral-title">${escapeHtml(translate(lang, 'common.neutralTitle'))}</p>
+      <p class="nc-neutral-body">${escapeHtml(translate(lang, 'common.neutralBody'))}</p>
+    </div>
+  `;
+}
+
+function boot(root, { navigatorLanguage = navigator.language, search = location.search } = {}) {
+  injectStylesOnce();
+  const params = new URLSearchParams(search);
+  const token = params.get('p');
+  const nowOverride = parseNowOverride(params.get('now'));
+  const now = nowOverride ?? new Date().toISOString(); // ÚNICO lugar de todo el proyecto con permiso de leer el reloj real (INV-1 solo rige src/domain/)
+
+  const storedLang = localStorage.getItem(LANG_STORAGE_KEY);
+  const langParam = params.get('lang');
+  let lang = langParam && STRINGS[langParam] ? langParam : resolveInitialLang(navigatorLanguage, storedLang);
+
+  document.title = STRINGS[lang].common.appName;
+  document.documentElement.lang = lang;
+
+  const ctxData = resolveVisitContext(token);
+  if (!ctxData || isExpired(ctxData.visit, ctxData.appointments, ctxData.lodging, now)) {
+    renderNeutralScreen(root, lang);
+    return;
+  }
+
+  const { visit, appointments, passes, lodging } = ctxData;
+  const lastViewedKey = LAST_VIEWED_ITINERARY_KEY_PREFIX + visit.id;
+  let itineraryStamped = false;
+
+  function t(path) {
+    return translate(lang, path);
+  }
+
+  function render() {
+    const route = currentRoute();
+    if (route === 'stay' && !lodging) {
+      location.hash = '#/home';
+      return;
+    }
+    const screen = SCREENS[route];
+    const lastViewedItineraryAt = localStorage.getItem(lastViewedKey);
+    const ctx = { visit, appointments, passes, lodging, now, lang, t, lastViewedItineraryAt };
+
+    document.title = STRINGS[lang].common.appName; // constante a propósito: INV-6, nunca nombre de paciente ni de estudio
+
+    // La pantalla del pase nunca usa tema oscuro (fase 06 — la lectora
+    // necesita contraste máximo): se fuerza tema claro en TODO el árbol,
+    // no solo en el símbolo, con una clase que gana sobre la media query
+    // de prefers-color-scheme (ver theme.js). Va en <body>, no en #app:
+    // el fondo de <body> es un ancestro de #app, así que una variable CSS
+    // puesta solo en #app nunca lo alcanza (las variables bajan a
+    // descendientes, no suben a ancestros) — se vio en el propio
+    // navegador antes de darlo por bueno: la franja entre la tarjeta del
+    // pase y la barra de pestañas seguía oscura.
+    document.body.className = route === 'pass' ? 'nc-force-light' : '';
+
+    root.innerHTML = `
+      <header class="nc-header">
+        <span class="nc-header-brand">
+          <img class="nc-header-icon" src="data:image/png;base64,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" alt="" width="28" height="28" />
+          <span class="nc-header-title">${escapeHtml(STRINGS[lang].common.appName)}</span>
+        </span>
+        <button type="button" class="nc-lang-toggle" data-role="lang-toggle">${escapeHtml(t('common.langToggle'))}</button>
+      </header>
+      <main class="nc-main" data-role="screen-mount"></main>
+      ${renderTabBar(TAB_ROUTES.has(route) ? screen.tab : '', t)}
+    `;
+
+    const mount = root.querySelector('[data-role="screen-mount"]');
+    mount.innerHTML = screen.render(ctx);
+    if (screen.attach) screen.attach(mount, ctx);
+
+    if (route === 'itinerary' && !itineraryStamped) {
+      itineraryStamped = true;
+      // Se escribe DESPUÉS de pintar con el valor viejo (arriba), nunca
+      // antes: si se escribiera antes, ninguna cita se vería nunca como
+      // "actualizada" en la primera visita a esta pantalla.
+      localStorage.setItem(lastViewedKey, now);
+    }
+
+    root.querySelectorAll('[data-nav]').forEach((el) => {
+      el.addEventListener('click', () => {
+        location.hash = `#/${el.dataset.nav}`;
+      });
+    });
+    root.querySelector('[data-role="lang-toggle"]')?.addEventListener('click', () => {
+      lang = lang === 'es' ? 'en' : 'es';
+      localStorage.setItem(LANG_STORAGE_KEY, lang);
+      render();
+    });
+  }
+
+  window.addEventListener('hashchange', render);
+  render();
+}
+boot(document.getElementById("app"));
+
+})();
+</script>
+</body>
+</html>

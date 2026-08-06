@@ -1,0 +1,16 @@
+{
+  "name": "newcity-patient-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "NewCity Hospital Patient App — prototipo navegable",
+  "scripts": {
+    "test": "node --test 'test/**/*.test.js'",
+    "test:domain": "node --test 'test/domain/**/*.test.js'",
+    "test:data": "node --test 'test/data/**/*.test.js'",
+    "test:tz": "for z in UTC America/New_York America/Tijuana; do echo \"--- TZ=$z ---\"; TZ=$z node --test 'test/domain/**/*.test.js'; done"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

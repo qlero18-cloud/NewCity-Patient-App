@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Fase 04 — arnés de verificación del mapa (NO es una pantalla del prototipo)</title>
+<style>
+  :root {
+    --navy: #1C2B53; --teal: #14BCC4; --bg: #EEF3F8; --ink: #1C2B53; --card: #FFFFFF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #10192E; --ink: #F2F5FA; --card: #182238; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--ink);
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  header { padding: 12px 16px; border-bottom: 2px dashed #E2A33D; }
+  header p { margin: 4px 0 0; font-size: 12px; opacity: 0.85; }
+  .banner { background: #E2A33D; color: #1C2B53; font-weight: 700; font-size: 12px; padding: 4px 16px; }
+  main { flex: 1; padding: 12px 16px 24px; max-width: 480px; margin: 0 auto; width: 100%; }
+  #map-container { width: 100%; }
+  #map-container svg { width: 100%; height: auto; display: block; }
+  .controls { margin-top: 16px; border-top: 1px solid #B9C6DA; padding-top: 12px; }
+  .controls h2 { font-size: 14px; margin: 0 0 8px; }
+  .controls select, .controls button {
+    font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 1px solid #B9C6DA;
+    background: var(--card); color: var(--ink);
+  }
+  .controls button { background: var(--navy); color: #fff; border: none; cursor: pointer; margin-right: 8px; }
+  .controls button:disabled { opacity: 0.4; cursor: default; }
+  #step-instruction { margin-top: 8px; font-size: 13px; min-height: 2.4em; }
+  #ficha-slot { margin-top: 16px; }
+  .nc-ficha {
+    background: var(--card); border: 1px solid #B9C6DA; border-radius: 12px; padding: 12px 14px;
+  }
+  .nc-ficha-title { margin: 0 0 4px; font-size: 16px; }
+  .nc-ficha-blurb { margin: 0 0 6px; font-size: 13px; opacity: 0.85; }
+  .nc-ficha-hours { margin: 0 0 10px; font-size: 13px; }
+  .nc-ficha-badge { color: #8A5A00; font-size: 11px; font-weight: 700; }
+  .nc-ficha-directions {
+    font-size: 13px; padding: 8px 12px; border-radius: 8px; border: none;
+    background: var(--teal); color: var(--navy); font-weight: 700; cursor: pointer;
+  }
+  #directions-log { margin-top: 8px; font-size: 12px; opacity: 0.7; }
+</style>
+</head>
+<body>
+  <div class="banner">ARNÉS DE VERIFICACIÓN — FASE 04 · NO es una de las 7 pantallas del prototipo</div>
+  <header>
+    <strong>Mapa del complejo — verificación manual</strong>
+    <p>
+      Toca los 7 puntos uno por uno y confirma que cada uno abre su ficha. Después elige una ruta abajo y
+      usa "Paso siguiente" para confirmar que el resaltado avanza y quita el anterior.
+    </p>
+  </header>
+  <main>
+    <div id="map-container" aria-live="polite"></div>
+
+    <div id="ficha-slot"></div>
+
+    <div class="controls">
+      <h2>Recorrer una ruta del catálogo (fase 02)</h2>
+      <select id="route-select"></select>
+      <div style="margin-top:8px;">
+        <button id="btn-next" type="button">Paso siguiente</button>
+        <button id="btn-reset" type="button">Reiniciar</button>
+      </div>
+      <div id="step-instruction"></div>
+    </div>
+
+    <div id="directions-log"></div>
+  </main>
+
+  <script type="module">
+    // Los "?v=2" de abajo son solo para forzar al navegador a no servir un
+    // módulo cacheado durante la verificación manual de esta fase — no
+    // tienen ningún efecto en producción (este archivo es un arnés de
+    // desarrollo, no una de las 7 pantallas del prototipo).
+    import { MAP_POINT_IDS, renderComplexMapSvg, renderFichaHtml } from './complexMap.js?v=2';
+    import { highlighterForSvgElement } from './highlights.js?v=2';
+    import { routes } from '../data/routes.js?v=2';
+
+    const lang = new URLSearchParams(location.search).get('lang') === 'en' ? 'en' : 'es';
+    document.documentElement.lang = lang;
+
+    const mapContainer = document.getElementById('map-container');
+    mapContainer.innerHTML = renderComplexMapSvg({ lang });
+    const svgEl = mapContainer.querySelector('svg');
+    const highlighter = highlighterForSvgElement(svgEl);
+
+    const fichaSlot = document.getElementById('ficha-slot');
+    const directionsLog = document.getElementById('directions-log');
+
+    function openFicha(mapPointId) {
+      fichaSlot.innerHTML = renderFichaHtml(mapPointId, lang);
+      const btn = fichaSlot.querySelector('[data-directions-for]');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          directionsLog.textContent =
+            (lang === 'en' ? 'Directions requested for: ' : 'Cómo llegar solicitado para: ') + btn.dataset.directionsFor;
+        });
+      }
+    }
+
+    for (const id of MAP_POINT_IDS) {
+      const group = svgEl.querySelector(`[data-map-point-id="${id}"]`);
+      if (!group) continue;
+      group.addEventListener('click', () => openFicha(id));
+      group.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          openFicha(id);
+        }
+      });
+    }
+
+    // --- recorrido paso a paso de una ruta del catálogo ---
+    const routeSelect = document.getElementById('route-select');
+    for (const route of routes) {
+      const opt = document.createElement('option');
+      opt.value = route.id;
+      opt.textContent = `${route.fromLocationId} → ${route.toLocationId}`;
+      routeSelect.appendChild(opt);
+    }
+
+    let stepIndex = -1;
+    const instructionEl = document.getElementById('step-instruction');
+
+    function currentRoute() {
+      return routes.find((r) => r.id === routeSelect.value);
+    }
+
+    function renderStep() {
+      const route = currentRoute();
+      if (!route) return;
+      if (stepIndex < 0) {
+        instructionEl.textContent = lang === 'en' ? '(not started)' : '(sin iniciar)';
+        return;
+      }
+      const step = route.steps[stepIndex];
+      highlighter.highlightStep(step.mapHighlightId);
+      instructionEl.textContent = `${step.order}/${route.steps.length} — ${step.instruction[lang]} [${step.mapHighlightId}]`;
+    }
+
+    document.getElementById('btn-next').addEventListener('click', () => {
+      const route = currentRoute();
+      if (!route) return;
+      if (stepIndex < route.steps.length - 1) {
+        stepIndex += 1;
+        renderStep();
+      }
+    });
+
+    document.getElementById('btn-reset').addEventListener('click', () => {
+      stepIndex = -1;
+      renderStep();
+    });
+
+    routeSelect.addEventListener('change', () => {
+      stepIndex = -1;
+      renderStep();
+    });
+
+    renderStep();
+  </script>
+</body>
+</html>

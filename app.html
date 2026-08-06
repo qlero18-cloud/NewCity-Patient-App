@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<!--
+  INV-6: el título es una constante fija ("NewCity") puesta también por
+  src/ui/app.js en cada render — nunca nombre de paciente ni de estudio.
+  build.py envuelve este archivo tal cual en index.html; no agrega ni
+  quita meta tags de este <head>.
+-->
+<title>NewCity</title>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+  import { boot } from './src/ui/app.js';
+  boot(document.getElementById('app'));
+</script>
+</body>
+</html>
