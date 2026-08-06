@@ -625,7 +625,7 @@ function renderTabBar(activeTab, t) {
   const items = TAB_ORDER.map((id) => {
     const isActive = id === activeTab;
     return `
-      <button type="button" class="${classNames(['nc-tab', isActive && 'nc-tab--active'])}" data-tab="${id}" role="tab" aria-selected="${isActive}">
+      <button type="button" class="${classNames(['nc-tab', isActive && 'nc-tab--active'])}" data-nav="${id}" role="tab" aria-selected="${isActive}">
         <span class="nc-tab-label">${escapeHtml(t(`tabs.${id}`))}</span>
       </button>`;
   }).join('\n');
