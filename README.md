@@ -24,7 +24,7 @@ Las siete pantallas del paciente (Inicio, Mi itinerario, Mapa y accesos, Plaza, 
 Todo lo que depende de esto sigue marcado `[POR CONFIRMAR]` / `unconfirmed: true` en pantalla, no como si fuera dato real:
 
 1. Planos oficiales del complejo (el mapa y las rutas son un esquema referencial provisional).
-2. Tipo de comida y horarios de Farmer's Table, The Yard y Boka — ¿hay algo más en Nivel 1?
+2. Tipo de comida y horarios de Farmer's Table, The Park Restaurante y Boka — ¿hay algo más en Nivel 1?
 3. Amenidades (cajeros, wifi, sanitarios, zonas pet-friendly) — hoy no hay ninguna representada, no hay dato real de ninguna.
 4. Horarios reales de Compass, Piso 27 y coordinación (hoy: 07:00–20:00 todos los días, placeholder).
 5. Cuál número es WhatsApp y cuál Google Voice (hoy se usa el mismo número real de los flyers en los dos campos).

@@ -39,7 +39,7 @@ Los pares mínimos que el v1 debe cubrir, en ambos sentidos donde aplique:
 | Lobby Torre Médica | Compass |
 | Lobby Torre Médica | Piso 27 |
 | Compass | Piso 27 |
-| Compass | Nivel 1 (Farmer's Table / The Yard) |
+| Compass | Nivel 1 (Farmer's Table / The Park Restaurante) |
 | Piso 27 | Nivel 1 |
 | Piso 27 | Farmacia |
 | Quartz Hotel & Spa | Lobby Torre Médica |

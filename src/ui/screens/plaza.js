@@ -1,4 +1,4 @@
-// Plaza — restaurantes (Farmer's Table, The Yard, Boka) con filtro por
+// Plaza — restaurantes (Farmer's Table, The Park Restaurante, Boka) con filtro por
 // tipo de comida, más amenidades en sección aparte (fase 05). Fase 03 no
 // confirmó ningún tipo de comida todavía (cuisine: [] en las tres) ni
 // ninguna amenidad real — el filtro se arma leyendo los tags que de verdad

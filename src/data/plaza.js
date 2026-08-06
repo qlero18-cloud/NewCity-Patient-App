@@ -1,8 +1,14 @@
 // Restaurantes de la Plaza (PRD §7 PlazaVenue, §13). Confirmado por el
-// cliente: Farmer's Table y The Yard están en Nivel 1; Boka está DENTRO
-// del Hotel Quartz, no en Nivel 1 (corrección explícita del cliente sobre
-// el primer borrador de la presentación — ver docs/DECISIONS.md D14 y la
-// nota de nomenclatura del PRD §13).
+// cliente: Farmer's Table y The Park Restaurante están en Nivel 1; Boka
+// está DENTRO del Hotel Quartz, no en Nivel 1 (corrección explícita del
+// cliente sobre el primer borrador de la presentación — ver
+// docs/DECISIONS.md D14 y la nota de nomenclatura del PRD §13).
+//
+// "The Yard" (nombre usado hasta la fase 06) se renombró a "The Park
+// Restaurante": el directorio oficial de la plaza (directorio-plaza-
+// exterior.pdf, aportado por el cliente en fase 07) ya no lo lista con el
+// nombre anterior, y el cliente confirmó que es el mismo local renombrado,
+// no un cierre — ver docs/DECISIONS.md D25.
 //
 // Tipo de comida y horario de los tres siguen sin confirmar (PRD §15.2:
 // "¿Hay algo más en Nivel 1?" tampoco tiene respuesta todavía), así que
@@ -40,6 +46,6 @@ function venue(id, name, level, mapPointId) {
 
 export const plazaVenues = [
   venue('farmers_table', "Farmer's Table", 'N1', 'mp_level1'),
-  venue('the_yard', 'The Yard', 'N1', 'mp_level1'),
+  venue('the_park', 'The Park Restaurante', 'N1', 'mp_level1'),
   venue('boka', 'Boka', 'Quartz', 'mp_quartz'),
 ];

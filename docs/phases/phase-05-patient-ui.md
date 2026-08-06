@@ -40,7 +40,7 @@ Mi pase se abre desde Inicio e Itinerario. Horarios y Mi estancia cuelgan de Ini
 
 **Mapa y accesos** — el mapa de la fase 04 más la ruta paso a paso: lista numerada, avance paso por paso y resaltado sincronizado en el mapa.
 
-**Plaza** — Farmer's Table y The Yard en Nivel 1, Boka dentro del Quartz, con filtro por tipo de comida. Amenidades en una segunda sección.
+**Plaza** — Farmer's Table y The Park Restaurante en Nivel 1, Boka dentro del Quartz, con filtro por tipo de comida. Amenidades en una segunda sección.
 
 **Horarios** — Compass, Piso 27 y coordinación, con indicador "abierto ahora / cerrado" calculado con `now` inyectado, nunca con el reloj leído dentro de la vista.
 

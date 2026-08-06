@@ -52,12 +52,12 @@ export const routes = [
 
   route('r_compass_nivel1', 'compass', 'nivel1', 4, [
     step(1, 'Sal de Compass hacia el Nivel 1.', 'Exit Compass toward Level 1.', 'mp_compass'),
-    step(2, 'Encontrarás Farmer\'s Table y The Yard en Nivel 1.', 'You\'ll find Farmer\'s Table and The Yard on Level 1.', 'mp_level1'),
+    step(2, 'Encontrarás Farmer\'s Table y The Park Restaurante en Nivel 1.', 'You\'ll find Farmer\'s Table and The Park Restaurante on Level 1.', 'mp_level1'),
   ]),
 
   route('r_piso27_nivel1', 'piso27', 'nivel1', 5, [
     step(1, 'Desde el piso 27, baja en el elevador de la Torre Médica.', 'From floor 27, take the Medical Tower elevator down.', 'mp_floor27'),
-    step(2, 'Nivel 1 tiene Farmer\'s Table y The Yard.', 'Level 1 has Farmer\'s Table and The Yard.', 'mp_level1'),
+    step(2, 'Nivel 1 tiene Farmer\'s Table y The Park Restaurante.', 'Level 1 has Farmer\'s Table and The Park Restaurante.', 'mp_level1'),
   ]),
 
   route('r_piso27_farmacia', 'piso27', 'farmacia', 5, [

@@ -28,7 +28,7 @@ test/map/ids.test.js
 | `mp_compass` | Compass — laboratorio e imagenología |
 | `mp_floor27` | Piso 27 — consultorios |
 | `mp_quartz` | Quartz Hotel & Spa — hospedaje, recovery y Boka |
-| `mp_level1` | Nivel 1 — Farmer's Table y The Yard |
+| `mp_level1` | Nivel 1 — Farmer's Table y The Park Restaurante |
 | `mp_pharmacy` | Farmacia |
 
 Cada punto: círculo tocable de al menos 44 × 44 px de área efectiva, con etiqueta. Al tocarlo se abre una ficha con nombre, qué hay ahí, horario y botón "cómo llegar".

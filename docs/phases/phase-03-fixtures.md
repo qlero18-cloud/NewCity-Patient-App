@@ -39,7 +39,7 @@ Confirmado por el cliente:
 - **Compass** — laboratorio e imagenología
 - **Piso 27** — consultorios
 - **Acceso general** — lobby de la Torre Médica
-- **Nivel 1** — Farmer's Table y The Yard
+- **Nivel 1** — Farmer's Table y The Park Restaurante
 - **Boka** — dentro del Hotel Quartz
 - Estacionamiento, farmacia, tienda de conveniencia
 

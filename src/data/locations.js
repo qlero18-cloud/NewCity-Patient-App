@@ -54,7 +54,7 @@ export const locations = [
   loc('compass', 'Compass · Laboratorio e imagenología', 'Compass · Lab & Imaging', 'lab_imaging', 'N1', 'mp_compass'),
   loc('piso27', 'Piso 27 · Consultorios', 'Floor 27 · Consultation Offices', 'consultorios', '27', 'mp_floor27'),
   loc('quartz', 'Quartz Hotel & Spa', 'Quartz Hotel & Spa', 'hotel', 'N1', 'mp_quartz'),
-  loc('nivel1', "Nivel 1 · Gastronomía (Farmer's Table, The Yard)", 'Level 1 · Dining (Farmer\'s Table, The Yard)', 'dining', 'N1', 'mp_level1'),
+  loc('nivel1', "Nivel 1 · Gastronomía (Farmer's Table, The Park Restaurante)", 'Level 1 · Dining (Farmer\'s Table, The Park Restaurante)', 'dining', 'N1', 'mp_level1'),
   // Nombre y ubicación exacta de la farmacia sin confirmar (PRD §15.6):
   // aquí va marcada unconfirmed a nivel de ubicación completa, no solo el
   // horario, porque más que el horario está pendiente.

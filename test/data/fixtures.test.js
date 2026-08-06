@@ -56,10 +56,10 @@ describe('locations.js — ubicaciones del complejo', () => {
 });
 
 describe('plaza.js — restaurantes (PRD §15.2: tipo de comida y horarios sin confirmar)', () => {
-  test('existen Farmer\'s Table y The Yard en Nivel 1, y Boka dentro del Quartz (no en Nivel 1)', () => {
+  test('existen Farmer\'s Table y The Park Restaurante en Nivel 1, y Boka dentro del Quartz (no en Nivel 1)', () => {
     const byName = Object.fromEntries(plazaVenues.map((v) => [v.name, v]));
     assert.strictEqual(byName["Farmer's Table"].mapPointId, 'mp_level1');
-    assert.strictEqual(byName['The Yard'].mapPointId, 'mp_level1');
+    assert.strictEqual(byName['The Park Restaurante'].mapPointId, 'mp_level1');
     assert.strictEqual(byName['Boka'].mapPointId, 'mp_quartz');
   });
 

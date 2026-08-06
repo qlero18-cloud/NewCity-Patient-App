@@ -345,7 +345,7 @@ Al abrir una cita, el origen propuesto es la ubicación de la cita anterior del 
 | **Mi itinerario** | Agenda e Itinerario | Línea de tiempo agrupada por día, con estado y distintivo "actualizado" |
 | **Mi pase** | Agenda e Itinerario | QPASS a pantalla completa, brillo alto, pantalla activa, funciona sin conexión |
 | **Mapa y accesos** | Mapa Dinámico y Accesos | Mapa SVG con puntos tocables; ruta paso a paso con resaltado por tramo |
-| **Plaza** | Directorio y Servicios | Farmer's Table y The Yard (Nivel 1), Boka (dentro del Quartz), con filtro por tipo de comida; amenidades |
+| **Plaza** | Directorio y Servicios | Farmer's Table y The Park Restaurante (Nivel 1), Boka (dentro del Quartz), con filtro por tipo de comida; amenidades |
 | **Horarios** | Horarios y Operaciones | Compass, Piso 27 y coordinación, con indicador "abierto ahora" |
 | **Mi estancia** | Información de Hospedaje | Reservación Quartz con botón copiar; desayuno y recovery si aplican |
 | **Ayuda** | Soporte y Contacto | WhatsApp (`wa.me`), llamada (`tel:`), horario de atención |
@@ -376,7 +376,7 @@ Navy `#1C2B53` · teal `#14BCC4` · blanco · tinte `#EEF3F8` · tipografía **B
 | **Compass** | Laboratorio e imagenología |
 | **Piso 27** | Consultorios |
 | **Acceso general** | Lobby de la Torre Médica |
-| **Nivel 1** | Gastronomía: Farmer's Table y The Yard |
+| **Nivel 1** | Gastronomía: Farmer's Table y The Park Restaurante |
 | **Boka** | Restaurante dentro del Hotel Quartz |
 
 ---
@@ -415,10 +415,10 @@ Navy `#1C2B53` · teal `#14BCC4` · blanco · tinte `#EEF3F8` · tipografía **B
 
 ## 15. Información pendiente del cliente
 
-1. **Planos oficiales del complejo** — bloqueo principal para las rutas paso a paso
-2. **Tipo de comida y horarios** de Farmer's Table, The Yard y Boka. ¿Hay algo más en el Nivel 1?
+1. **Planos oficiales del complejo** — bloqueo principal para las rutas paso a paso. Parcialmente resuelto en fase 07: el cliente aportó `directorio-plaza-exterior.pdf` (directorio de señalética de la plaza), que sí da distribución espacial real de Nivel Calle y Nivel Plaza — pero no cubre el interior de la Torre Médica piso por piso (Piso 27 no aparece ahí), así que las rutas siguen siendo un esquema referencial, no un plano a escala completo
+2. **Tipo de comida y horarios** de Farmer's Table, The Park Restaurante y Boka. ¿Hay algo más en el Nivel 1?
 3. **Amenidades** — cajeros, nombre de la red wifi, sanitarios, zonas pet-friendly
 4. **Horarios** de Compass, Piso 27 y del equipo de coordinación
 5. **Teléfonos** — cuál número es WhatsApp y cuál Google Voice. De los flyers solo tengo (619) 324.3116
-6. **Farmacia** — nombre y ubicación exacta
+6. ~~**Farmacia** — nombre y ubicación exacta~~ Resuelto en fase 07: "Farmacia La + Barata" (`directorio-plaza-exterior.pdf`, punto H4)
 7. **Formato real del QPASS** — qué codifica el `payload` y qué lectora lo lee, para decidir entre QR y Code128
