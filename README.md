@@ -23,7 +23,7 @@ Las siete pantallas del paciente (Inicio, Mi itinerario, Mapa y accesos, Plaza, 
 
 Todo lo que depende de esto sigue marcado `[POR CONFIRMAR]` / `unconfirmed: true` en pantalla, no como si fuera dato real:
 
-1. Planos oficiales del complejo — parcialmente resuelto (`directorio-plaza-exterior.pdf`, fase 07, D26): da la distribución real en dos niveles, pero no el interior de la Torre Médica piso por piso, así que el mapa y las rutas siguen siendo un esquema referencial.
+1. Planos oficiales del complejo — parcialmente resuelto (`directorio-plaza-exterior.pdf`, fase 07, D26 y D30): el mapa ya usa esa señalética real como fondo, en dos niveles, pero sigue sin cubrir el interior de la Torre Médica piso por piso (Piso 27 no aparece ahí), así que el mapa y las rutas siguen siendo un esquema referencial, no un plano a escala.
 2. Tipo de comida y horarios de Farmer's Table, The Park Restaurante, Boka y José Café — ¿hay algo más en Nivel 1?
 3. ~~Amenidades~~ Resuelto para cajeros, sanitarios, elevador, escaleras, rampa y valet (D27) — sigue faltando el nombre de la red wifi y zonas pet-friendly.
 4. Horarios reales de Compass, Piso 27 y coordinación (hoy: 07:00–20:00 todos los días, placeholder) — el directorio nuevo tampoco trae horarios de ningún local.
