@@ -417,7 +417,7 @@ Navy `#1C2B53` · teal `#14BCC4` · blanco · tinte `#EEF3F8` · tipografía **B
 
 1. **Planos oficiales del complejo** — bloqueo principal para las rutas paso a paso. Parcialmente resuelto en fase 07: el cliente aportó `directorio-plaza-exterior.pdf` (directorio de señalética de la plaza), que sí da distribución espacial real de Nivel Calle y Nivel Plaza — pero no cubre el interior de la Torre Médica piso por piso (Piso 27 no aparece ahí), así que las rutas siguen siendo un esquema referencial, no un plano a escala completo
 2. **Tipo de comida y horarios** de Farmer's Table, The Park Restaurante y Boka. ¿Hay algo más en el Nivel 1?
-3. **Amenidades** — cajeros, nombre de la red wifi, sanitarios, zonas pet-friendly
+3. ~~**Amenidades** — cajeros, sanitarios~~ Resuelto en fase 07 para cajeros, sanitarios, elevador, escaleras eléctricas, rampa para discapacitados, pago de estacionamiento, valet y emergencias (`directorio-plaza-exterior.pdf`) — sigue sin confirmar el **nombre de la red wifi** y **zonas pet-friendly**, que no aparecen en ese documento
 4. **Horarios** de Compass, Piso 27 y del equipo de coordinación
 5. **Teléfonos** — cuál número es WhatsApp y cuál Google Voice. De los flyers solo tengo (619) 324.3116
 6. ~~**Farmacia** — nombre y ubicación exacta~~ Resuelto en fase 07: "Farmacia La + Barata" (`directorio-plaza-exterior.pdf`, punto H4)

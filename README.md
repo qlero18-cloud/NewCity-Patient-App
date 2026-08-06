@@ -23,15 +23,15 @@ Las siete pantallas del paciente (Inicio, Mi itinerario, Mapa y accesos, Plaza, 
 
 Todo lo que depende de esto sigue marcado `[POR CONFIRMAR]` / `unconfirmed: true` en pantalla, no como si fuera dato real:
 
-1. Planos oficiales del complejo (el mapa y las rutas son un esquema referencial provisional).
-2. Tipo de comida y horarios de Farmer's Table, The Park Restaurante y Boka — ¿hay algo más en Nivel 1?
-3. Amenidades (cajeros, wifi, sanitarios, zonas pet-friendly) — hoy no hay ninguna representada, no hay dato real de ninguna.
-4. Horarios reales de Compass, Piso 27 y coordinación (hoy: 07:00–20:00 todos los días, placeholder).
+1. Planos oficiales del complejo — parcialmente resuelto (`directorio-plaza-exterior.pdf`, fase 07, D26): da la distribución real en dos niveles, pero no el interior de la Torre Médica piso por piso, así que el mapa y las rutas siguen siendo un esquema referencial.
+2. Tipo de comida y horarios de Farmer's Table, The Park Restaurante, Boka y José Café — ¿hay algo más en Nivel 1?
+3. ~~Amenidades~~ Resuelto para cajeros, sanitarios, elevador, escaleras, rampa y valet (D27) — sigue faltando el nombre de la red wifi y zonas pet-friendly.
+4. Horarios reales de Compass, Piso 27 y coordinación (hoy: 07:00–20:00 todos los días, placeholder) — el directorio nuevo tampoco trae horarios de ningún local.
 5. Cuál número es WhatsApp y cuál Google Voice (hoy se usa el mismo número real de los flyers en los dos campos).
-6. Nombre y ubicación exacta de la farmacia.
+6. ~~Nombre y ubicación exacta de la farmacia~~ Resuelto: "Farmacia La + Barata" (D26).
 7. Formato real del payload del QPASS y qué lectora lo lee — el generador de esta fase se acotó a versión 3/nivel M/modo byte (`docs/DECISIONS.md` D21) hasta saber qué hace falta de verdad.
 
-Además, sin resolver entre fases ya aprobadas: "tienda de conveniencia" aparece como contenido confirmado en `phase-03-fixtures.md` pero no tiene un `mapPointId` en los 7 fijos de `phase-04-map-svg.md` (D17) — falta que el cliente decida cómo se resuelve.
+Ya resuelto (antes listado aquí como hueco entre fases): "tienda de conveniencia" es 7-Eleven (D27) — `docs/DECISIONS.md` D17 queda marcada como resuelta.
 
 ## Prototipo publicado
 

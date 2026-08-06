@@ -708,10 +708,24 @@ const STRINGS = {
     plaza: {
       title: 'Plaza',
       restaurantsTitle: 'Restaurantes',
+      directoryTitle: 'Directorio',
       amenitiesTitle: 'Amenidades',
       amenitiesEmpty: 'Sin amenidades confirmadas todavía.',
       cuisineFilterAll: 'Todos',
       cuisineUnknown: 'Tipo de comida por confirmar',
+      category: {
+        gastronomia: 'Gastronomía',
+        salud: 'Salud',
+        belleza: 'Belleza',
+        servicios: 'Servicios',
+        moda: 'Moda',
+        amenidad: 'Amenidad',
+      },
+      level: {
+        calle: 'Nivel Calle',
+        plaza: 'Nivel Plaza',
+        ambos: 'Ambos niveles',
+      },
     },
     hours: {
       title: 'Horarios',
@@ -803,10 +817,24 @@ const STRINGS = {
     plaza: {
       title: 'Plaza',
       restaurantsTitle: 'Restaurants',
+      directoryTitle: 'Directory',
       amenitiesTitle: 'Amenities',
       amenitiesEmpty: 'No confirmed amenities yet.',
       cuisineFilterAll: 'All',
       cuisineUnknown: 'Cuisine to be confirmed',
+      category: {
+        gastronomia: 'Food',
+        salud: 'Health',
+        belleza: 'Beauty',
+        servicios: 'Services',
+        moda: 'Fashion',
+        amenidad: 'Amenity',
+      },
+      level: {
+        calle: 'Street Level',
+        plaza: 'Plaza Level',
+        ambos: 'Both levels',
+      },
     },
     hours: {
       title: 'Hours',
@@ -2626,7 +2654,7 @@ const PASS_SCREEN_CSS = `
 `;
 
 // --- src/data/plaza.js ---
-// Restaurantes de la Plaza (PRD §7 PlazaVenue, §13). Confirmado por el
+// Directorio de la Plaza (PRD §7 PlazaVenue, §13). Confirmado por el
 // cliente: Farmer's Table y The Park Restaurante están en Nivel 1; Boka
 // está DENTRO del Hotel Quartz, no en Nivel 1 (corrección explícita del
 // cliente sobre el primer borrador de la presentación — ver
@@ -2638,14 +2666,38 @@ const PASS_SCREEN_CSS = `
 // nombre anterior, y el cliente confirmó que es el mismo local renombrado,
 // no un cierre — ver docs/DECISIONS.md D25.
 //
-// Tipo de comida y horario de los tres siguen sin confirmar (PRD §15.2:
-// "¿Hay algo más en Nivel 1?" tampoco tiene respuesta todavía), así que
-// los tres venues van unconfirmed: true completos, no solo en hours.
+// Fase 07 (D27): el mismo documento trae los ~27 locales y amenidades
+// restantes de la plaza (Salud, Belleza, Servicios, Moda, más las
+// amenidades que PRD §15.3 marcaba como sin ningún dato real — cajeros,
+// sanitarios, elevador, escaleras, rampa, pago de estacionamiento, valet,
+// emergencias). Se agregan aquí con `category` (los 5 rótulos del propio
+// documento, más "amenidad"), no como "restaurant": ese type se queda
+// exclusivo de Gastronomía para no romper el filtro por tipo de comida ya
+// existente en pantalla.
 //
-// Amenidades (cajeros, wifi, sanitarios, zonas pet-friendly — PRD §15.3)
-// NO están representadas aquí: no hay ni nombre ni ubicación real de
-// ninguna. Inventar entradas placeholder sería peor que no tenerlas.
-// Cuando el cliente confirme, se agregan como PlazaVenue type: "amenity".
+// mapPointId: ninguno de estos 27 es un punto nuevo en el mapa SVG (fase
+// 04 fija exactamente 7 — D26 ya los reubicó en dos niveles reales). Cada
+// entrada nueva apunta al punto existente MÁS CERCANO en el documento de
+// referencia, no a uno propio: 27 círculos tocables más saturarían un
+// esquema de teléfono ya ajustado, y src/ui/screens/plaza.js no usa
+// mapPointId para "cómo llegar" (renderFicha, a diferencia de la ficha del
+// mapa, no tiene ese botón) — aquí es solo una referencia de zona, no un
+// destino de ruteo, así que aproximar es razonable. test/data/fixtures.test.js
+// ya prueba de forma genérica que todo mapPointId de este archivo existe
+// en la lista fija de la fase 04; eso sigue cumpliéndose porque no se
+// inventa ninguno nuevo.
+//
+// Tipo de comida y horario de gastronomía siguen sin confirmar (PRD
+// §15.2), y tampoco hay horario real de ningún local nuevo — todo sigue
+// unconfirmed: true completo, mismo criterio que los tres venues
+// originales.
+//
+// Dos códigos del documento comparten nombre de marca ("Luxor Óptica" en
+// H3 y en S5): se listan como dos entradas distintas (`luxor_optica_h3`,
+// `luxor_optica_s5`) en vez de asumir que es un error de imprenta — dos
+// sucursales de una misma óptica dentro del mismo complejo no es algo
+// inusual, y no hay forma de confirmar cuál sería "la" correcta si se
+// borrara una.
 
 // Nombre único a propósito, ver el mismo comentario en
 // src/data/locations.js: build.py (fase 05) aplana todos los módulos a un
@@ -2659,12 +2711,18 @@ function plazaOpeningHours() {
   };
 }
 
-function venue(id, name, level, mapPointId) {
+// category: 'gastronomia' | 'salud' | 'belleza' | 'servicios' | 'moda' | 'amenidad'
+// (los 5 rótulos tal cual los usa directorio-plaza-exterior.pdf, más
+// "amenidad" para los íconos de servicio sin marca propia). `type` se
+// deriva de category solo para las dos vistas que el PRD ya nombraba
+// (PlazaVenue type: "restaurant" | "amenity"); category es el dato real.
+function venue(id, name, category, level, mapPointId) {
   return {
     id,
     name,
-    type: 'restaurant',
-    cuisine: [], // PRD §15.2: tipo de comida sin confirmar
+    type: category === 'gastronomia' ? 'restaurant' : category === 'amenidad' ? 'amenity' : 'directory',
+    category,
+    cuisine: [], // PRD §15.2: tipo de comida sin confirmar (solo aplica a gastronomia)
     level,
     hours: plazaOpeningHours(),
     mapPointId,
@@ -2673,78 +2731,188 @@ function venue(id, name, level, mapPointId) {
 }
 
 const plazaVenues = [
-  venue('farmers_table', "Farmer's Table", 'N1', 'mp_level1'),
-  venue('the_park', 'The Park Restaurante', 'N1', 'mp_level1'),
-  venue('boka', 'Boka', 'Quartz', 'mp_quartz'),
+  // --- Gastronomía | Food ---
+  venue('farmers_table', "Farmer's Table", 'gastronomia', 'N1', 'mp_level1'),
+  venue('the_park', 'The Park Restaurante', 'gastronomia', 'N1', 'mp_level1'),
+  venue('boka', 'Boka', 'gastronomia', 'Quartz', 'mp_quartz'),
+  venue('jose_cafe', 'José Café', 'gastronomia', 'calle', 'mp_lobby'),
+
+  // --- Salud | Health ---
+  venue('dreyes_uniformes', "D'Reyes Uniformes Médicos", 'salud', 'calle', 'mp_parking'),
+  venue('previa_imagen_dental', 'Previa Imagen Dental', 'salud', 'calle', 'mp_parking'),
+  venue('luxor_optica_h3', 'Luxor Óptica', 'salud', 'calle', 'mp_pharmacy'),
+  venue('luxor_optica_s5', 'Luxor Óptica', 'salud', 'plaza', 'mp_compass'),
+  venue('hospital', 'Hospital', 'salud', 'calle', 'mp_lobby'),
+  venue('centro_luz_ada', 'Centro de Luz Ada', 'salud', 'calle', 'mp_lobby'),
+  venue('lumati', 'Lumati', 'salud', 'plaza', 'mp_compass'),
+  venue('rehab_ortopedia', 'Rehabilitación y Ortopedia Avanzada', 'salud', 'plaza', 'mp_compass'),
+
+  // --- Belleza | Beauty ---
+  venue('skin_point', 'Skin Point', 'belleza', 'calle', 'mp_parking'),
+
+  // --- Servicios | Services ---
+  venue('dr_zoo', 'Dr. Zoo', 'servicios', 'calle', 'mp_parking'),
+  venue('bankaool', 'Bankaool', 'servicios', 'calle', 'mp_parking'),
+  venue('reyes_room_barber', 'Reyes Room Barber Shop', 'servicios', 'calle', 'mp_parking'),
+  venue('credinspira', 'Credinspira', 'servicios', 'calle', 'mp_pharmacy'),
+  venue('emotion_tours', 'Emotion Tours', 'servicios', 'calle', 'mp_pharmacy'),
+  venue('medi_exchange', 'Medi Exchange', 'servicios', 'calle', 'mp_pharmacy'),
+  venue('seven_eleven', '7-Eleven', 'servicios', 'calle', 'mp_pharmacy'), // D17: resuelve "tienda de conveniencia"
+
+  // --- Moda | Fashion ---
+  venue('atalier_calzado', 'Atalier del Calzado', 'moda', 'calle', 'mp_parking'),
+  venue('slender_waist', 'Slender Waist', 'moda', 'calle', 'mp_pharmacy'),
+
+  // --- Amenidades (PRD §15.3: cajeros, sanitarios, etc. — antes sin ningún dato real) ---
+  // level aquí usa los mismos códigos ('calle' | 'plaza' | 'ambos') que
+  // src/ui/screens/plaza.js traduce vía t('plaza.level.*') — a diferencia
+  // de "N1"/"Quartz" en los venues de arriba (códigos cortos que se
+  // muestran tal cual, sin traducir, igual que desde fase 03), estos sí
+  // son palabras reales en español y deben verse traducidas en inglés.
+  venue('restrooms', { es: 'Baños', en: 'Restrooms' }, 'amenidad', 'ambos', 'mp_lobby'),
+  venue('atm', { es: 'Cajero automático', en: 'ATM' }, 'amenidad', 'calle', 'mp_lobby'),
+  venue('elevator', { es: 'Elevador', en: 'Elevator' }, 'amenidad', 'ambos', 'mp_lobby'),
+  venue('escalator', { es: 'Escaleras eléctricas', en: 'Escalator' }, 'amenidad', 'ambos', 'mp_lobby'),
+  venue('handicap_ramp', { es: 'Rampa para discapacitados', en: 'Handicap ramp' }, 'amenidad', 'calle', 'mp_parking'),
+  venue('parking_payment', { es: 'Pago de estacionamiento', en: 'Parking payment machine' }, 'amenidad', 'calle', 'mp_parking'),
+  venue('valet', { es: 'Valet', en: 'Valet parking' }, 'amenidad', 'calle', 'mp_lobby'),
+  venue('emergency', { es: 'Emergencias', en: 'Emergency' }, 'amenidad', 'calle', 'mp_lobby'),
 ];
 
 // --- src/ui/screens/plaza.js ---
-// Plaza — restaurantes (Farmer's Table, The Park Restaurante, Boka) con filtro por
-// tipo de comida, más amenidades en sección aparte (fase 05). Fase 03 no
-// confirmó ningún tipo de comida todavía (cuisine: [] en las tres) ni
-// ninguna amenidad real — el filtro se arma leyendo los tags que de verdad
-// existan en los datos (hoy: ninguno además de "Todos"), listo para cuando
-// haya dato real sin tocar este archivo otra vez.
+// Plaza — tres secciones sobre el mismo catálogo (src/data/plaza.js):
+// Restaurantes (category: gastronomia, con filtro por tipo de comida, sin
+// cambios de fase 05), Directorio (salud/belleza/servicios/moda, fase 07 —
+// D27) y Amenidades (antes siempre vacía, PRD §15.3 — fase 07 la llena con
+// dato real). Fase 03 no confirmó ningún tipo de comida todavía (cuisine:
+// [] en gastronomia) ni horario de ningún local — el filtro de comida se
+// arma leyendo los tags que de verdad existan (hoy: ninguno además de
+// "Todos"), listo para cuando haya dato real sin tocar este archivo otra
+// vez.
 
 
 
+
+// venue.name es un string (nombre de marca, igual en los dos idiomas —
+// "7-Eleven", "Skin Point") en la mayoría de los locales, pero un objeto
+// {es,en} en las amenidades (D27): "Baños"/"Restrooms" sí necesita
+// traducirse, a diferencia de una marca. Mismo patrón `?? .es` que ya usa
+// locationName() en util.js para Location.
+function venueName(venue, lang) {
+  if (typeof venue.name === 'string') return venue.name;
+  return venue.name[lang] ?? venue.name.es;
+}
+
+function byCategory(category) {
+  return plazaVenues.filter((v) => v.category === category);
+}
 
 function allCuisineTags() {
-  return [...new Set(plazaVenues.flatMap((v) => v.cuisine))].sort();
+  return [...new Set(byCategory('gastronomia').flatMap((v) => v.cuisine))].sort();
+}
+
+function allDirectoryCategories() {
+  // Orden fijo (el mismo del documento fuente), no alfabético.
+  return ['salud', 'belleza', 'servicios', 'moda'].filter((c) => byCategory(c).length > 0);
+}
+
+// venue.level es "N1"/"Quartz" (código corto, sin traducir, desde fase 03
+// — se muestra tal cual en los dos idiomas) en los venues originales, o
+// "calle"/"plaza"/"ambos" (D27) en los nuevos: esos SÍ son palabras reales
+// que deben traducirse, no códigos. LEVEL_KEYS distingue los dos casos sin
+// necesitar un campo aparte.
+const LEVEL_KEYS = new Set(['calle', 'plaza', 'ambos']);
+function levelLine(venue, t) {
+  return LEVEL_KEYS.has(venue.level) ? t(`plaza.level.${venue.level}`) : venue.level;
 }
 
 function venueLines(venue, t, lang) {
-  const cuisineLine = venue.cuisine.length > 0 ? venue.cuisine.join(', ') : t('plaza.cuisineUnknown');
-  const levelLine = venue.level;
-  return [cuisineLine, levelLine];
+  if (venue.category === 'gastronomia') {
+    const cuisineLine = venue.cuisine.length > 0 ? venue.cuisine.join(', ') : t('plaza.cuisineUnknown');
+    return [cuisineLine, levelLine(venue, t)];
+  }
+  if (venue.category === 'amenidad') {
+    return [levelLine(venue, t)];
+  }
+  return [t(`plaza.category.${venue.category}`), levelLine(venue, t)];
 }
 
 function renderPlazaScreen(ctx) {
   const { t, lang } = ctx;
-  const tags = allCuisineTags();
+  const cuisineTags = allCuisineTags();
+  const directoryCategories = allDirectoryCategories();
+  const amenities = byCategory('amenidad');
 
-  const filterHtml = `
+  const cuisineFilterHtml = `
     <div class="nc-cuisine-filter" role="group" aria-label="${escapeHtml(t('plaza.restaurantsTitle'))}">
       <button type="button" class="nc-chip nc-chip--active" data-cuisine="">${escapeHtml(t('plaza.cuisineFilterAll'))}</button>
-      ${tags.map((tag) => `<button type="button" class="nc-chip" data-cuisine="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`).join('\n')}
+      ${cuisineTags.map((tag) => `<button type="button" class="nc-chip" data-cuisine="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`).join('\n')}
     </div>
   `;
-
-  const venuesHtml = plazaVenues
-    .map((v) =>
-      `<div data-venue-cuisines="${escapeHtml(v.cuisine.join('|'))}">${renderFicha({
-        title: v.name,
-        lines: venueLines(v, t, lang),
-        unconfirmed: v.unconfirmed === true,
-        t,
-      })}</div>`
-    )
+  const restaurantsHtml = byCategory('gastronomia')
+    .map((v) => `<div data-venue-cuisines="${escapeHtml(v.cuisine.join('|'))}">${renderFicha({ title: venueName(v, lang), lines: venueLines(v, t, lang), unconfirmed: v.unconfirmed === true, t })}</div>`)
     .join('\n');
+
+  const categoryFilterHtml = `
+    <div class="nc-cuisine-filter" role="group" aria-label="${escapeHtml(t('plaza.directoryTitle'))}">
+      <button type="button" class="nc-chip nc-chip--active" data-category="">${escapeHtml(t('plaza.cuisineFilterAll'))}</button>
+      ${directoryCategories.map((c) => `<button type="button" class="nc-chip" data-category="${escapeHtml(c)}">${escapeHtml(t(`plaza.category.${c}`))}</button>`).join('\n')}
+    </div>
+  `;
+  const directoryHtml = directoryCategories
+    .flatMap((c) => byCategory(c))
+    .map((v) => `<div data-venue-category="${escapeHtml(v.category)}">${renderFicha({ title: venueName(v, lang), lines: venueLines(v, t, lang), unconfirmed: v.unconfirmed === true, t })}</div>`)
+    .join('\n');
+
+  const amenitiesHtml = amenities.length === 0
+    ? `<p class="nc-empty-state">${escapeHtml(t('plaza.amenitiesEmpty'))}</p>`
+    : amenities.map((v) => renderFicha({ title: venueName(v, lang), lines: venueLines(v, t, lang), unconfirmed: v.unconfirmed === true, t })).join('\n');
 
   return `
     <section class="nc-screen">
       <h1 class="nc-screen-title">${escapeHtml(t('plaza.title'))}</h1>
+
       <h2 class="nc-section-title">${escapeHtml(t('plaza.restaurantsTitle'))}</h2>
-      ${filterHtml}
-      <div class="nc-venue-list" data-role="venue-list">${venuesHtml}</div>
+      ${cuisineFilterHtml}
+      <div class="nc-venue-list" data-role="venue-list">${restaurantsHtml}</div>
+
+      <h2 class="nc-section-title">${escapeHtml(t('plaza.directoryTitle'))}</h2>
+      ${categoryFilterHtml}
+      <div class="nc-venue-list" data-role="directory-list">${directoryHtml}</div>
 
       <h2 class="nc-section-title">${escapeHtml(t('plaza.amenitiesTitle'))}</h2>
-      <p class="nc-empty-state">${escapeHtml(t('plaza.amenitiesEmpty'))}</p>
+      <div class="nc-venue-list" data-role="amenities-list">${amenitiesHtml}</div>
     </section>
   `;
 }
 
 function attachPlazaScreen(rootEl) {
-  const chips = rootEl.querySelectorAll('.nc-chip');
+  // data-cuisine y data-category no se traslapan (son dos filtros
+  // distintos, cada chip lleva solo uno de los dos atributos), así que
+  // seleccionar por atributo alcanza sin necesitar acotar por contenedor.
+  const cuisineChips = rootEl.querySelectorAll('[data-cuisine]');
   const venues = rootEl.querySelectorAll('[data-venue-cuisines]');
-  chips.forEach((chip) => {
+  cuisineChips.forEach((chip) => {
     chip.addEventListener('click', () => {
-      chips.forEach((c) => c.classList.remove('nc-chip--active'));
+      cuisineChips.forEach((c) => c.classList.remove('nc-chip--active'));
       chip.classList.add('nc-chip--active');
       const wanted = chip.dataset.cuisine;
       venues.forEach((v) => {
         const cuisines = v.dataset.venueCuisines.split('|').filter(Boolean);
         v.style.display = !wanted || cuisines.includes(wanted) ? '' : 'none';
+      });
+    });
+  });
+
+  const categoryChips = rootEl.querySelectorAll('[data-category]');
+  const directoryVenues = rootEl.querySelectorAll('[data-venue-category]');
+  categoryChips.forEach((chip) => {
+    chip.addEventListener('click', () => {
+      categoryChips.forEach((c) => c.classList.remove('nc-chip--active'));
+      chip.classList.add('nc-chip--active');
+      const wanted = chip.dataset.category;
+      directoryVenues.forEach((v) => {
+        v.style.display = !wanted || v.dataset.venueCategory === wanted ? '' : 'none';
       });
     });
   });
@@ -2754,7 +2922,7 @@ const PLAZA_CSS = `
 .nc-cuisine-filter { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .nc-chip { min-height: 44px; min-width: 44px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--nc-card-border); background: var(--nc-card-bg); color: var(--nc-ink); font: 600 12px Barlow, system-ui, sans-serif; cursor: pointer; }
 .nc-chip--active { background: var(--nc-teal); color: var(--nc-navy); border-color: var(--nc-teal); }
-.nc-venue-list { display: flex; flex-direction: column; gap: 8px; }
+.nc-venue-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
 .nc-empty-state { font-size: 13px; opacity: 0.65; }
 `;
 

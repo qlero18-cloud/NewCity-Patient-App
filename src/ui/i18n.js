@@ -67,10 +67,24 @@ export const STRINGS = {
     plaza: {
       title: 'Plaza',
       restaurantsTitle: 'Restaurantes',
+      directoryTitle: 'Directorio',
       amenitiesTitle: 'Amenidades',
       amenitiesEmpty: 'Sin amenidades confirmadas todavía.',
       cuisineFilterAll: 'Todos',
       cuisineUnknown: 'Tipo de comida por confirmar',
+      category: {
+        gastronomia: 'Gastronomía',
+        salud: 'Salud',
+        belleza: 'Belleza',
+        servicios: 'Servicios',
+        moda: 'Moda',
+        amenidad: 'Amenidad',
+      },
+      level: {
+        calle: 'Nivel Calle',
+        plaza: 'Nivel Plaza',
+        ambos: 'Ambos niveles',
+      },
     },
     hours: {
       title: 'Horarios',
@@ -162,10 +176,24 @@ export const STRINGS = {
     plaza: {
       title: 'Plaza',
       restaurantsTitle: 'Restaurants',
+      directoryTitle: 'Directory',
       amenitiesTitle: 'Amenities',
       amenitiesEmpty: 'No confirmed amenities yet.',
       cuisineFilterAll: 'All',
       cuisineUnknown: 'Cuisine to be confirmed',
+      category: {
+        gastronomia: 'Food',
+        salud: 'Health',
+        belleza: 'Beauty',
+        servicios: 'Services',
+        moda: 'Fashion',
+        amenidad: 'Amenity',
+      },
+      level: {
+        calle: 'Street Level',
+        plaza: 'Plaza Level',
+        ambos: 'Both levels',
+      },
     },
     hours: {
       title: 'Hours',
