@@ -44,6 +44,17 @@ import { escapeHtml, classNames, locationName, locationOptionsHtml } from '../..
 import { locations } from '../../../data/locations.js';
 import { renderCard } from '../../components/card.js';
 import { renderBadge } from '../../components/badge.js';
+import { renderFormErrors, renderRequestError } from './formErrors.js';
+
+// Etapa D — el servidor devuelve motivos por campo y esto los nombra. Las
+// llaves son las mismas etiquetas que ya pinta cada <label> del formulario,
+// para que el error diga exactamente el nombre que se ve en pantalla.
+const CAMPOS = {
+  serviceName: 'coordinator.itinerary.serviceNameLabel',
+  startsAt: 'coordinator.itinerary.startsAtLabel',
+  durationMin: 'coordinator.itinerary.durationLabel',
+  locationId: 'coordinator.itinerary.locationLabel',
+};
 
 // Formato que espera la store para startsAt. Se muestra como placeholder en
 // vez de dejar el campo mudo — mismo criterio que ya usan los dos campos de
@@ -183,7 +194,7 @@ function renderAddAppointmentForm(lang, t) {
 }
 
 export function renderItineraryScreen(ctx) {
-  const { store, visitId, lang, t } = ctx;
+  const { store, visitId, lang, t, errors, requestError } = ctx;
   const title = t('coordinator.itinerary.title');
   const record = store.getVisit(visitId);
 
@@ -224,34 +235,36 @@ export function renderItineraryScreen(ctx) {
     <section class="nc-screen">
       <h1 class="nc-screen-title">${escapeHtml(title)}</h1>
       ${body}
+      ${renderRequestError(requestError, t)}
+      ${renderFormErrors(errors, t, CAMPOS)}
       ${renderAddAppointmentForm(lang, t)}
     </section>
   `;
 }
 
-// ctx aquí además trae { now, onChange } (mismo contrato que el resto de
-// attach*Screen interactivos de esta fase): now nunca se lee del reloj
-// real aquí (eso es privilegio de src/ui/coordinatorApp.js, D20), y
-// onChange se llama después de cada mutación exitosa de la store para que
-// el router vuelva a pintar la pantalla con el estado nuevo.
+// ctx aquí además trae { onChange } (mismo contrato que el resto de
+// attach*Screen interactivos): onChange se llama con el RESULTADO de cada
+// mutación, no solo cuando salió bien, y el router decide qué pintar —
+// repintar con los datos nuevos, o el motivo por el que el servidor dijo
+// que no.
+//
+// Etapa D: `now` ya no se recibe ni se manda. La store llama a la API y la
+// hora de lo que se guarda la estampa el servidor, que es el único que
+// puede decirla igual para todas las coordinadoras.
 export function attachItineraryScreen(rootEl, ctx) {
-  const { store, visitId, now, onChange, t } = ctx;
+  const { store, visitId, onChange } = ctx;
 
   const form = rootEl.querySelector('[data-role="add-appointment-form"]');
-  form?.addEventListener('submit', (event) => {
+  form?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const fields = form.elements;
-    store.addAppointment(
-      visitId,
-      {
-        serviceName: fields.serviceName.value,
-        startsAt: fields.startsAt.value,
-        durationMin: Number(fields.durationMin.value),
-        locationId: fields.locationId.value,
-      },
-      now
-    );
-    onChange?.();
+    const res = await store.addAppointment(visitId, {
+      serviceName: fields.serviceName.value,
+      startsAt: fields.startsAt.value,
+      durationMin: Number(fields.durationMin.value),
+      locationId: fields.locationId.value,
+    });
+    onChange?.(res);
   });
 
   // D40 — los botones ya no piden datos: revelan el formulario inline de su
@@ -275,37 +288,32 @@ export function attachItineraryScreen(rootEl, ctx) {
   });
 
   rootEl.querySelectorAll('[data-role="move-appointment-form"]').forEach((moveForm) => {
-    moveForm.addEventListener('submit', (event) => {
+    moveForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const newStartsAt = moveForm.elements.moveStartsAt.value.trim();
       if (!newStartsAt) return;
-      store.moveAppointment(visitId, moveForm.dataset.appointmentId, newStartsAt, now);
-      onChange?.();
+      const res = await store.moveAppointment(visitId, moveForm.dataset.appointmentId, newStartsAt);
+      onChange?.(res);
     });
   });
 
   rootEl.querySelectorAll('[data-role="edit-appointment-form"]').forEach((editForm) => {
-    editForm.addEventListener('submit', (event) => {
+    editForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const fields = editForm.elements;
-      store.editAppointment(
-        visitId,
-        editForm.dataset.appointmentId,
-        {
-          serviceName: fields.editServiceName.value.trim(),
-          durationMin: Number(fields.editDurationMin.value),
-          locationId: fields.editLocationId.value,
-        },
-        now
-      );
-      onChange?.();
+      const res = await store.editAppointment(visitId, editForm.dataset.appointmentId, {
+        serviceName: fields.editServiceName.value.trim(),
+        durationMin: Number(fields.editDurationMin.value),
+        locationId: fields.editLocationId.value,
+      });
+      onChange?.(res);
     });
   });
 
   rootEl.querySelectorAll('[data-role="cancel-appointment"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      store.cancelAppointment(visitId, btn.dataset.appointmentId, now);
-      onChange?.();
+    btn.addEventListener('click', async () => {
+      const res = await store.cancelAppointment(visitId, btn.dataset.appointmentId);
+      onChange?.(res);
     });
   });
 }

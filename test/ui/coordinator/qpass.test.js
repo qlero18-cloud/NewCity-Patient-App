@@ -8,50 +8,65 @@
 // renderQpassScreen(ctx) — aserciones de substring, nunca un clic real ni
 // una carga de archivo real (FileReader no existe en este entorno; eso se
 // revisa en el navegador).
+//
+// Etapa D — los pases se emiten y se revocan contra el servidor, y `now`
+// desapareció de la firma: la hora del pase la pone quien lo guarda, no el
+// reloj de la máquina de coordinación. El store se arma contra el handler
+// real (test/helpers/loopback.js) para que un cambio de contrato se vea
+// aquí en la misma corrida.
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderQpassScreen, validateQpassFile, QPASS_MAX_BYTES } from '../../../src/ui/screens/coordinator/qpass.js';
 import { createCoordinatorStore } from '../../../src/ui/coordinatorStore.js';
+import { panelConVisita } from '../../helpers/loopback.js';
 import { translate } from '../../../src/ui/i18n.js';
-
-const NOW = '2026-03-10T10:00-07:00';
 
 function ctx(lang, store, visitId) {
   return { store, visitId, lang, t: (path) => translate(lang, path) };
 }
 
-function issueImagePass(store, visitId = 'v_demo1') {
-  return store.issueQpass(visitId, { format: 'image', payload: 'data:image/png;base64,AAAA', scope: 'torre' }, NOW);
+// Emite y truena si el servidor lo rechazó. Sin esto, una prueba de "ya
+// emitido" sobre una emisión fallida fallaría más adelante y culparía a la
+// pantalla de algo que hizo el servidor.
+async function emitir(store, visitId, input) {
+  const res = await store.issueQpass(visitId, {
+    format: 'image',
+    payload: 'data:image/png;base64,AAAA',
+    scope: 'torre',
+    ...input,
+  });
+  if (!res.ok) throw new Error(`el pase de prueba no se emitió: ${JSON.stringify(res)}`);
+  return res.qpass;
 }
 
 describe('renderQpassScreen — título, en los dos idiomas, antes y después de emitir', () => {
-  test('coordinator.qpass.title aparece siempre, sin importar el estado', () => {
+  test('coordinator.qpass.title aparece siempre, sin importar el estado', async () => {
     for (const lang of ['es', 'en']) {
-      const store = createCoordinatorStore();
-      assert.ok(renderQpassScreen(ctx(lang, store, 'v_demo1')).includes(translate(lang, 'coordinator.qpass.title')));
+      const { store, visit } = await panelConVisita({ lang });
+      assert.ok(renderQpassScreen(ctx(lang, store, visit.id)).includes(translate(lang, 'coordinator.qpass.title')));
 
-      issueImagePass(store);
-      assert.ok(renderQpassScreen(ctx(lang, store, 'v_demo1')).includes(translate(lang, 'coordinator.qpass.title')));
+      await emitir(store, visit.id);
+      assert.ok(renderQpassScreen(ctx(lang, store, visit.id)).includes(translate(lang, 'coordinator.qpass.title')));
     }
   });
 });
 
 describe('renderQpassScreen — formulario de carga (todavía sin QPass format:"image" emitido)', () => {
-  test('trae el input de archivo con accept="image/*" y data-role="qpass-image-input"', () => {
+  test('trae el input de archivo con accept="image/*" y data-role="qpass-image-input"', async () => {
     for (const lang of ['es', 'en']) {
-      const store = createCoordinatorStore();
-      const html = renderQpassScreen(ctx(lang, store, 'v_demo1'));
+      const { store, visit } = await panelConVisita({ lang });
+      const html = renderQpassScreen(ctx(lang, store, visit.id));
       assert.match(html, /<input[^>]*type="file"[^>]*>/, 'falta <input type="file">');
       assert.match(html, /data-role="qpass-image-input"/);
       assert.match(html, /accept="image\/\*"/);
     }
   });
 
-  test('el select de alcance trae data-role="qpass-scope-select" y las tres opciones de pass.scope.*, traducidas en los dos idiomas', () => {
+  test('el select de alcance trae data-role="qpass-scope-select" y las tres opciones de pass.scope.*, traducidas en los dos idiomas', async () => {
     for (const lang of ['es', 'en']) {
-      const store = createCoordinatorStore();
-      const html = renderQpassScreen(ctx(lang, store, 'v_demo1'));
+      const { store, visit } = await panelConVisita({ lang });
+      const html = renderQpassScreen(ctx(lang, store, visit.id));
       assert.match(html, /data-role="qpass-scope-select"/);
       for (const scope of ['torre', 'piso27', 'estacionamiento']) {
         assert.match(html, new RegExp(`<option value="${scope}"`), `falta <option value="${scope}">`);
@@ -60,47 +75,51 @@ describe('renderQpassScreen — formulario de carga (todavía sin QPass format:"
     }
   });
 
-  test('el botón "Emitir" trae data-role="issue-qpass" y el atributo disabled antes de subir imagen', () => {
-    const store = createCoordinatorStore();
-    const html = renderQpassScreen(ctx('es', store, 'v_demo1'));
+  test('el botón "Emitir" trae data-role="issue-qpass" y el atributo disabled antes de subir imagen', async () => {
+    const { store, visit } = await panelConVisita();
+    const html = renderQpassScreen(ctx('es', store, visit.id));
     assert.match(html, /data-role="issue-qpass"[^>]*disabled/, 'el botón de emitir debería venir disabled sin imagen subida');
     assert.ok(html.includes(translate('es', 'coordinator.qpass.issue')));
   });
 
-  test('la vista previa (data-role="qpass-preview") muestra coordinator.qpass.noImage antes de subir nada', () => {
+  test('la vista previa (data-role="qpass-preview") muestra coordinator.qpass.noImage antes de subir nada', async () => {
     for (const lang of ['es', 'en']) {
-      const store = createCoordinatorStore();
-      const html = renderQpassScreen(ctx(lang, store, 'v_demo1'));
+      const { store, visit } = await panelConVisita({ lang });
+      const html = renderQpassScreen(ctx(lang, store, visit.id));
       assert.match(html, /data-role="qpass-preview"/);
       assert.ok(html.includes(translate(lang, 'coordinator.qpass.noImage')));
       assert.ok(!html.includes('<img'), 'no debería haber ninguna <img> antes de subir una imagen');
     }
   });
 
-  test('no muestra el distintivo de emitido ni el control data-nav="pass-preview" antes de emitir', () => {
-    const store = createCoordinatorStore();
-    const html = renderQpassScreen(ctx('es', store, 'v_demo1'));
+  test('no muestra el distintivo de emitido ni el control data-nav="pass-preview" antes de emitir', async () => {
+    const { store, visit } = await panelConVisita();
+    const html = renderQpassScreen(ctx('es', store, visit.id));
     assert.ok(!html.includes(translate('es', 'coordinator.qpass.issuedBadge')));
     assert.ok(!html.includes('data-nav="pass-preview"'));
   });
 
-  test('un QPass qr/code128 ya existente en las fixtures (v_demo1 trae q1/q2) NO cuenta como "emitido" para este flujo', () => {
-    // v_demo1 en src/data/fixtures.js ya trae pases qr/code128 (q1, q2) —
-    // el estado "emitido" de ESTA pantalla es específico a format:'image'
-    // (D29), no "la visita ya tiene algún QPass".
-    const store = createCoordinatorStore();
-    const html = renderQpassScreen(ctx('es', store, 'v_demo1'));
+  test('un QPass qr/code128 ya emitido NO cuenta como "emitido" para este flujo', async () => {
+    // El estado "emitido" de ESTA pantalla es específico a format:'image'
+    // (D29), no "la visita ya tiene algún QPass". Antes esto se apoyaba en
+    // los pases q1/q2 de las fixtures; ahora se emiten de verdad contra el
+    // servidor, que es la misma condición sin depender de datos de demo.
+    const { store, visit } = await panelConVisita();
+    await emitir(store, visit.id, { format: 'qr', payload: 'NCH|v1|demo' });
+    await emitir(store, visit.id, { format: 'code128', payload: 'NCH0001', scope: 'piso27' });
+
+    const html = renderQpassScreen(ctx('es', store, visit.id));
     assert.ok(html.includes('data-role="qpass-image-input"'), 'debería seguir mostrando el formulario de carga');
     assert.ok(!html.includes(translate('es', 'coordinator.qpass.issuedBadge')));
   });
 });
 
 describe('renderQpassScreen — después de emitir (store.issueQpass ya llamado directamente sobre el store)', () => {
-  test('muestra coordinator.qpass.issuedBadge y un control data-nav="pass-preview" con coordinator.qpass.viewAsPatient, ya no el formulario de carga', () => {
+  test('muestra coordinator.qpass.issuedBadge y un control data-nav="pass-preview" con coordinator.qpass.viewAsPatient, ya no el formulario de carga', async () => {
     for (const lang of ['es', 'en']) {
-      const store = createCoordinatorStore();
-      issueImagePass(store);
-      const html = renderQpassScreen(ctx(lang, store, 'v_demo1'));
+      const { store, visit } = await panelConVisita({ lang });
+      await emitir(store, visit.id);
+      const html = renderQpassScreen(ctx(lang, store, visit.id));
 
       assert.ok(html.includes(translate(lang, 'coordinator.qpass.issuedBadge')));
       assert.match(html, /data-nav="pass-preview"/);
@@ -113,21 +132,37 @@ describe('renderQpassScreen — después de emitir (store.issueQpass ya llamado 
       assert.ok(!html.includes('data-role="issue-qpass"'));
     }
   });
+
+  // Etapa D: el pase queda en Blobs, no en la memoria de esta pestaña.
+  // Es la mitad de #16 que le toca a esta pantalla — antes, recargar
+  // después de emitir devolvía el formulario de carga como si nunca se
+  // hubiera emitido nada.
+  test('otro store contra el mismo servidor ve el pase emitido tras loadVisit', async () => {
+    const { store, api, visit } = await panelConVisita();
+    await emitir(store, visit.id);
+
+    const otraSesion = createCoordinatorStore({ api });
+    const carga = await otraSesion.loadVisit(visit.id);
+    assert.strictEqual(carga.ok, true, 'precondición: el expediente debe cargarse');
+
+    const html = renderQpassScreen(ctx('es', otraSesion, visit.id));
+    assert.ok(html.includes(translate('es', 'coordinator.qpass.issuedBadge')), 'el pase emitido se perdió al recargar');
+  });
 });
 
 describe('renderQpassScreen — convención data-nav (D28: nunca data-tab/data-route/data-target)', () => {
-  test('el formulario de carga (antes de emitir) no usa data-tab/data-route/data-target', () => {
-    const store = createCoordinatorStore();
-    const html = renderQpassScreen(ctx('es', store, 'v_demo1'));
+  test('el formulario de carga (antes de emitir) no usa data-tab/data-route/data-target', async () => {
+    const { store, visit } = await panelConVisita();
+    const html = renderQpassScreen(ctx('es', store, visit.id));
     assert.doesNotMatch(html, /data-tab=/);
     assert.doesNotMatch(html, /data-route=/);
     assert.doesNotMatch(html, /data-target=/);
   });
 
-  test('la vista de emitido tampoco usa data-tab/data-route/data-target — solo data-nav="pass-preview"', () => {
-    const store = createCoordinatorStore();
-    issueImagePass(store);
-    const html = renderQpassScreen(ctx('es', store, 'v_demo1'));
+  test('la vista de emitido tampoco usa data-tab/data-route/data-target — solo data-nav="pass-preview"', async () => {
+    const { store, visit } = await panelConVisita();
+    await emitir(store, visit.id);
+    const html = renderQpassScreen(ctx('es', store, visit.id));
     assert.doesNotMatch(html, /data-tab=/);
     assert.doesNotMatch(html, /data-route=/);
     assert.doesNotMatch(html, /data-target=/);
@@ -136,8 +171,8 @@ describe('renderQpassScreen — convención data-nav (D28: nunca data-tab/data-r
 });
 
 describe('renderQpassScreen — visita inexistente (guardia defensiva, store.getVisit -> null)', () => {
-  test('no revienta, no muestra el formulario de carga ni el estado emitido', () => {
-    const store = createCoordinatorStore();
+  test('no revienta, no muestra el formulario de carga ni el estado emitido', async () => {
+    const { store } = await panelConVisita();
     const html = renderQpassScreen(ctx('es', store, 'no-existe'));
     assert.ok(html.includes('<section class="nc-screen'));
     assert.ok(html.includes(translate('es', 'coordinator.qpass.title')));
@@ -193,11 +228,11 @@ describe('validateQpassFile — validación de la imagen subida (Etapa A, #4)', 
 });
 
 describe('renderQpassScreen — re-emitir y revocar (Etapa A, #3)', () => {
-  test('la vista de emitido ofrece re-emitir y revocar: emitir ya no era una puerta de un solo sentido', () => {
-    const store = createCoordinatorStore();
-    store.issueQpass('v_demo2', { format: 'image', payload: 'data:image/png;base64,AAA', scope: 'torre' }, NOW);
+  test('la vista de emitido ofrece re-emitir y revocar: emitir ya no era una puerta de un solo sentido', async () => {
     for (const lang of ['es', 'en']) {
-      const html = renderQpassScreen(ctx(lang, store, 'v_demo2'));
+      const { store, visit } = await panelConVisita({ lang });
+      await emitir(store, visit.id, { payload: 'data:image/png;base64,AAA' });
+      const html = renderQpassScreen(ctx(lang, store, visit.id));
       assert.ok(html.includes('data-role="reissue-qpass"'), `falta el control de re-emitir en ${lang}`);
       assert.ok(html.includes('data-role="revoke-qpass"'), `falta el control de revocar en ${lang}`);
       assert.ok(html.includes(translate(lang, 'coordinator.qpass.reissue')), `falta el texto de re-emitir en ${lang}`);
@@ -205,21 +240,34 @@ describe('renderQpassScreen — re-emitir y revocar (Etapa A, #3)', () => {
     }
   });
 
-  test('tras revocar el pase de imagen, la pantalla vuelve al formulario de carga', () => {
-    const store = createCoordinatorStore();
-    const pass = store.issueQpass('v_demo2', { format: 'image', payload: 'data:image/png;base64,AAA', scope: 'torre' }, NOW);
-    store.revokeQpass('v_demo2', pass.id, NOW);
-    const html = renderQpassScreen(ctx('es', store, 'v_demo2'));
+  test('tras revocar el pase de imagen, la pantalla vuelve al formulario de carga', async () => {
+    const { store, visit } = await panelConVisita();
+    const pass = await emitir(store, visit.id, { payload: 'data:image/png;base64,AAA' });
+    const revocado = await store.revokeQpass(visit.id, pass.id);
+    assert.strictEqual(revocado.ok, true, 'precondición: la revocación debe haber funcionado');
+
+    const html = renderQpassScreen(ctx('es', store, visit.id));
     assert.ok(html.includes('data-role="qpass-image-input"'), 'debería volver a ofrecer la carga de imagen');
     assert.ok(!html.includes(translate('es', 'coordinator.qpass.issuedBadge')), 'no debería seguir diciendo "emitido"');
   });
 
-  test('un pase revocado NO cuenta como emitido, aunque siga en la lista de pases (queda como rastro)', () => {
-    const store = createCoordinatorStore();
-    const pass = store.issueQpass('v_demo2', { format: 'image', payload: 'data:image/png;base64,AAA', scope: 'torre' }, NOW);
-    store.revokeQpass('v_demo2', pass.id, NOW);
-    const { passes } = store.getVisitWithPasses('v_demo2');
+  test('un pase revocado NO cuenta como emitido, aunque siga en la lista de pases (queda como rastro)', async () => {
+    const { store, visit } = await panelConVisita();
+    const pass = await emitir(store, visit.id, { payload: 'data:image/png;base64,AAA' });
+    await store.revokeQpass(visit.id, pass.id);
+
+    const { passes } = store.getVisitWithPasses(visit.id);
     assert.ok(passes.some((p) => p.id === pass.id), 'el pase revocado no debe borrarse: es historial');
     assert.ok(passes.find((p) => p.id === pass.id).revokedAt, 'debería quedar marcado con revokedAt');
+  });
+
+  // Etapa D: revocar un pase que ya no está (dos coordinadoras sobre la
+  // misma visita, o el botón picado dos veces) no puede tronar la
+  // pantalla. Tiene que ser un fallo con nombre que el panel sepa pintar.
+  test('revocar un pase inexistente devuelve notFound, no una excepción', async () => {
+    const { store, visit } = await panelConVisita();
+    const res = await store.revokeQpass(visit.id, 'q_no_existe');
+    assert.strictEqual(res.ok, false);
+    assert.strictEqual(res.notFound, true);
   });
 });

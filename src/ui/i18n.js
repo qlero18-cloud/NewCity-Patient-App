@@ -141,6 +141,46 @@ export const STRINGS = {
       // resolvía por su cuenta con un `lang === 'en' ? … : …` escrito a
       // mano, y hospedaje ni siquiera mostraba nada.
       visitNotFound: 'No encontramos esa visita.',
+      // Etapa D — el hueco entre pedir los datos y tenerlos. Antes no
+      // existía: el panel arrancaba con una copia de las fixtures ya en
+      // memoria.
+      loading: 'Cargando…',
+      retry: 'Reintentar',
+      // Etapa D — sesión de coordinación. La Etapa C construyó
+      // /api/auth/*, pero el panel no tenía por dónde entrar.
+      auth: {
+        title: 'Coordinación NewCity',
+        intro: 'Entra con tu cuenta para capturar y editar visitas.',
+        usernameLabel: 'Usuario',
+        passwordLabel: 'Contraseña',
+        signIn: 'Entrar',
+        signingIn: 'Entrando…',
+        signOut: 'Salir',
+        checking: 'Verificando sesión…',
+        // Un solo mensaje para usuario inexistente, contraseña mala y
+        // cuenta bloqueada, porque el servidor da una sola respuesta para
+        // los tres (authHandler.js:38): decir cuál de los tres fue le
+        // sirve más a quien prueba usuarios que a quien olvidó su clave.
+        invalidCredentials: 'Usuario o contraseña incorrectos.',
+        expired: 'Tu sesión terminó. Vuelve a entrar.',
+      },
+      // Motivos que devuelve el servidor, por campo. Vienen como códigos
+      // sin idioma (`required`, `unknown`, …) justamente para poder
+      // traducirlos aquí: la respuesta HTTP no depende del idioma de quien
+      // la pidió. Compartidos por los cuatro formularios del panel.
+      error: {
+        required: 'Este dato es obligatorio.',
+        unknown: 'Esa opción no existe. Elige una de la lista.',
+        unsupported: 'Esa opción no está permitida.',
+        invalidDate: 'Fecha no reconocida. Usa el formato 2026-03-09T15:00-07:00.',
+        noOffset: 'Falta la zona horaria. Termina la fecha con -07:00.',
+        order: 'La fecha de fin debe ser posterior a la de inicio.',
+        tooLong: 'Ese texto es demasiado largo.',
+        invalid: 'Ese dato no es válido.',
+        // Fallas que no son de ningún campo.
+        gone: 'Esa visita ya no existe. Vuelve a la lista.',
+        network: 'No pudimos guardar: revisa la conexión e inténtalo otra vez.',
+      },
       visits: {
         title: 'Visitas',
         empty: 'No hay visitas todavía.',
@@ -319,6 +359,32 @@ export const STRINGS = {
       backToVisits: 'Back to visits',
       subnavLabel: 'Visit navigation',
       visitNotFound: 'We couldn’t find that visit.',
+      loading: 'Loading…',
+      retry: 'Retry',
+      auth: {
+        title: 'NewCity Coordination',
+        intro: 'Sign in with your account to create and edit visits.',
+        usernameLabel: 'Username',
+        passwordLabel: 'Password',
+        signIn: 'Sign in',
+        signingIn: 'Signing in…',
+        signOut: 'Sign out',
+        checking: 'Checking session…',
+        invalidCredentials: 'Incorrect username or password.',
+        expired: 'Your session ended. Please sign in again.',
+      },
+      error: {
+        required: 'This field is required.',
+        unknown: 'That option doesn’t exist. Pick one from the list.',
+        unsupported: 'That option isn’t allowed.',
+        invalidDate: 'We couldn’t read that date. Use the format 2026-03-09T15:00-07:00.',
+        noOffset: 'The time zone is missing. End the date with -07:00.',
+        order: 'The end date must be after the start date.',
+        tooLong: 'That text is too long.',
+        invalid: 'That value isn’t valid.',
+        gone: 'That visit no longer exists. Go back to the list.',
+        network: 'We couldn’t save: check your connection and try again.',
+      },
       visits: {
         title: 'Visits',
         empty: 'No visits yet.',

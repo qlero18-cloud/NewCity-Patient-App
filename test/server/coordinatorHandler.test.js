@@ -1,0 +1,555 @@
+// Etapa D — el endpoint de coordinación. Se escribe antes que el módulo.
+//
+// Lo que estas pruebas fijan, en orden de importancia:
+//
+//   1. TODA ruta exige sesión. Es un expediente clínico: una sola ruta que
+//      se salte el guardia deja el resto de la Etapa C sin sentido. Hay una
+//      prueba que recorre la lista de rutas en vez de nombrarlas una por
+//      una, para que una ruta nueva sin guardia no pase inadvertida.
+//   2. La firma de auditoría sale de la SESIÓN, nunca del cuerpo. Si el
+//      cliente pudiera mandar `by`, las cuentas individuales serían
+//      decorativas.
+//   3. Datos inválidos son 422 y no-existe es 404. Un null para las dos
+//      cosas obliga a quien llama a adivinar.
+
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { handleCoordinatorRequest, COORDINATOR_PREFIX } from '../../src/server/coordinatorHandler.js';
+import { createVisitStore } from '../../src/server/visitStore.js';
+
+const AHORA = '2026-03-10T09:00:00.000-07:00';
+const SESION = 'sesion-de-ana';
+
+function memoriaKv() {
+  const m = new Map();
+  return {
+    async get(k) {
+      return m.has(k) ? structuredClone(m.get(k)) : null;
+    },
+    async set(k, v) {
+      m.set(k, structuredClone(v));
+    },
+    async delete(k) {
+      m.delete(k);
+    },
+    async list(prefix) {
+      return [...m.keys()].filter((k) => k.startsWith(prefix));
+    },
+  };
+}
+
+// Doble del guardia de la Etapa C: el handler no debe saber CÓMO se
+// autentica, solo que alguien le dice quién es. Autentica si viene la
+// cookie de prueba y rechaza si no, que es todo el contrato que consume.
+function guardiaDoble({ cuenta = { username: 'ana.ruiz', name: 'Ana Ruiz' } } = {}) {
+  const llamadas = [];
+  return {
+    llamadas,
+    async requireCoordinator(request) {
+      llamadas.push(request.url);
+      if (request.headers.get('cookie')?.includes(SESION)) return { ok: true, account: cuenta };
+      return {
+        ok: false,
+        response: new Response(JSON.stringify({ error: 'unauthenticated' }), { status: 401 }),
+      };
+    },
+  };
+}
+
+let contador = 0;
+function deps(extra = {}) {
+  const kv = memoriaKv();
+  const store = createVisitStore(kv, {
+    generateToken: () => `tok${(contador += 1)}`.padEnd(22, 'x'),
+    generateVisitId: () => `v_${contador}`,
+  });
+  const guardia = guardiaDoble(extra.guardia ?? {});
+  return {
+    store,
+    guardia,
+    deps: {
+      store,
+      requireCoordinator: guardia.requireCoordinator,
+      now: AHORA,
+      newId: (p) => `${p}_${(contador += 1)}`,
+      ...extra.deps,
+    },
+  };
+}
+
+const url = (ruta) => `https://nch.test${COORDINATOR_PREFIX}${ruta}`;
+
+function pedir(ruta, { method = 'GET', body, conSesion = true } = {}) {
+  const headers = { 'content-type': 'application/json' };
+  if (conSesion) headers.cookie = `nc_session=${SESION}`;
+  return new Request(url(ruta), {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+const VISITA = {
+  patientFirstName: 'Ana',
+  lang: 'es',
+  startsAt: '2026-03-10T08:00:00.000-07:00',
+  endsAt: '2026-03-11T20:00:00.000-07:00',
+};
+
+const CITA = {
+  startsAt: '2026-03-10T11:30:00.000-07:00',
+  durationMin: 45,
+  serviceName: 'Resonancia',
+  locationId: 'compass',
+};
+
+async function conVisita(d) {
+  const res = await handleCoordinatorRequest(pedir('/visits', { method: 'POST', body: VISITA }), d);
+  return (await res.json()).visit.id;
+}
+
+describe('el guardia de sesión', () => {
+  // Se enumeran aquí para poder recorrerlas todas: una ruta nueva sin
+  // guardia es el error que más caro sale y el más fácil de cometer.
+  const RUTAS = [
+    ['GET', '/visits'],
+    ['POST', '/visits'],
+    ['GET', '/visits/v_1'],
+    ['POST', '/visits/v_1/appointments'],
+    ['PATCH', '/visits/v_1/appointments/a_1'],
+    ['PUT', '/visits/v_1/lodging'],
+    ['POST', '/visits/v_1/passes'],
+    ['PATCH', '/visits/v_1/passes/q_1'],
+  ];
+
+  for (const [method, ruta] of RUTAS) {
+    test(`${method} ${ruta} sin sesión da 401`, async () => {
+      const { deps: d } = deps();
+      // Sin cuerpo en GET: `new Request` lo prohíbe, y el guardia no lo mira.
+      const body = method === 'GET' ? undefined : {};
+      const res = await handleCoordinatorRequest(pedir(ruta, { method, body, conSesion: false }), d);
+      assert.equal(res.status, 401);
+    });
+  }
+
+  test('el guardia corre ANTES de mirar el cuerpo o la ruta', async () => {
+    // Si validara primero, un 422 sobre una petición sin sesión ya habría
+    // dicho que la ruta existe y qué campos espera.
+    const { deps: d, store } = deps();
+    const res = await handleCoordinatorRequest(
+      pedir('/visits', { method: 'POST', body: { basura: true }, conSesion: false }),
+      d,
+    );
+    assert.equal(res.status, 401);
+    assert.deepEqual(await store.listVisits(), [], 'nada se escribió');
+  });
+
+  test('una ruta desconocida bajo el prefijo da 404, no 500', async () => {
+    const { deps: d } = deps();
+    const res = await handleCoordinatorRequest(pedir('/visits/v_1/inventado', { method: 'POST', body: {} }), d);
+    assert.equal(res.status, 404);
+  });
+
+  test('el método equivocado da 405, no 404', async () => {
+    const { deps: d } = deps();
+    const res = await handleCoordinatorRequest(pedir('/visits', { method: 'DELETE' }), d);
+    assert.equal(res.status, 405);
+  });
+});
+
+describe('POST /visits — alta', () => {
+  test('crea la visita y DEVUELVE el token', async () => {
+    // Esto es lo que preguntaste al principio: hoy createVisit acuña un
+    // token y el router lo tira. Sin él no hay nada que mandarle al
+    // paciente, y la Etapa E no tendría de dónde sacar el QR.
+    const { deps: d } = deps();
+    const res = await handleCoordinatorRequest(pedir('/visits', { method: 'POST', body: VISITA }), d);
+
+    assert.equal(res.status, 201);
+    const { visit } = await res.json();
+    assert.ok(visit.token, 'el token viaja de vuelta a quien creó la visita');
+    assert.equal(visit.patientFirstName, 'Ana');
+    assert.equal(visit.status, 'active');
+  });
+
+  test('firma quién la creó', async () => {
+    const { deps: d } = deps();
+    const res = await handleCoordinatorRequest(pedir('/visits', { method: 'POST', body: VISITA }), d);
+    assert.equal((await res.json()).visit.createdBy, 'ana.ruiz');
+  });
+
+  test('datos inválidos: 422 con los motivos por campo', async () => {
+    const { deps: d, store } = deps();
+    const res = await handleCoordinatorRequest(
+      pedir('/visits', { method: 'POST', body: { ...VISITA, lang: 'fr', startsAt: '' } }),
+      d,
+    );
+
+    assert.equal(res.status, 422);
+    const { errors } = await res.json();
+    assert.equal(errors.lang, 'unsupported');
+    assert.equal(errors.startsAt, 'required');
+    assert.deepEqual(await store.listVisits(), [], 'no queda una visita a medias');
+  });
+
+  test('un cuerpo que no es JSON da 400, no 500', async () => {
+    const { deps: d } = deps();
+    const req = new Request(url('/visits'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: `nc_session=${SESION}` },
+      body: '{roto',
+    });
+    assert.equal((await handleCoordinatorRequest(req, d)).status, 400);
+  });
+});
+
+describe('GET /visits — lista', () => {
+  test('lista sin token: la lista no es donde se reparten credenciales', async () => {
+    // El token sale UNA vez, al crear, y después solo por la ruta de una
+    // visita concreta. Una lista que los trae todos convierte cualquier
+    // fuga de esa respuesta en una fuga de todos los expedientes.
+    const { deps: d } = deps();
+    await conVisita(d);
+    await conVisita(d);
+
+    const res = await handleCoordinatorRequest(pedir('/visits'), d);
+    assert.equal(res.status, 200);
+    const { visits } = await res.json();
+    assert.equal(visits.length, 2);
+    for (const v of visits) assert.equal(v.token, undefined);
+  });
+});
+
+describe('GET /visits/:id', () => {
+  test('trae el expediente completo', async () => {
+    const { deps: d } = deps();
+    const id = await conVisita(d);
+    await handleCoordinatorRequest(pedir(`/visits/${id}/appointments`, { method: 'POST', body: CITA }), d);
+
+    const res = await handleCoordinatorRequest(pedir(`/visits/${id}`), d);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.visit.id, id);
+    assert.equal(body.appointments.length, 1);
+    assert.ok(body.visit.token, 'aquí sí: es la ruta para reenviarle el enlace al paciente');
+  });
+
+  test('una visita vencida SIGUE siendo consultable por coordinación', async () => {
+    // getVisitByToken aplica R1; getVisit no, y es a propósito: lo que
+    // caduca es el enlace del paciente, no el expediente. Si esta ruta
+    // aplicara caducidad, una visita de la semana pasada sería
+    // irrecuperable para quien la capturó.
+    const { deps: d } = deps();
+    const id = await conVisita(d);
+
+    const res = await handleCoordinatorRequest(pedir(`/visits/${id}`), {
+      ...d,
+      now: '2027-01-01T00:00:00.000-07:00',
+    });
+    assert.equal(res.status, 200);
+  });
+
+  test('visita inexistente: 404 con el mismo cuerpo en toda ruta', async () => {
+    // #11 del reporte: hoy "visita no encontrada" se comporta distinto
+    // según por dónde entres.
+    const { deps: d } = deps();
+    const rutas = [
+      ['GET', '/visits/v_fantasma', undefined],
+      ['POST', '/visits/v_fantasma/appointments', CITA],
+      ['PUT', '/visits/v_fantasma/lodging', { hotel: 'X', checkIn: AHORA, checkOut: '2026-03-12T11:00:00.000-07:00' }],
+      ['POST', '/visits/v_fantasma/passes', { format: 'image', payload: 'data:,x', scope: 'torre' }],
+    ];
+
+    const cuerpos = [];
+    for (const [method, ruta, body] of rutas) {
+      const res = await handleCoordinatorRequest(pedir(ruta, { method, body }), d);
+      assert.equal(res.status, 404, `${method} ${ruta}`);
+      cuerpos.push(await res.text());
+    }
+    assert.equal(new Set(cuerpos).size, 1, 'las cuatro dicen exactamente lo mismo');
+  });
+});
+
+describe('citas', () => {
+  test('POST agrega, persiste y firma', async () => {
+    const { deps: d, store } = deps();
+    const id = await conVisita(d);
+
+    const res = await handleCoordinatorRequest(pedir(`/visits/${id}/appointments`, { method: 'POST', body: CITA }), d);
+    assert.equal(res.status, 201);
+
+    // Releído del almacén, no de la respuesta: lo que importa de esta etapa
+    // es que sobreviva a la petición.
+    const guardado = await store.getVisit(id);
+    assert.equal(guardado.appointments.length, 1);
+    assert.equal(guardado.appointments[0].createdBy, 'ana.ruiz');
+    assert.equal(guardado.appointments[0].locationId, 'compass');
+  });
+
+  test('rechaza una ubicación fuera del catálogo con 422', async () => {
+    // El <select> de la Etapa A por HTTP: aquí es donde de verdad se
+    // sostiene, porque quien manda el POST puede no haber visto la pantalla.
+    const { deps: d, store } = deps();
+    const id = await conVisita(d);
+
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${id}/appointments`, { method: 'POST', body: { ...CITA, locationId: 'piso 27' } }),
+      d,
+    );
+
+    assert.equal(res.status, 422);
+    assert.equal((await res.json()).errors.locationId, 'unknown');
+    assert.equal((await store.getVisit(id)).appointments.length, 0);
+  });
+
+  test('PATCH action:move mueve y marca', async () => {
+    const { deps: d, store } = deps();
+    const id = await conVisita(d);
+    const alta = await handleCoordinatorRequest(
+      pedir(`/visits/${id}/appointments`, { method: 'POST', body: CITA }),
+      d,
+    );
+    const apptId = (await alta.json()).appointment.id;
+
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${id}/appointments/${apptId}`, {
+        method: 'PATCH',
+        body: { action: 'move', startsAt: '2026-03-10T15:00:00.000-07:00' },
+      }),
+      d,
+    );
+
+    assert.equal(res.status, 200);
+    const a = (await store.getVisit(id)).appointments[0];
+    assert.equal(a.startsAt, '2026-03-10T15:00:00.000-07:00');
+    assert.equal(a.status, 'moved');
+  });
+
+  test('PATCH action:edit y action:cancel', async () => {
+    const { deps: d, store } = deps();
+    const id = await conVisita(d);
+    const alta = await handleCoordinatorRequest(
+      pedir(`/visits/${id}/appointments`, { method: 'POST', body: CITA }),
+      d,
+    );
+    const apptId = (await alta.json()).appointment.id;
+
+    await handleCoordinatorRequest(
+      pedir(`/visits/${id}/appointments/${apptId}`, {
+        method: 'PATCH',
+        body: { action: 'edit', serviceName: 'Tomografía', durationMin: 20, locationId: 'piso27' },
+      }),
+      d,
+    );
+    assert.equal((await store.getVisit(id)).appointments[0].serviceName, 'Tomografía');
+
+    await handleCoordinatorRequest(
+      pedir(`/visits/${id}/appointments/${apptId}`, { method: 'PATCH', body: { action: 'cancel' } }),
+      d,
+    );
+    assert.equal((await store.getVisit(id)).appointments[0].status, 'cancelled');
+  });
+
+  test('una acción inventada da 422, no 500 ni un no-op silencioso', async () => {
+    const { deps: d } = deps();
+    const id = await conVisita(d);
+    const alta = await handleCoordinatorRequest(
+      pedir(`/visits/${id}/appointments`, { method: 'POST', body: CITA }),
+      d,
+    );
+    const apptId = (await alta.json()).appointment.id;
+
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${id}/appointments/${apptId}`, { method: 'PATCH', body: { action: 'borrar' } }),
+      d,
+    );
+    assert.equal(res.status, 422);
+    assert.equal((await res.json()).errors.action, 'unsupported');
+  });
+
+  test('cita inexistente dentro de una visita que sí existe: 404', async () => {
+    const { deps: d } = deps();
+    const id = await conVisita(d);
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${id}/appointments/a_fantasma`, { method: 'PATCH', body: { action: 'cancel' } }),
+      d,
+    );
+    assert.equal(res.status, 404);
+  });
+});
+
+describe('hospedaje y pases', () => {
+  test('PUT /lodging guarda y firma', async () => {
+    const { deps: d, store } = deps();
+    const id = await conVisita(d);
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${id}/lodging`, {
+        method: 'PUT',
+        body: {
+          hotel: 'Quartz Hotel & Spa',
+          reservationCode: 'QZ-1',
+          checkIn: '2026-03-10T15:00:00.000-07:00',
+          checkOut: '2026-03-11T12:00:00.000-07:00',
+          breakfastIncluded: true,
+        },
+      }),
+      d,
+    );
+
+    assert.equal(res.status, 200);
+    const l = (await store.getVisit(id)).lodging;
+    assert.equal(l.hotel, 'Quartz Hotel & Spa');
+    assert.equal(l.updatedBy, 'ana.ruiz');
+  });
+
+  test('POST /passes emite y PATCH revoca, sin borrar', async () => {
+    const { deps: d, store } = deps();
+    const id = await conVisita(d);
+    const alta = await handleCoordinatorRequest(
+      pedir(`/visits/${id}/passes`, {
+        method: 'POST',
+        body: { format: 'image', payload: 'data:image/png;base64,iVBOR', scope: 'torre' },
+      }),
+      d,
+    );
+    assert.equal(alta.status, 201);
+    const passId = (await alta.json()).qpass.id;
+
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${id}/passes/${passId}`, { method: 'PATCH', body: { action: 'revoke' } }),
+      d,
+    );
+    assert.equal(res.status, 200);
+
+    const guardado = await store.getVisit(id);
+    assert.equal(guardado.passes.length, 1, 'revocar no borra');
+    assert.equal(guardado.passes[0].revokedAt, AHORA);
+    assert.equal(guardado.passes[0].revokedBy, 'ana.ruiz');
+  });
+});
+
+describe('el contrato de las mutaciones', () => {
+  test('toda mutación devuelve el expediente COMPLETO, no solo lo que cambió', async () => {
+    // Es lo que le permite al panel reemplazar su copia local de un golpe
+    // en vez de parchearla por su cuenta. Dos coordinadoras tocando la
+    // misma visita divergen a la primera si cada panel adivina el
+    // resultado; con el registro entero, la última respuesta es la verdad.
+    const { deps: d } = deps();
+    const id = await conVisita(d);
+
+    const alta = await handleCoordinatorRequest(pedir(`/visits/${id}/appointments`, { method: 'POST', body: CITA }), d);
+    const cuerpoAlta = await alta.json();
+    assert.ok(cuerpoAlta.record, 'el registro entero');
+    assert.equal(cuerpoAlta.record.visit.id, id);
+    assert.equal(cuerpoAlta.record.appointments.length, 1);
+    // Y la entidad concreta aparte: quien acaba de crearla necesita su id,
+    // y buscarlo dentro del registro sería adivinarlo.
+    assert.ok(cuerpoAlta.appointment.id);
+
+    const patch = await handleCoordinatorRequest(
+      pedir(`/visits/${id}/appointments/${cuerpoAlta.appointment.id}`, {
+        method: 'PATCH',
+        body: { action: 'cancel' },
+      }),
+      d,
+    );
+    const cuerpoPatch = await patch.json();
+    assert.equal(cuerpoPatch.record.appointments[0].status, 'cancelled');
+
+    const pase = await handleCoordinatorRequest(
+      pedir(`/visits/${id}/passes`, {
+        method: 'POST',
+        body: { format: 'image', payload: 'data:,x', scope: 'torre' },
+      }),
+      d,
+    );
+    const cuerpoPase = await pase.json();
+    assert.equal(cuerpoPase.record.passes.length, 1);
+    // El registro completo SÍ trae token: es la ruta de una visita concreta
+    // y el panel necesita poder reenviarle el enlace al paciente.
+    assert.ok(cuerpoPase.record.visit.token);
+  });
+});
+
+describe('la firma de auditoría', () => {
+  test('sale de la sesión, NUNCA del cuerpo', async () => {
+    // Si el cliente pudiera mandar `by` o `createdBy`, las cuentas
+    // individuales de la Etapa C serían decorativas: cualquiera firmaría
+    // con el nombre de cualquiera.
+    const { deps: d, store } = deps({ guardia: { cuenta: { username: 'beto.lara', name: 'Beto Lara' } } });
+    const id = await conVisita(d);
+    await handleCoordinatorRequest(
+      pedir(`/visits/${id}/appointments`, {
+        method: 'POST',
+        body: { ...CITA, createdBy: 'ana.ruiz', updatedBy: 'ana.ruiz', by: 'ana.ruiz' },
+      }),
+      d,
+    );
+
+    const a = (await store.getVisit(id)).appointments[0];
+    assert.equal(a.createdBy, 'beto.lara');
+    assert.equal(a.updatedBy, 'beto.lara');
+  });
+
+  test('dos personas distintas dejan rastros distintos en la misma visita', async () => {
+    const ana = deps();
+    const id = await conVisita(ana.deps);
+    const alta = await handleCoordinatorRequest(
+      pedir(`/visits/${id}/appointments`, { method: 'POST', body: CITA }),
+      ana.deps,
+    );
+    const apptId = (await alta.json()).appointment.id;
+
+    // Mismo almacén, otra sesión: es el escenario real de dos turnos.
+    const betoDeps = {
+      ...ana.deps,
+      requireCoordinator: guardiaDoble({ cuenta: { username: 'beto.lara', name: 'Beto Lara' } }).requireCoordinator,
+    };
+    await handleCoordinatorRequest(
+      pedir(`/visits/${id}/appointments/${apptId}`, { method: 'PATCH', body: { action: 'cancel' } }),
+      betoDeps,
+    );
+
+    const a = (await ana.store.getVisit(id)).appointments[0];
+    assert.equal(a.createdBy, 'ana.ruiz', 'quién la creó no se reescribe');
+    assert.equal(a.updatedBy, 'beto.lara', 'quién la canceló sí queda');
+  });
+});
+
+describe('encabezados', () => {
+  test('no-store y nosniff en todas las respuestas', async () => {
+    // Es un expediente clínico: que no quede en la caché del navegador ni
+    // en la de ningún intermediario (PRD §6.2). Misma regla que el endpoint
+    // del paciente.
+    const { deps: d } = deps();
+    const id = await conVisita(d);
+
+    for (const res of [
+      await handleCoordinatorRequest(pedir('/visits'), d),
+      await handleCoordinatorRequest(pedir(`/visits/${id}`), d),
+      await handleCoordinatorRequest(pedir('/visits/v_fantasma'), d),
+    ]) {
+      assert.equal(res.headers.get('cache-control'), 'no-store');
+      assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+    }
+  });
+});
+
+describe('fallos del almacén', () => {
+  test('un almacén que truena da 500 sin filtrar el detalle', async () => {
+    const { deps: d } = deps();
+    const roto = {
+      ...d,
+      store: {
+        ...d.store,
+        async listVisits() {
+          throw new Error('BLOBS_TOKEN no está definido');
+        },
+      },
+    };
+    const res = await handleCoordinatorRequest(pedir('/visits'), roto);
+    assert.equal(res.status, 500);
+    const texto = await res.text();
+    assert.equal(texto.includes('BLOBS_TOKEN'), false, 'el detalle se queda del lado del servidor');
+  });
+});

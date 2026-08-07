@@ -53,19 +53,60 @@ describe('renderCoordinatorHeader — "volver a visitas" (Etapa A, #20)', () => 
 
   test('sí aparece en las demás rutas, que es donde de verdad lleva a otro lado', () => {
     for (const route of ['intake', 'itinerary', 'lodging', 'qpass', 'pass-preview']) {
-      const html = renderCoordinatorHeader(route, t('es'));
+      const html = renderCoordinatorHeader(route, t('es'), { user: { displayName: 'Ana Ruiz' } });
       assert.ok(
         html.includes('data-nav="visits"'),
         `falta "volver a visitas" en la ruta ${route}`
       );
     }
   });
+
+  // Encontrado en navegador, no por los tests: al darle a Salir estando en
+  // #/qpass, la pantalla de acceso queda con "Volver a visitas" en el
+  // encabezado. El clic cambia el hash y vuelve a pintar... la misma
+  // pantalla de acceso, porque sin sesión no hay ruta que valga. Es
+  // exactamente el control muerto del #20, reaparecido por la puerta de la
+  // Etapa C: el encabezado se pinta igual con sesión y sin ella.
+  test('sin sesión NO aparece en ninguna ruta: desde la pantalla de acceso tampoco lleva a ningún lado', () => {
+    for (const route of ['intake', 'itinerary', 'lodging', 'qpass', 'pass-preview']) {
+      const html = renderCoordinatorHeader(route, t('es'));
+      assert.ok(
+        !html.includes('data-nav="visits"'),
+        `"volver a visitas" pintado sin sesión en la ruta ${route} — ahí el clic no navega a ningún lado`
+      );
+    }
+  });
+});
+
+describe('renderCoordinatorHeader — sesión (Etapa D)', () => {
+  // Sin esto no hay forma de terminar una sesión. La máquina de
+  // coordinación se comparte, y la cookie dura un turno de ocho horas
+  // (sessions.js): quien se siente después queda firmando el expediente
+  // con la cuenta de quien se levantó.
+  test('con sesión abierta, muestra quién es y ofrece salir', () => {
+    for (const lang of ['es', 'en']) {
+      const html = renderCoordinatorHeader('visits', t(lang), { user: { username: 'ana.ruiz', displayName: 'Ana Ruiz' } });
+      assert.ok(html.includes('Ana Ruiz'), `falta el nombre de quien está dentro en ${lang}`);
+      assert.match(html, /data-role="sign-out"/, `falta el botón de salir en ${lang}`);
+      assert.ok(html.includes(translate(lang, 'coordinator.auth.signOut')), `el botón de salir no usa la llave i18n en ${lang}`);
+    }
+  });
+
+  test('sin sesión no ofrece salir — el encabezado de la pantalla de acceso no lleva ese botón', () => {
+    const html = renderCoordinatorHeader('visits', t('es'));
+    assert.doesNotMatch(html, /data-role="sign-out"/);
+  });
+
+  test('el nombre de quien está dentro se escapa', () => {
+    const html = renderCoordinatorHeader('visits', t('es'), { user: { displayName: '<img src=x onerror=alert(1)>' } });
+    assert.ok(!html.includes('<img'));
+  });
 });
 
 describe('renderCoordinatorHeader — texto traducido (Etapa A, #13/#14)', () => {
   test('el nombre de la app y el botón de volver salen de i18n en los dos idiomas', () => {
     for (const lang of ['es', 'en']) {
-      const html = renderCoordinatorHeader('itinerary', t(lang));
+      const html = renderCoordinatorHeader('itinerary', t(lang), { user: { displayName: 'Ana Ruiz' } });
       assert.ok(html.includes(translate(lang, 'coordinator.appName')), `falta appName en ${lang}`);
       assert.ok(html.includes(translate(lang, 'coordinator.backToVisits')), `falta backToVisits en ${lang}`);
     }

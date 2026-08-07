@@ -1,176 +1,272 @@
-// Fase 09 — coordinatorStore.js: copia en memoria de src/data/fixtures.js
-// que la demo del coordinador muta. La promesa central del doc de esta
-// fase ("nunca el archivo fixtures.js, nunca localStorage, nunca un
-// servidor") solo se cumple si esta copia es de verdad independiente —
-// por eso la primera prueba de este archivo es justo esa, no una
-// genérica de "funciona".
+// Etapa D — el store del panel deja de ser una copia en memoria de las
+// fixtures y pasa a hablar con la API.
 //
-// now se recibe como parámetro en todo método que estampa una hora
-// (mismo criterio INV-1 que src/domain/, D11) — coordinatorStore.js no es
-// el lugar sancionado para leer el reloj real (D20: ese permiso es solo
-// de src/ui/app.js); quien orqueste esta store (coordinatorApp.js) es
-// quien decide qué "now" usar, igual que app.js hace con el resto de la
-// UI. Los ids se generan con un contador propio de cada store — no hace
-// falta más que eso para una demo sin persistencia real, y un contador es
-// determinista y fácil de probar, a diferencia de algo aleatorio.
+// Esta prueba reemplaza a la de la fase 09, que fijaba justo lo contrario
+// ("se pierde al recargar, a propósito"). El cambio de contrato es el punto
+// de la etapa, así que la prueba vieja no se adapta: se sustituye.
+//
+// Lo que se fija aquí:
+//
+//   1. Las lecturas son SÍNCRONAS y salen de una copia local; las
+//      mutaciones son asíncronas y pasan por el servidor. Es lo que deja
+//      que las cinco pantallas sigan pintando sin await.
+//   2. La copia local se REEMPLAZA con lo que devuelve el servidor, nunca
+//      se parchea localmente. Si el panel adivinara el resultado, dos
+//      coordinadoras sobre la misma visita divergirían a la primera.
+//   3. Un 422 del servidor llega a la pantalla como errores por campo, no
+//      como un null indistinguible de "no existe" (#11).
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { createCoordinatorStore } from '../../src/ui/coordinatorStore.js';
-import { fixtures } from '../../src/data/fixtures.js';
 
-const NOW = '2026-03-10T10:00-07:00';
+const VISITA = {
+  patientFirstName: 'Ana',
+  lang: 'es',
+  startsAt: '2026-03-10T08:00:00.000-07:00',
+  endsAt: '2026-03-11T20:00:00.000-07:00',
+};
 
-describe('createCoordinatorStore — copia independiente de fixtures.js', () => {
-  test('listVisits arranca con las mismas visitas que fixtures.js', () => {
-    const store = createCoordinatorStore();
-    const ids = store.listVisits().map((v) => v.visit.id).sort();
-    assert.deepStrictEqual(ids, Object.keys(fixtures).sort());
+const CITA = {
+  startsAt: '2026-03-10T11:30:00.000-07:00',
+  durationMin: 45,
+  serviceName: 'Resonancia',
+  locationId: 'compass',
+};
+
+function registro(id = 'v_1', extra = {}) {
+  return {
+    visit: { id, token: `tok-${id}`, patientFirstName: 'Ana', lang: 'es', status: 'active' },
+    appointments: [],
+    passes: [],
+    lodging: null,
+    ...extra,
+  };
+}
+
+// Doble del transporte. Guarda cada llamada para poder afirmar QUÉ se pidió
+// —método, ruta y cuerpo— y no solo qué se recibió: la mitad de los errores
+// de un cliente HTTP son mandar bien los datos a la ruta equivocada.
+function apiDoble(respuestas = {}) {
+  const llamadas = [];
+  return {
+    llamadas,
+    async request(method, path, body) {
+      llamadas.push({ method, path, body });
+      const clave = `${method} ${path}`;
+      const r = respuestas[clave] ?? respuestas[method] ?? { status: 200, body: {} };
+      return typeof r === 'function' ? r(body) : r;
+    },
+  };
+}
+
+describe('lecturas: síncronas, desde la copia local', () => {
+  test('listVisits está vacío hasta que se carga', () => {
+    const store = createCoordinatorStore({ api: apiDoble() });
+    assert.deepEqual(store.listVisits(), [], 'sin inventar nada antes de hablar con el servidor');
   });
 
-  test('mutar la store NO toca el módulo fixtures.js real', () => {
-    const store = createCoordinatorStore();
-    store.addAppointment('v_demo1', { startsAt: NOW, durationMin: 30, serviceName: 'Prueba', locationId: 'piso27' }, NOW);
-    assert.strictEqual(fixtures.v_demo1.appointments.length, 4, 'fixtures.js no debe cambiar de tamaño');
-    assert.strictEqual(store.getVisit('v_demo1').appointments.length, 5);
-  });
-
-  test('dos stores independientes no comparten estado (dos pestañas de la demo)', () => {
-    const storeA = createCoordinatorStore();
-    const storeB = createCoordinatorStore();
-    storeA.addAppointment('v_demo1', { startsAt: NOW, durationMin: 30, serviceName: 'Solo en A', locationId: 'piso27' }, NOW);
-    assert.strictEqual(storeA.getVisit('v_demo1').appointments.length, 5);
-    assert.strictEqual(storeB.getVisit('v_demo1').appointments.length, 4);
-  });
-});
-
-describe('createCoordinatorStore — alta de visita', () => {
-  test('createVisit agrega una visita nueva, visible de inmediato en listVisits', () => {
-    const store = createCoordinatorStore();
-    const before = store.listVisits().length;
-    const visit = store.createVisit({ patientFirstName: 'Carlos', lang: 'es', startsAt: NOW, endsAt: NOW });
-    assert.strictEqual(store.listVisits().length, before + 1);
-    assert.strictEqual(visit.patientFirstName, 'Carlos');
-    assert.strictEqual(visit.status, 'active');
-    assert.ok(visit.id, 'la visita nueva necesita un id');
-    assert.ok(visit.token, 'la visita nueva necesita un token, aunque sea de demo');
-  });
-
-  test('dos altas seguidas nunca comparten id', () => {
-    const store = createCoordinatorStore();
-    const a = store.createVisit({ patientFirstName: 'A', lang: 'es', startsAt: NOW, endsAt: NOW });
-    const b = store.createVisit({ patientFirstName: 'B', lang: 'es', startsAt: NOW, endsAt: NOW });
-    assert.notStrictEqual(a.id, b.id);
-  });
-});
-
-describe('createCoordinatorStore — itinerario', () => {
-  test('addAppointment agrega una cita "scheduled" a la visita correcta', () => {
-    const store = createCoordinatorStore();
-    const appt = store.addAppointment('v_demo1', { startsAt: NOW, durationMin: 45, serviceName: 'Laboratorio extra', locationId: 'compass' }, NOW);
-    assert.strictEqual(appt.status, 'scheduled');
-    assert.strictEqual(appt.visitId, 'v_demo1');
-    assert.ok(store.getVisit('v_demo1').appointments.some((a) => a.id === appt.id));
-  });
-
-  test('moveAppointment cambia startsAt y marca la cita como "moved"', () => {
-    const store = createCoordinatorStore();
-    const newTime = '2026-03-10T15:00-07:00';
-    const moved = store.moveAppointment('v_demo1', 'a1', newTime, NOW);
-    assert.strictEqual(moved.startsAt, newTime);
-    assert.strictEqual(moved.status, 'moved');
-    assert.strictEqual(moved.updatedAt, NOW);
-  });
-
-  test('cancelAppointment marca la cita como "cancelled" sin quitarla del arreglo', () => {
-    const store = createCoordinatorStore();
-    const cancelled = store.cancelAppointment('v_demo1', 'a2', NOW);
-    assert.strictEqual(cancelled.status, 'cancelled');
-    assert.strictEqual(store.getVisit('v_demo1').appointments.length, 4, 'sigue en el arreglo, solo cambia de estado');
-  });
-
-  // "editarla" es una acción propia, distinta de "moverla" (docs/phases/
-  // phase-09-coordinator-demo.md: "agregar una cita, editarla, moverla
-  // (cambiar startsAt) y cancelarla"). editAppointment cubre serviceName/
-  // durationMin/locationId nada más — startsAt sigue siendo trabajo
-  // exclusivo de moveAppointment, y status (el enum cerrado del PRD §7:
-  // scheduled/in_progress/done/moved/cancelled) nunca lo toca: "editar" no
-  // es un valor de status propio, es solo cambiar contenido.
-  test('editAppointment cambia serviceName/durationMin/locationId y estampa updatedAt, sin tocar startsAt ni status', () => {
-    const store = createCoordinatorStore();
-    const edited = store.editAppointment(
-      'v_demo1',
-      'a1',
-      { serviceName: 'Laboratorio (perfil ampliado)', durationMin: 60, locationId: 'piso27' },
-      NOW
-    );
-    assert.strictEqual(edited.serviceName, 'Laboratorio (perfil ampliado)');
-    assert.strictEqual(edited.durationMin, 60);
-    assert.strictEqual(edited.locationId, 'piso27');
-    assert.strictEqual(edited.updatedAt, NOW);
-    assert.strictEqual(edited.startsAt, '2026-03-10T08:00-07:00', 'startsAt es trabajo exclusivo de moveAppointment');
-    assert.strictEqual(edited.status, 'scheduled', 'editar contenido no es un valor de status — el enum se queda intacto');
-  });
-
-  test('editAppointment sobre una cita ya movida conserva su status "moved" (editar contenido no revierte ni reemplaza el estado)', () => {
-    const store = createCoordinatorStore();
-    store.moveAppointment('v_demo1', 'a1', '2026-03-10T11:00-07:00', NOW);
-    const edited = store.editAppointment('v_demo1', 'a1', { serviceName: 'Laboratorio', durationMin: 45, locationId: 'compass' }, NOW);
-    assert.strictEqual(edited.status, 'moved');
-    assert.strictEqual(edited.startsAt, '2026-03-10T11:00-07:00', 'editAppointment no debe pisar el startsAt que dejó moveAppointment');
-  });
-
-  test('mover, editar o cancelar una cita de un id inexistente devuelve null, no lanza excepción', () => {
-    const store = createCoordinatorStore();
-    assert.strictEqual(store.moveAppointment('v_demo1', 'a-no-existe', NOW, NOW), null);
-    assert.strictEqual(
-      store.editAppointment('v_demo1', 'a-no-existe', { serviceName: 'x', durationMin: 1, locationId: 'x' }, NOW),
-      null
-    );
-    assert.strictEqual(store.cancelAppointment('v_demo1', 'a-no-existe', NOW), null);
-  });
-});
-
-describe('createCoordinatorStore — hospedaje', () => {
-  test('setLodging registra el hospedaje de una visita que no tenía (v_demo2)', () => {
-    const store = createCoordinatorStore();
-    assert.strictEqual(store.getVisit('v_demo2').lodging, null);
-    const lodging = store.setLodging('v_demo2', {
-      hotel: 'Quartz Hotel & Spa',
-      reservationCode: 'QZ-0001',
-      checkIn: NOW,
-      checkOut: NOW,
-      breakfastIncluded: true,
-      recoveryRoom: false,
+  test('loadVisits llena la lista', async () => {
+    const api = apiDoble({
+      'GET /visits': { status: 200, body: { visits: [{ id: 'v_1', patientFirstName: 'Ana' }, { id: 'v_2' }] } },
     });
-    assert.strictEqual(lodging.visitId, 'v_demo2');
-    assert.strictEqual(store.getVisit('v_demo2').lodging.reservationCode, 'QZ-0001');
+    const store = createCoordinatorStore({ api });
+
+    await store.loadVisits();
+    assert.deepEqual(store.listVisits().map((r) => r.visit.id), ['v_1', 'v_2']);
+    assert.deepEqual(api.llamadas[0], { method: 'GET', path: '/visits', body: undefined });
+  });
+
+  test('la lista NO finge appointments vacíos', async () => {
+    // GET /visits solo trae los Visit. Rellenar `appointments: []` diría
+    // "esta visita no tiene citas" cuando lo cierto es "todavía no las
+    // pedí" — y esa mentira se pinta igual que un itinerario vacío.
+    const api = apiDoble({ 'GET /visits': { status: 200, body: { visits: [{ id: 'v_1' }] } } });
+    const store = createCoordinatorStore({ api });
+
+    await store.loadVisits();
+    assert.equal(store.listVisits()[0].appointments, undefined);
+  });
+
+  test('getVisit devuelve null hasta que esa visita se carga entera', async () => {
+    const api = apiDoble({
+      'GET /visits': { status: 200, body: { visits: [{ id: 'v_1' }] } },
+      'GET /visits/v_1': { status: 200, body: registro('v_1', { appointments: [{ id: 'a_1' }] }) },
+    });
+    const store = createCoordinatorStore({ api });
+
+    await store.loadVisits();
+    assert.equal(store.getVisit('v_1'), null, 'estar en la lista no es estar cargada');
+
+    await store.loadVisit('v_1');
+    assert.equal(store.getVisit('v_1').appointments.length, 1);
+  });
+
+  test('loadVisit con una visita inexistente: notFound, no una excepción', async () => {
+    // #11: hoy "visita no encontrada" se comporta distinto según por dónde
+    // entres. Aquí es un solo resultado con nombre.
+    const api = apiDoble({ GET: { status: 404, body: { error: 'not_found' } } });
+    const store = createCoordinatorStore({ api });
+
+    assert.deepEqual(await store.loadVisit('v_fantasma'), { ok: false, notFound: true });
+    assert.equal(store.getVisit('v_fantasma'), null);
+  });
+
+  test('getVisitWithPasses sale de la misma copia', async () => {
+    const api = apiDoble({
+      'GET /visits/v_1': { status: 200, body: registro('v_1', { passes: [{ id: 'q_1' }] }) },
+    });
+    const store = createCoordinatorStore({ api });
+
+    assert.equal(store.getVisitWithPasses('v_1'), null);
+    await store.loadVisit('v_1');
+    assert.equal(store.getVisitWithPasses('v_1').passes.length, 1);
+    assert.equal(store.getVisitWithPasses('v-no-existe'), null);
   });
 });
 
-describe('createCoordinatorStore — emisión de QPASS (D29)', () => {
-  test('issueQpass crea un QPass con format:"image" y el payload es la data URL tal cual, no un símbolo generado', () => {
-    const store = createCoordinatorStore();
-    const dataUrl = 'data:image/jpeg;base64,AAAA';
-    const qpass = store.issueQpass('v_demo1', { format: 'image', payload: dataUrl, scope: 'torre' }, NOW);
-    assert.strictEqual(qpass.format, 'image');
-    assert.strictEqual(qpass.payload, dataUrl);
-    assert.strictEqual(qpass.validUntil, null, 'D15: sin caducidad por tiempo, el caso normal');
-    assert.strictEqual(qpass.revokedAt, null);
-    assert.strictEqual(qpass.issuedAt, NOW);
+describe('createVisit', () => {
+  test('manda POST /visits y entrega el token', async () => {
+    // El token es lo que hoy se tiraba a la basura y sin lo cual no hay
+    // nada que mandarle al paciente.
+    const api = apiDoble({
+      'POST /visits': { status: 201, body: { visit: { id: 'v_9', token: 'tok-real', patientFirstName: 'Ana' } } },
+    });
+    const store = createCoordinatorStore({ api });
+
+    const res = await store.createVisit(VISITA);
+    assert.equal(res.ok, true);
+    assert.equal(res.visit.token, 'tok-real');
+    assert.deepEqual(api.llamadas[0], { method: 'POST', path: '/visits', body: VISITA });
   });
 
-  test('getVisitWithPasses trae el QPass recién emitido, listo para pass-preview', () => {
-    const store = createCoordinatorStore();
-    store.issueQpass('v_demo2', { format: 'image', payload: 'data:image/jpeg;base64,BBBB', scope: 'torre' }, NOW);
-    const { visit, passes } = store.getVisitWithPasses('v_demo2');
-    assert.strictEqual(visit.id, 'v_demo2');
-    assert.ok(passes.some((p) => p.format === 'image' && p.payload === 'data:image/jpeg;base64,BBBB'));
+  test('un 422 llega como errores POR CAMPO', async () => {
+    const api = apiDoble({
+      'POST /visits': { status: 422, body: { error: 'invalid', errors: { lang: 'unsupported' } } },
+    });
+    const store = createCoordinatorStore({ api });
+
+    const res = await store.createVisit({ ...VISITA, lang: 'fr' });
+    assert.deepEqual(res, { ok: false, errors: { lang: 'unsupported' } });
+  });
+});
+
+describe('mutaciones: la copia local se reemplaza con la del servidor', () => {
+  const conRegistroDe = (record) => ({ status: 200, body: { record, appointment: record.appointments?.at(-1) } });
+
+  test('addAppointment guarda lo que devolvió el servidor, no lo que se mandó', async () => {
+    // El servidor recorta espacios, estampa createdBy/updatedAt y asigna el
+    // id. Si el panel se quedara con lo que escribió el formulario, la
+    // pantalla mostraría algo distinto a lo guardado hasta la próxima
+    // recarga — y esa clase de divergencia solo se nota cuando ya importa.
+    const delServidor = registro('v_1', {
+      appointments: [{ id: 'a_srv', serviceName: 'Resonancia', createdBy: 'ana.ruiz', updatedAt: 'del-servidor' }],
+    });
+    const api = apiDoble({ 'POST /visits/v_1/appointments': conRegistroDe(delServidor) });
+    const store = createCoordinatorStore({ api });
+
+    const res = await store.addAppointment('v_1', { ...CITA, serviceName: '  Resonancia  ' });
+    assert.equal(res.ok, true);
+    assert.equal(res.appointment.id, 'a_srv');
+
+    const guardado = store.getVisit('v_1');
+    assert.equal(guardado.appointments[0].createdBy, 'ana.ruiz');
+    assert.equal(guardado.appointments[0].updatedAt, 'del-servidor');
   });
 
-  test('visita inexistente: getVisitWithPasses e issueQpass devuelven null, no lanzan excepción', () => {
-    const store = createCoordinatorStore();
-    assert.strictEqual(store.getVisitWithPasses('v-no-existe'), null);
-    assert.strictEqual(store.issueQpass('v-no-existe', { format: 'image', payload: 'x', scope: 'torre' }, NOW), null);
+  test('el panel ya NO manda `now`: la hora la pone el servidor', async () => {
+    // Antes cada mutación recibía `now` del navegador. Un reloj mal puesto
+    // en la máquina de coordinación estampaba esa hora en el expediente que
+    // lee el paciente. Ahora la hora de lo guardado la decide el servidor,
+    // que es el único que puede decirla igual para todos.
+    const api = apiDoble({ 'POST /visits/v_1/appointments': conRegistroDe(registro()) });
+    const store = createCoordinatorStore({ api });
+
+    await store.addAppointment('v_1', CITA);
+    assert.deepEqual(Object.keys(api.llamadas[0].body).sort(), [
+      'durationMin',
+      'locationId',
+      'serviceName',
+      'startsAt',
+    ]);
+  });
+
+  test('move, edit y cancel van al mismo PATCH con action distinto', async () => {
+    const api = apiDoble({ PATCH: conRegistroDe(registro()) });
+    const store = createCoordinatorStore({ api });
+
+    await store.moveAppointment('v_1', 'a_1', '2026-03-10T15:00:00.000-07:00');
+    await store.editAppointment('v_1', 'a_1', { serviceName: 'X', durationMin: 20, locationId: 'piso27' });
+    await store.cancelAppointment('v_1', 'a_1');
+
+    assert.deepEqual(api.llamadas.map((l) => l.path), [
+      '/visits/v_1/appointments/a_1',
+      '/visits/v_1/appointments/a_1',
+      '/visits/v_1/appointments/a_1',
+    ]);
+    assert.deepEqual(api.llamadas.map((l) => l.body.action), ['move', 'edit', 'cancel']);
+    assert.equal(api.llamadas[0].body.startsAt, '2026-03-10T15:00:00.000-07:00');
+  });
+
+  test('setLodging va por PUT y revokeQpass por PATCH', async () => {
+    // Revocar NO es DELETE: no borra nada, le estampa revokedAt al pase y
+    // lo deja en la lista. Un DELETE prometería otra cosa.
+    const api = apiDoble({ PUT: conRegistroDe(registro()), PATCH: conRegistroDe(registro()) });
+    const store = createCoordinatorStore({ api });
+
+    await store.setLodging('v_1', { hotel: 'Quartz' });
+    await store.revokeQpass('v_1', 'q_1');
+
+    assert.equal(api.llamadas[0].method, 'PUT');
+    assert.equal(api.llamadas[0].path, '/visits/v_1/lodging');
+    assert.equal(api.llamadas[1].method, 'PATCH');
+    assert.equal(api.llamadas[1].path, '/visits/v_1/passes/q_1');
+    assert.equal(api.llamadas[1].body.action, 'revoke');
+  });
+
+  test('un 422 no toca la copia local', async () => {
+    const api = apiDoble({
+      'GET /visits/v_1': { status: 200, body: registro('v_1', { appointments: [{ id: 'a_previa' }] }) },
+      POST: { status: 422, body: { error: 'invalid', errors: { locationId: 'unknown' } } },
+    });
+    const store = createCoordinatorStore({ api });
+    await store.loadVisit('v_1');
+
+    const res = await store.addAppointment('v_1', { ...CITA, locationId: 'piso 27' });
+    assert.deepEqual(res, { ok: false, errors: { locationId: 'unknown' } });
+    assert.deepEqual(store.getVisit('v_1').appointments.map((a) => a.id), ['a_previa'], 'intacta');
+  });
+
+  test('un 404 llega como notFound, distinguible de un 422', async () => {
+    const api = apiDoble({ POST: { status: 404, body: { error: 'not_found' } } });
+    const store = createCoordinatorStore({ api });
+
+    assert.deepEqual(await store.addAppointment('v_fantasma', CITA), { ok: false, notFound: true });
+  });
+});
+
+describe('fallos que no son del formulario', () => {
+  test('un 401 se reporta como sesión caída, no como dato inválido', async () => {
+    // Sin esto, una sesión vencida se ve como un formulario que dejó de
+    // funcionar sin decir por qué, y la coordinadora reintenta en vez de
+    // volver a entrar.
+    const api = apiDoble({ POST: { status: 401, body: { error: 'unauthenticated' } } });
+    const store = createCoordinatorStore({ api });
+
+    assert.deepEqual(await store.createVisit(VISITA), { ok: false, unauthenticated: true });
+  });
+
+  test('un 500 o una red caída se reportan como falla, sin inventar errores de campo', async () => {
+    const store500 = createCoordinatorStore({ api: apiDoble({ POST: { status: 500, body: { error: 'internal' } } }) });
+    assert.deepEqual(await store500.createVisit(VISITA), { ok: false, failed: true });
+
+    const storeRed = createCoordinatorStore({
+      api: {
+        async request() {
+          throw new TypeError('Failed to fetch');
+        },
+      },
+    });
+    assert.deepEqual(await storeRed.createVisit(VISITA), { ok: false, failed: true });
   });
 });

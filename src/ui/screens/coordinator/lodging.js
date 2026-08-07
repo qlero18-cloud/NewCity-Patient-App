@@ -20,6 +20,19 @@
 import { escapeHtml } from '../../util.js';
 import { renderCard } from '../../components/card.js';
 import { instantMs } from '../../../domain/time.js';
+import { renderFormErrors, renderRequestError } from './formErrors.js';
+
+// Etapa D — el servidor valida lo mismo que validateLodging, y a veces
+// más. Los errores por campo de ARRIBA (los <span> junto a cada input) los
+// pone la validación local; este mapa es para los que llegan del servidor,
+// que se resumen en bloque porque no siempre corresponden a un input
+// visible.
+const CAMPOS = {
+  hotel: 'coordinator.lodging.hotelLabel',
+  reservationCode: 'coordinator.lodging.reservationCodeLabel',
+  checkIn: 'coordinator.lodging.checkInLabel',
+  checkOut: 'coordinator.lodging.checkOutLabel',
+};
 
 // Puro y exportado: bajo la restricción de no simular DOM en node:test,
 // esta es la única forma de probar la validación de verdad. Devuelve
@@ -91,7 +104,7 @@ function checkboxField(name, checked, label) {
 }
 
 export function renderLodgingScreen(ctx) {
-  const { store, visitId, t, flash } = ctx;
+  const { store, visitId, t, flash, errors, requestError } = ctx;
   const title = t('coordinator.lodging.title');
   const record = store.getVisit(visitId);
 
@@ -123,6 +136,8 @@ export function renderLodgingScreen(ctx) {
           ${checkboxField('breakfastIncluded', !!lodging?.breakfastIncluded, t('coordinator.lodging.breakfastLabel'))}
           ${checkboxField('recoveryRoom', !!lodging?.recoveryRoom, t('coordinator.lodging.recoveryLabel'))}
         `)}
+        ${renderRequestError(requestError, t)}
+        ${renderFormErrors(errors, t, CAMPOS)}
         ${flash === 'saved' ? `<p class="nc-lodging-saved" data-role="lodging-saved" role="status">${escapeHtml(t('coordinator.lodging.saved'))}</p>` : ''}
         <button type="submit" class="nc-button nc-button--primary nc-lodging-submit">${escapeHtml(t('coordinator.lodging.save'))}</button>
       </form>
@@ -188,13 +203,23 @@ export function attachLodgingScreen(rootEl, ctx) {
       return;
     }
 
-    store.setLodging(visitId, values);
-    // 'saved' viaja al repintado (coordinatorApp.js lo pasa como
-    // ctx.flash y lo consume en el siguiente render). Sin confirmación no
-    // había ninguna señal de que el clic hubiera servido: el formulario es
-    // el mismo para alta y edición, y se queda idéntico después de
-    // guardar.
-    onChange?.('saved');
+    // Etapa D — esto ahora va al servidor y puede fallar por cosas que la
+    // validación de arriba no puede ver: sin conexión, sesión vencida, o la
+    // visita borrada desde otra pantalla. El resultado se le entrega entero
+    // al router, que decide entre confirmar y explicar.
+    //
+    // El await deja el botón vivo mientras tanto; se acepta a sabiendas: un
+    // doble clic manda dos PUT y el segundo escribe lo mismo que el primero
+    // (setLodging reemplaza, no acumula), así que el peor caso es una
+    // escritura de más, no un hospedaje duplicado.
+    store.setLodging(visitId, values).then((res) => {
+      // 'saved' viaja al repintado (coordinatorApp.js lo pasa como
+      // ctx.flash y lo consume en el siguiente render). Sin confirmación no
+      // había ninguna señal de que el clic hubiera servido: el formulario es
+      // el mismo para alta y edición, y se queda idéntico después de
+      // guardar.
+      onChange?.(res, 'saved');
+    });
   });
 }
 

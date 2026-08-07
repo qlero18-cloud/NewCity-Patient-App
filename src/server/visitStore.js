@@ -97,7 +97,11 @@ export function createVisitStore(kv, options = {}) {
   }
 
   return {
-    async createVisit(input, now) {
+    // `createdBy` es opcional a propósito: la Etapa B creaba visitas sin
+    // nadie firmando porque no había cuentas todavía, y las pruebas de esa
+    // etapa siguen llamando con dos argumentos. Desde la Etapa D el
+    // handler siempre lo manda, porque siempre hay una sesión detrás.
+    async createVisit(input, now, createdBy) {
       const { ok, errors } = validateVisitInput(input);
       if (!ok) {
         // Se lanza en vez de devolver null: quien llama tiene que decidir
@@ -117,6 +121,11 @@ export function createVisitStore(kv, options = {}) {
           endsAt: trimmed(input.endsAt),
           status: 'active',
           createdAt: now,
+          // Sin llave si no vino nadie firmando, en vez de `undefined`:
+          // JSON.stringify borra las llaves con undefined, así que el
+          // registro guardado y el que devuelve esta función no serían el
+          // mismo objeto — y esa diferencia solo aparecería al releer.
+          ...(createdBy ? { createdBy } : {}),
         },
         appointments: [],
         passes: [],

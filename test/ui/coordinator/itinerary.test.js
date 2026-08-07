@@ -5,16 +5,22 @@
 // de substring/regex sobre el HTML que devuelve renderItineraryScreen(ctx)
 // — nunca un clic simulado ni attachItineraryScreen (eso se revisa en
 // navegador, según el doc de esta fase).
+//
+// Etapa D — el store ya no guarda en memoria: pide a la API. Las pruebas
+// dejan de ser síncronas y el store se arma contra el handler real
+// (test/helpers/loopback.js), no contra un doble a mano: así, si el
+// servidor cambia lo que devuelve, esta pantalla se entera en la misma
+// corrida en vez de seguir pasando contra una copia desactualizada de las
+// reglas.
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderItineraryScreen } from '../../../src/ui/screens/coordinator/itinerary.js';
 import { createCoordinatorStore } from '../../../src/ui/coordinatorStore.js';
+import { createLoopbackApi, panelConVisita } from '../../helpers/loopback.js';
 import { translate } from '../../../src/ui/i18n.js';
 import { locations, LOCATION_IDS } from '../../../src/data/locations.js';
 import { locationName, escapeHtml } from '../../../src/ui/util.js';
-
-const NOW = '2026-03-10T10:00-07:00';
 
 // Los nombres de ubicación traen ·, &, paréntesis y apóstrofes. Hay que
 // pasarlos por escapeHtml (así viajan en el HTML: "Quartz Hotel &amp; Spa")
@@ -31,20 +37,19 @@ function ctx(store, visitId, lang) {
   return { store, visitId, lang, t: (path) => translate(lang, path) };
 }
 
-function newVisit(store, lang) {
-  return store.createVisit({
-    patientFirstName: 'Ana',
-    lang,
-    startsAt: '2026-03-10T00:00-07:00',
-    endsAt: '2026-03-12T00:00-07:00',
-  });
+// Agrega una cita y devuelve la entidad creada. El servidor manda
+// { record, appointment }; el `.appointment` es la cita concreta, que es lo
+// único que estas pruebas necesitan para armar sus selectores por id.
+async function agregarCita(store, visitId, datos) {
+  const res = await store.addAppointment(visitId, datos);
+  if (!res.ok) throw new Error(`la cita de prueba no se agregó: ${JSON.stringify(res)}`);
+  return res.appointment;
 }
 
 for (const lang of ['es', 'en']) {
   describe(`renderItineraryScreen — [${lang}]`, () => {
-    test('visita sin citas muestra coordinator.itinerary.empty', () => {
-      const store = createCoordinatorStore();
-      const visit = newVisit(store, lang);
+    test('visita sin citas muestra coordinator.itinerary.empty', async () => {
+      const { store, visit } = await panelConVisita({ lang });
 
       const html = renderItineraryScreen(ctx(store, visit.id, lang));
 
@@ -52,14 +57,9 @@ for (const lang of ['es', 'en']) {
       assert.ok(html.includes(translate(lang, 'coordinator.itinerary.empty')), 'falta el mensaje de itinerario vacío');
     });
 
-    test('una cita agregada se pinta como tarjeta, con sus valores crudos y sus controles move/edit/cancel', () => {
-      const store = createCoordinatorStore();
-      const visit = newVisit(store, lang);
-      const appt = store.addAppointment(
-        visit.id,
-        { serviceName: 'Laboratorio', startsAt: '2026-03-10T08:00-07:00', durationMin: 45, locationId: 'compass' },
-        NOW
-      );
+    test('una cita agregada se pinta como tarjeta, con sus valores crudos y sus controles move/edit/cancel', async () => {
+      const { store, visit } = await panelConVisita({ lang });
+      const appt = await agregarCita(store, visit.id, { serviceName: 'Laboratorio', startsAt: '2026-03-10T08:00-07:00', durationMin: 45, locationId: 'compass' });
 
       const html = renderItineraryScreen(ctx(store, visit.id, lang));
 
@@ -102,15 +102,10 @@ for (const lang of ['es', 'en']) {
       );
     });
 
-    test('una cita cancelada trae la clase de tachado en la línea de serviceName y NO trae control de cancelar NI de editar (sí sigue trayendo el de mover)', () => {
-      const store = createCoordinatorStore();
-      const visit = newVisit(store, lang);
-      const appt = store.addAppointment(
-        visit.id,
-        { serviceName: 'Resonancia magnética', startsAt: '2026-03-10T09:00-07:00', durationMin: 60, locationId: 'compass' },
-        NOW
-      );
-      store.cancelAppointment(visit.id, appt.id, NOW);
+    test('una cita cancelada trae la clase de tachado en la línea de serviceName y NO trae control de cancelar NI de editar (sí sigue trayendo el de mover)', async () => {
+      const { store, visit } = await panelConVisita({ lang });
+      const appt = await agregarCita(store, visit.id, { serviceName: 'Resonancia magnética', startsAt: '2026-03-10T09:00-07:00', durationMin: 60, locationId: 'compass' });
+      await store.cancelAppointment(visit.id, appt.id);
 
       const html = renderItineraryScreen(ctx(store, visit.id, lang));
 
@@ -131,9 +126,8 @@ for (const lang of ['es', 'en']) {
       );
     });
 
-    test('el formulario de agregar cita expone sus 4 campos y el botón de envío, bajo data-role="add-appointment-form"', () => {
-      const store = createCoordinatorStore();
-      const visit = newVisit(store, lang);
+    test('el formulario de agregar cita expone sus 4 campos y el botón de envío, bajo data-role="add-appointment-form"', async () => {
+      const { store, visit } = await panelConVisita({ lang });
 
       const html = renderItineraryScreen(ctx(store, visit.id, lang));
 
@@ -150,18 +144,16 @@ for (const lang of ['es', 'en']) {
     // sin nada que resaltar ni rutear para esa cita. Un <select> lo cierra
     // estructuralmente en vez de confiar en que se teclee bien.
     describe(`ubicación como <select> (D40) — [${lang}]`, () => {
-      test('el campo locationId es un <select>, no un <input> de texto libre', () => {
-        const store = createCoordinatorStore();
-        const visit = newVisit(store, lang);
+      test('el campo locationId es un <select>, no un <input> de texto libre', async () => {
+        const { store, visit } = await panelConVisita({ lang });
         const html = renderItineraryScreen(ctx(store, visit.id, lang));
 
         assert.match(html, /<select[^>]*name="locationId"/, 'locationId debe ser un <select>');
         assert.doesNotMatch(html, /<input[^>]*name="locationId"/, 'no debe quedar ningún <input> de texto para locationId');
       });
 
-      test('el <select> ofrece exactamente las 7 ubicaciones de locations.js, con su nombre en el idioma activo', () => {
-        const store = createCoordinatorStore();
-        const visit = newVisit(store, lang);
+      test('el <select> ofrece exactamente las 7 ubicaciones de locations.js, con su nombre en el idioma activo', async () => {
+        const { store, visit } = await panelConVisita({ lang });
         const html = renderItineraryScreen(ctx(store, visit.id, lang));
 
         for (const id of LOCATION_IDS) {
@@ -184,19 +176,14 @@ for (const lang of ['es', 'en']) {
     // <select>: dejaban abierta exactamente la misma puerta que el dropdown
     // cierra en el formulario de agregar. Ahora son formularios inline.
     describe(`mover y editar como formularios inline (D40) — [${lang}]`, () => {
-      function withAppointment(store, lang) {
-        const visit = newVisit(store, lang);
-        const appt = store.addAppointment(
-          visit.id,
-          { serviceName: 'Laboratorio', startsAt: '2026-03-10T08:00-07:00', durationMin: 45, locationId: 'compass' },
-          NOW
-        );
-        return { visit, appt };
+      async function withAppointment(lang) {
+        const { store, visit } = await panelConVisita({ lang });
+        const appt = await agregarCita(store, visit.id, { serviceName: 'Laboratorio', startsAt: '2026-03-10T08:00-07:00', durationMin: 45, locationId: 'compass' });
+        return { store, visit, appt };
       }
 
-      test('editar trae un formulario inline con su propio <select> de ubicación', () => {
-        const store = createCoordinatorStore();
-        const { visit, appt } = withAppointment(store, lang);
+      test('editar trae un formulario inline con su propio <select> de ubicación', async () => {
+        const { store, visit, appt } = await withAppointment(lang);
         const html = renderItineraryScreen(ctx(store, visit.id, lang));
 
         assert.match(
@@ -207,9 +194,8 @@ for (const lang of ['es', 'en']) {
         assert.match(html, /<select[^>]*name="editLocationId"/, 'el formulario de editar debe traer un <select> de ubicación');
       });
 
-      test('el <select> de editar llega con la ubicación actual de la cita ya seleccionada', () => {
-        const store = createCoordinatorStore();
-        const { visit } = withAppointment(store, lang);
+      test('el <select> de editar llega con la ubicación actual de la cita ya seleccionada', async () => {
+        const { store, visit } = await withAppointment(lang);
         const html = renderItineraryScreen(ctx(store, visit.id, lang));
 
         assert.match(
@@ -219,9 +205,8 @@ for (const lang of ['es', 'en']) {
         );
       });
 
-      test('mover trae un formulario inline con campo de fecha/hora, no un prompt', () => {
-        const store = createCoordinatorStore();
-        const { visit, appt } = withAppointment(store, lang);
+      test('mover trae un formulario inline con campo de fecha/hora, no un prompt', async () => {
+        const { store, visit, appt } = await withAppointment(lang);
         const html = renderItineraryScreen(ctx(store, visit.id, lang));
 
         assert.match(
@@ -232,10 +217,9 @@ for (const lang of ['es', 'en']) {
         assert.match(html, /name="moveStartsAt"/, 'el formulario de mover debe traer su campo de fecha/hora');
       });
 
-      test('una cita cancelada no trae formulario de editar (mismo criterio que su botón)', () => {
-        const store = createCoordinatorStore();
-        const { visit, appt } = withAppointment(store, lang);
-        store.cancelAppointment(visit.id, appt.id, NOW);
+      test('una cita cancelada no trae formulario de editar (mismo criterio que su botón)', async () => {
+        const { store, visit, appt } = await withAppointment(lang);
+        await store.cancelAppointment(visit.id, appt.id);
         const html = renderItineraryScreen(ctx(store, visit.id, lang));
 
         assert.doesNotMatch(html, /data-role="edit-appointment-form"/, 'una cita cancelada no debe traer formulario de editar');
@@ -243,9 +227,8 @@ for (const lang of ['es', 'en']) {
       });
     });
 
-    test('los campos del formulario traen el tipo y la ayuda que corresponden', () => {
-      const store = createCoordinatorStore();
-      const visit = newVisit(store, lang);
+    test('los campos del formulario traen el tipo y la ayuda que corresponden', async () => {
+      const { store, visit } = await panelConVisita({ lang });
       const html = renderItineraryScreen(ctx(store, visit.id, lang));
 
       assert.match(
@@ -262,7 +245,7 @@ for (const lang of ['es', 'en']) {
     });
 
     test('visita inexistente no truena — fallback corto en vez de excepción', () => {
-      const store = createCoordinatorStore();
+      const store = createCoordinatorStore({ api: createLoopbackApi() });
 
       let html;
       assert.doesNotThrow(() => {
@@ -273,9 +256,8 @@ for (const lang of ['es', 'en']) {
       assert.doesNotMatch(html, /data-role="add-appointment-form"/, 'sin visita no debería ofrecerse el formulario de agregar cita');
     });
 
-    test('ningún destino de navegación usa un atributo distinto a data-nav (D28) — esta pantalla no trae ninguno propio', () => {
-      const store = createCoordinatorStore();
-      const visit = newVisit(store, lang);
+    test('ningún destino de navegación usa un atributo distinto a data-nav (D28) — esta pantalla no trae ninguno propio', async () => {
+      const { store, visit } = await panelConVisita({ lang });
       const html = renderItineraryScreen(ctx(store, visit.id, lang));
       assert.doesNotMatch(html, /data-tab=/);
       assert.doesNotMatch(html, /data-route=/);
@@ -286,21 +268,12 @@ for (const lang of ['es', 'en']) {
     // línea de tiempo" es un criterio de aceptación explícito del doc de
     // esta fase; antes appointments se pintaba en orden de inserción, sin
     // importar el startsAt nuevo tras moverla.
-    test('mover una cita hacia una hora posterior la reordena al final de la lista', () => {
-      const store = createCoordinatorStore();
-      const visit = newVisit(store, lang);
-      const first = store.addAppointment(
-        visit.id,
-        { serviceName: 'Primera cita', startsAt: '2026-03-10T08:00-07:00', durationMin: 30, locationId: 'compass' },
-        NOW
-      );
-      const second = store.addAppointment(
-        visit.id,
-        { serviceName: 'Segunda cita', startsAt: '2026-03-10T09:00-07:00', durationMin: 30, locationId: 'compass' },
-        NOW
-      );
+    test('mover una cita hacia una hora posterior la reordena al final de la lista', async () => {
+      const { store, visit } = await panelConVisita({ lang });
+      const first = await agregarCita(store, visit.id, { serviceName: 'Primera cita', startsAt: '2026-03-10T08:00-07:00', durationMin: 30, locationId: 'compass' });
+      const second = await agregarCita(store, visit.id, { serviceName: 'Segunda cita', startsAt: '2026-03-10T09:00-07:00', durationMin: 30, locationId: 'compass' });
 
-      store.moveAppointment(visit.id, first.id, '2026-03-10T10:00-07:00', NOW);
+      await store.moveAppointment(visit.id, first.id, '2026-03-10T10:00-07:00');
 
       const html = renderItineraryScreen(ctx(store, visit.id, lang));
       assert.ok(
@@ -309,21 +282,12 @@ for (const lang of ['es', 'en']) {
       );
     });
 
-    test('mover una cita hacia una hora anterior la reordena al inicio de la lista', () => {
-      const store = createCoordinatorStore();
-      const visit = newVisit(store, lang);
-      const first = store.addAppointment(
-        visit.id,
-        { serviceName: 'Cita temprano', startsAt: '2026-03-10T08:00-07:00', durationMin: 30, locationId: 'compass' },
-        NOW
-      );
-      const second = store.addAppointment(
-        visit.id,
-        { serviceName: 'Cita tarde', startsAt: '2026-03-10T09:00-07:00', durationMin: 30, locationId: 'compass' },
-        NOW
-      );
+    test('mover una cita hacia una hora anterior la reordena al inicio de la lista', async () => {
+      const { store, visit } = await panelConVisita({ lang });
+      const first = await agregarCita(store, visit.id, { serviceName: 'Cita temprano', startsAt: '2026-03-10T08:00-07:00', durationMin: 30, locationId: 'compass' });
+      const second = await agregarCita(store, visit.id, { serviceName: 'Cita tarde', startsAt: '2026-03-10T09:00-07:00', durationMin: 30, locationId: 'compass' });
 
-      store.moveAppointment(visit.id, second.id, '2026-03-10T07:00-07:00', NOW);
+      await store.moveAppointment(visit.id, second.id, '2026-03-10T07:00-07:00');
 
       const html = renderItineraryScreen(ctx(store, visit.id, lang));
       assert.ok(
@@ -337,15 +301,10 @@ for (const lang of ['es', 'en']) {
     // mostraba como el enum crudo ("cancelled"/"moved"), igual en los dos
     // idiomas — violando el criterio de aceptación "ninguna cadena nueva
     // queda fija en un solo idioma".
-    test('una cita movida muestra el badge traducido coordinator.itinerary.movedBadge, no el enum crudo "moved"', () => {
-      const store = createCoordinatorStore();
-      const visit = newVisit(store, lang);
-      const appt = store.addAppointment(
-        visit.id,
-        { serviceName: 'Cita a mover', startsAt: '2026-03-10T08:00-07:00', durationMin: 30, locationId: 'compass' },
-        NOW
-      );
-      store.moveAppointment(visit.id, appt.id, '2026-03-10T09:00-07:00', NOW);
+    test('una cita movida muestra el badge traducido coordinator.itinerary.movedBadge, no el enum crudo "moved"', async () => {
+      const { store, visit } = await panelConVisita({ lang });
+      const appt = await agregarCita(store, visit.id, { serviceName: 'Cita a mover', startsAt: '2026-03-10T08:00-07:00', durationMin: 30, locationId: 'compass' });
+      await store.moveAppointment(visit.id, appt.id, '2026-03-10T09:00-07:00');
 
       const html = renderItineraryScreen(ctx(store, visit.id, lang));
       assert.ok(
@@ -355,15 +314,10 @@ for (const lang of ['es', 'en']) {
       assert.doesNotMatch(html, /nc-coord-itin-status">moved</, 'no debería mostrarse el enum crudo "moved" para una cita movida');
     });
 
-    test('una cita cancelada muestra el badge traducido coordinator.itinerary.cancelledBadge, no el enum crudo "cancelled"', () => {
-      const store = createCoordinatorStore();
-      const visit = newVisit(store, lang);
-      const appt = store.addAppointment(
-        visit.id,
-        { serviceName: 'Cita a cancelar', startsAt: '2026-03-10T08:00-07:00', durationMin: 30, locationId: 'compass' },
-        NOW
-      );
-      store.cancelAppointment(visit.id, appt.id, NOW);
+    test('una cita cancelada muestra el badge traducido coordinator.itinerary.cancelledBadge, no el enum crudo "cancelled"', async () => {
+      const { store, visit } = await panelConVisita({ lang });
+      const appt = await agregarCita(store, visit.id, { serviceName: 'Cita a cancelar', startsAt: '2026-03-10T08:00-07:00', durationMin: 30, locationId: 'compass' });
+      await store.cancelAppointment(visit.id, appt.id);
 
       const html = renderItineraryScreen(ctx(store, visit.id, lang));
       assert.ok(

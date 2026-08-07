@@ -31,6 +31,8 @@
 // veces.
 
 import { createCoordinatorStore } from './coordinatorStore.js';
+import { createHttpApi, createAuthApi } from './api.js';
+import { createAuthClient } from './authClient.js';
 import { resolveInitialLang, translate } from './i18n.js';
 import { escapeHtml, classNames } from './util.js';
 import { attachNav } from './nav.js';
@@ -42,6 +44,8 @@ import { renderIntakeScreen, attachIntakeScreen, INTAKE_CSS } from './screens/co
 import { renderItineraryScreen, attachItineraryScreen, ITINERARY_CSS } from './screens/coordinator/itinerary.js';
 import { renderLodgingScreen, attachLodgingScreen, LODGING_CSS } from './screens/coordinator/lodging.js';
 import { renderQpassScreen, attachQpassScreen, QPASS_CSS } from './screens/coordinator/qpass.js';
+import { renderSignInScreen, attachSignInScreen, SIGNIN_CSS } from './screens/coordinator/signin.js';
+import { errorText, FORM_ERRORS_CSS } from './screens/coordinator/formErrors.js';
 import { renderPassScreen, attachPassScreen, PASS_SCREEN_CSS } from './screens/pass.js';
 
 // Envoltorio flex nada más — el botón en sí (color, tamaño mínimo de
@@ -53,9 +57,15 @@ const SUBNAV_CSS = `
 /* El encabezado pasó de un solo botón a dos (volver + idioma); sin esto,
    el segundo se apila en vez de quedar a un lado. */
 .nc-coord-header-actions { display: flex; gap: 8px; align-items: center; }
+.nc-coord-user { font-size: 12px; opacity: 0.75; white-space: nowrap; }
 `;
 
-const ALL_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, ITINERARY_CSS, LODGING_CSS, QPASS_CSS, PASS_SCREEN_CSS, SUBNAV_CSS].join('\n');
+const GATE_CSS = `
+.nc-gate { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.nc-gate-msg { margin: 0; font-size: 14px; opacity: 0.8; }
+`;
+
+const ALL_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, ITINERARY_CSS, LODGING_CSS, QPASS_CSS, PASS_SCREEN_CSS, SUBNAV_CSS, SIGNIN_CSS, FORM_ERRORS_CSS, GATE_CSS].join('\n');
 
 function injectStylesOnce() {
   if (document.getElementById('nc-styles')) return;
@@ -140,18 +150,73 @@ export function renderVisitSubnav(route, t) {
 //   - "Volver a visitas" ya no se pinta estando en #/visits: ahí el clic no
 //     llevaba a ningún lado (el hash no cambia, no hay 'hashchange', no
 //     pasa nada). Un control que no hace nada es peor que ninguno.
-export function renderCoordinatorHeader(route, t) {
-  const backButton = route === 'visits'
+//   - Etapa D: quién está dentro y el botón de salir. Sin él no había forma
+//     de terminar una sesión: la máquina de coordinación se comparte y la
+//     cookie dura un turno completo de ocho horas (src/server/sessions.js),
+//     así que la siguiente persona que se sentara quedaría firmando cada
+//     mutación con la cuenta de quien se levantó — justo lo que las cuentas
+//     individuales existían para evitar. `user` es opcional: sin sesión
+//     (pantalla de acceso) no se pinta ninguna de las dos cosas.
+export function renderCoordinatorHeader(route, t, { user } = {}) {
+  // Dos condiciones, no una. La segunda salió del navegador: al darle a
+  // Salir estando en #/qpass, el hash se queda donde estaba y la pantalla
+  // de acceso heredaba este botón. El clic cambiaba el hash y repintaba…
+  // la misma pantalla de acceso, porque sin sesión no hay ruta que valga.
+  // El #20 otra vez, entrando por la puerta que abrió la Etapa C.
+  const backButton = route === 'visits' || !user
     ? ''
     : `<button type="button" class="nc-button" data-nav="visits">${escapeHtml(t('coordinator.backToVisits'))}</button>`;
+  // displayName primero, username de respaldo: el nombre para mostrar es
+  // opcional en la cuenta (src/server/accountStore.js) y un encabezado en
+  // blanco no dice quién está firmando.
+  const quien = user
+    ? `<span class="nc-coord-user">${escapeHtml(user.displayName || user.username || '')}</span>`
+    : '';
+  const salir = user
+    ? `<button type="button" class="nc-button" data-role="sign-out">${escapeHtml(t('coordinator.auth.signOut'))}</button>`
+    : '';
   return `
     <header class="nc-header">
       <span class="nc-header-title">${escapeHtml(t('coordinator.appName'))}</span>
       <div class="nc-coord-header-actions">
+        ${quien}
         ${backButton}
         <button type="button" class="nc-button" data-role="lang-toggle">${escapeHtml(t('common.langToggle'))}</button>
+        ${salir}
       </div>
     </header>
+  `;
+}
+
+// Los tres estados en que el panel todavía no puede pintar una pantalla:
+// verificando la sesión, esperando datos, o sin haber podido traerlos.
+//
+// Ninguno existía antes de la Etapa D — el store era una copia en memoria
+// de las fixtures, así que siempre había algo que pintar desde el primer
+// milisegundo. Con la API de por medio hay un hueco, y pintar la pantalla
+// vacía mientras llega la respuesta diría "esta visita no tiene citas"
+// cuando lo cierto es "todavía no me contestan": la misma mentira que el
+// store se cuida de no contar con sus dos mapas separados.
+export function renderCoordinatorGate({ kind, code }, t) {
+  if (kind === 'error') {
+    // Reintentar una visita que ya no existe no la va a resucitar; ofrecer
+    // el botón invita a picarle diez veces contra un 404.
+    const reintentar = code === 'gone'
+      ? ''
+      : `<button type="button" class="nc-button nc-button--primary" data-role="retry">${escapeHtml(t('coordinator.retry'))}</button>`;
+    return `
+      <section class="nc-screen nc-gate">
+        <p class="nc-gate-msg" role="alert">${escapeHtml(errorText(t, code))}</p>
+        ${reintentar}
+      </section>
+    `;
+  }
+  // role="status" y no "alert": esperar no es una emergencia, y anunciarlo
+  // como tal interrumpe lo que el lector de pantalla esté diciendo.
+  return `
+    <section class="nc-screen nc-gate">
+      <p class="nc-gate-msg" role="status" aria-live="polite">${escapeHtml(t(kind === 'checking' ? 'coordinator.auth.checking' : 'coordinator.loading'))}</p>
+    </section>
   `;
 }
 
@@ -163,8 +228,41 @@ function currentRoute() {
 export function boot(root) {
   injectStylesOnce();
 
-  const store = createCoordinatorStore();
+  // Etapa D — el panel deja de ser una copia en memoria de las fixtures.
+  //
+  // DOS transportes, no uno. Aquí había uno solo, con el argumento de que
+  // "la cookie viaja igual para /api/auth y /api/coordinator" — cierto, y
+  // sin embargo son dos Functions en dos rutas distintas
+  // (netlify/functions/auth.mjs y coordinator.mjs). Con uno solo, entrar
+  // pegaba en /api/coordinator/login: la pantalla de acceso se veía
+  // perfecta y nadie podía entrar. Las bases viven con nombre en api.js y
+  // test/ui/api.test.js las ata a las que exporta el servidor.
+  const store = createCoordinatorStore({ api: createHttpApi() });
+  const auth = createAuthClient({ api: createAuthApi() });
+
   let selectedVisitId = null;
+
+  // ---- sesión -----------------------------------------------------------
+  // 'checking' al arrancar y no 'out': mostrar la pantalla de acceso a
+  // alguien que YA tiene sesión válida —el caso normal al recargar— le
+  // pediría la contraseña sin necesidad, y ese hábito es justo el que
+  // entrena a teclearla en cualquier formulario que la pida.
+  let sesion = 'checking'; // 'checking' | 'in' | 'out'
+  let user = null;
+  let authError = null;
+  let authBusy = false;
+  // Sobrevive a un intento fallido; la contraseña jamás (ver signin.js).
+  let usuarioTecleado = '';
+
+  // ---- carga de datos ----------------------------------------------------
+  let listaCargada = false;
+  let listaError = null;
+  let visitaError = null;
+  let enVuelo = false;
+
+  // ---- resultado de la última mutación -----------------------------------
+  let pendingErrors = null;
+  let pendingRequestError = null;
 
   const storedLang = localStorage.getItem(LANG_STORAGE_KEY);
   // `let`, no `const`: el panel ya tiene su propio botón de idioma
@@ -191,16 +289,263 @@ export function boot(root) {
   // de 'hashchange', y ahí recibiría un Event como primer argumento.
   let pendingFlash = null;
 
+  // La sesión se cayó a media captura. No es un error de esta pantalla ni
+  // de este campo: se resuelve volviendo a entrar, y lo que estuviera
+  // pintado ya no vale porque se pintó con datos que ya no podemos
+  // refrescar.
+  function caducar() {
+    sesion = 'out';
+    user = null;
+    authError = 'expired';
+    listaCargada = false;
+    visitaError = null;
+  }
+
+  // Traduce el resultado de una mutación a lo que hay que pintar después.
+  // Devuelve si salió bien, para que quien llama decida si además navega.
+  //
+  // Los tres estados pendientes se limpian SIEMPRE al empezar: si no, el
+  // error del intento anterior seguiría en pantalla junto al éxito del
+  // nuevo, y "Guardado" debajo de "Falta la zona horaria" no dice nada
+  // útil sobre cuál de los dos es el estado real.
+  function aplicarResultado(res, flashOk) {
+    pendingFlash = null;
+    pendingErrors = null;
+    pendingRequestError = null;
+
+    // Sin resultado (una pantalla que solo pide repintar) cuenta como bien:
+    // no hay nada que reportar.
+    if (!res || res.ok) {
+      pendingFlash = typeof flashOk === 'string' ? flashOk : null;
+      return true;
+    }
+    if (res.unauthenticated) {
+      caducar();
+      return false;
+    }
+    // Errores por campo o un fallo de la petición entera, nunca los dos:
+    // son dos huecos distintos en el formulario y llenarlos a la vez
+    // duplicaría el mismo problema con dos redacciones.
+    if (res.errors) pendingErrors = res.errors;
+    else pendingRequestError = res.notFound ? 'gone' : 'network';
+    return false;
+  }
+
+  // Cambiar de visita invalida lo que supiéramos de la anterior: si la que
+  // se abrió antes no se pudo cargar, ese error no es de esta.
+  function seleccionar(visitId) {
+    selectedVisitId = visitId;
+    visitaError = null;
+  }
+
+  async function verificarSesion() {
+    const res = await auth.session();
+    if (res.ok) {
+      sesion = 'in';
+      user = res.user;
+      authError = null;
+    } else {
+      sesion = 'out';
+      user = null;
+      // Un fallo de red al arrancar NO se anuncia como sesión vencida: no
+      // sabemos si venció, solo que no pudimos preguntar.
+      authError = res.failed ? 'network' : null;
+    }
+    render();
+  }
+
+  // render() es síncrono a propósito (también es el listener de
+  // 'hashchange', que no espera promesas), así que la carga se dispara
+  // desde aquí y vuelve a pintar cuando termina. `enVuelo` evita que dos
+  // repintados seguidos lancen dos veces la misma petición; los flags de
+  // error evitan el ciclo infinito de "no hay datos -> pide -> falla -> no
+  // hay datos".
+  function asegurarDatos(route) {
+    if (enVuelo || sesion !== 'in') return;
+
+    if (!listaCargada && !listaError) {
+      enVuelo = true;
+      store.loadVisits().then((res) => {
+        enVuelo = false;
+        if (res.ok) listaCargada = true;
+        else if (res.unauthenticated) caducar();
+        else listaError = 'network';
+        render();
+      });
+      return;
+    }
+
+    const necesitaVisita = route === 'pass-preview' || SCREENS[route]?.needsVisit;
+    if (necesitaVisita && selectedVisitId && !store.getVisit(selectedVisitId) && !visitaError) {
+      enVuelo = true;
+      const pedida = selectedVisitId;
+      store.loadVisit(pedida).then((res) => {
+        enVuelo = false;
+        // Si mientras tanto se cambió de visita, esta respuesta ya no
+        // describe lo que hay en pantalla: se ignora en vez de escribir el
+        // error de una visita sobre otra.
+        if (pedida !== selectedVisitId) return render();
+        if (res.unauthenticated) caducar();
+        else if (!res.ok) visitaError = res.notFound ? 'gone' : 'network';
+        render();
+      });
+    }
+  }
+
+  // Pinta el chrome mínimo (encabezado, para poder cambiar de idioma o
+  // salir) más un solo bloque de contenido. Lo usan la pantalla de acceso y
+  // los tres estados de espera.
+  function pintarSolo(route, contenido, conUsuario) {
+    root.innerHTML = `
+      ${renderCoordinatorHeader(route, t, conUsuario ? { user } : {})}
+      <main class="nc-main" data-role="screen-mount"></main>
+    `;
+    root.querySelector('[data-role="screen-mount"]').innerHTML = contenido;
+    return root.querySelector('[data-role="screen-mount"]');
+  }
+
+  async function entrar(credenciales) {
+    authBusy = true;
+    authError = null;
+    usuarioTecleado = credenciales.username;
+    render();
+
+    const res = await auth.signIn(credenciales);
+    authBusy = false;
+    if (res.ok) {
+      sesion = 'in';
+      user = res.user;
+      usuarioTecleado = '';
+      listaCargada = false;
+      listaError = null;
+    } else {
+      authError = res.invalidCredentials ? 'invalidCredentials' : 'network';
+    }
+    render();
+  }
+
+  async function salir() {
+    // El estado local se tira ANTES de esperar la respuesta: si la petición
+    // falla, la sesión del navegador sigue viva pero la pantalla ya no
+    // muestra el expediente de nadie. Al revés —esperar y luego limpiar—
+    // deja los datos del paciente en pantalla mientras la red decide.
+    sesion = 'out';
+    user = null;
+    authError = null;
+    listaCargada = false;
+    visitaError = null;
+    selectedVisitId = null;
+    render();
+    await auth.signOut();
+  }
+
+  // El chrome que existe en TODAS las pantallas, incluidas las tres puertas
+  // (acceso, espera, fallo): navegación, idioma, salir, y el reintento
+  // cuando lo hay. Vivía dentro de render(), al final, así que las puertas
+  // —que devuelven antes de llegar ahí— se quedaban con un botón de idioma
+  // muerto: la única forma de cambiar de idioma en la pantalla de acceso
+  // habría sido entrar primero.
+  function cablearChrome(onRetry) {
+    attachNav(root);
+
+    // El toggle de idioma no es un [data-nav] (no navega a ningún lado:
+    // cambia el idioma de la ruta actual), así que se cablea aparte, igual
+    // que data-select-visit. Persistir ANTES de repintar: si render()
+    // fallara, la preferencia ya quedó guardada y la recarga muestra el
+    // idioma que la coordinadora eligió.
+    root.querySelector('[data-role="lang-toggle"]')?.addEventListener('click', () => {
+      lang = lang === 'es' ? 'en' : 'es';
+      try {
+        localStorage.setItem(LANG_STORAGE_KEY, lang);
+      } catch {
+        // Modo privado / almacenamiento lleno: cambiar de idioma en esta
+        // sesión debe funcionar igual, solo no se recuerda para la próxima.
+      }
+      render();
+    });
+
+    root.querySelector('[data-role="sign-out"]')?.addEventListener('click', salir);
+    if (onRetry) root.querySelector('[data-role="retry"]')?.addEventListener('click', onRetry);
+  }
+
+  // Navegar por hash tiene un hueco: si YA estamos en ese hash, el
+  // navegador no dispara 'hashchange' y no se repinta nada. Antes eso no se
+  // notaba porque el único destino era #/itinerary desde #/intake; ahora
+  // que un alta puede fallar y quedarse donde está, sí.
+  function irA(hash) {
+    if (location.hash === hash) render();
+    else location.hash = hash;
+  }
+
   function render() {
     const flash = pendingFlash;
+    const errors = pendingErrors;
+    const requestError = pendingRequestError;
     pendingFlash = null;
+    pendingErrors = null;
+    pendingRequestError = null;
 
     // Recalculado en cada render(), nunca cacheado al boot (ver
-    // encabezado del archivo): una coordinadora que lleve rato con la
-    // demo abierta no debe arrastrar un `now` viejo a una acción
-    // posterior (agregar/mover una cita, emitir un QPASS).
+    // encabezado del archivo). Desde la Etapa D solo lo usa #/pass-preview:
+    // las mutaciones ya no lo llevan porque la hora que queda escrita en el
+    // expediente la pone el servidor.
     const now = new Date().toISOString();
     const route = currentRoute();
+
+    // --- puerta de sesión, antes que cualquier otra cosa ------------------
+    // Antes de esto no había ninguna: el panel pedía datos a
+    // /api/coordinator, que exige sesión en toda ruta, y recibía 401 en
+    // todo sin decir por qué.
+    if (sesion === 'checking') {
+      pintarSolo(route, renderCoordinatorGate({ kind: 'checking' }, t), false);
+      cablearChrome();
+      return;
+    }
+
+    if (sesion === 'out') {
+      const ctx = { t, error: authError, username: usuarioTecleado, busy: authBusy, onSubmit: entrar };
+      const mount = pintarSolo(route, renderSignInScreen(ctx), false);
+      attachSignInScreen(mount, ctx);
+      cablearChrome();
+      return;
+    }
+
+    // --- puerta de datos ---------------------------------------------------
+    asegurarDatos(route);
+
+    if (listaError) {
+      pintarSolo(route, renderCoordinatorGate({ kind: 'error', code: listaError }, t), true);
+      cablearChrome(() => {
+        listaError = null;
+        render();
+      });
+      return;
+    }
+    if (!listaCargada) {
+      pintarSolo(route, renderCoordinatorGate({ kind: 'loading' }, t), true);
+      cablearChrome();
+      return;
+    }
+
+    const necesitaVisita = route === 'pass-preview' || SCREENS[route].needsVisit;
+    if (necesitaVisita && selectedVisitId) {
+      if (visitaError) {
+        pintarSolo(route, renderCoordinatorGate({ kind: 'error', code: visitaError }, t), true);
+        cablearChrome(() => {
+          visitaError = null;
+          render();
+        });
+        return;
+      }
+      if (!store.getVisit(selectedVisitId)) {
+        // El expediente completo todavía no llega. Pintar la pantalla vacía
+        // aquí diría "esta visita no tiene citas" — la misma mentira que el
+        // store se cuida de no contar (ver sus dos mapas separados).
+        pintarSolo(route, renderCoordinatorGate({ kind: 'loading' }, t), true);
+        cablearChrome();
+        return;
+      }
+    }
 
     const passRecord = route === 'pass-preview' ? store.getVisitWithPasses(selectedVisitId) : null;
 
@@ -244,7 +589,7 @@ export function boot(root) {
     // corresponder es una promesa que la pantalla no cumple.
     const mainRole = showSubnav ? ' role="tabpanel"' : '';
     root.innerHTML = `
-      ${renderCoordinatorHeader(route, t)}
+      ${renderCoordinatorHeader(route, t, { user })}
       ${showSubnav ? renderVisitSubnav(route, t) : ''}
       <main class="nc-main" data-role="screen-mount"${mainRole}></main>
     `;
@@ -273,8 +618,13 @@ export function boot(root) {
         visitId: selectedVisitId,
         lang,
         t,
-        now,
         flash,
+        // Etapa D — lo que el servidor rechazó del último intento. Antes
+        // no existía nada de esto porque no había servidor que rechazara
+        // nada: el store guardaba lo que le dieran. `errors` es por campo,
+        // `requestError` es de la petición entera.
+        errors,
+        requestError,
         // intake.js no navega por sí mismo (su propio reporte lo dice
         // explícito: "el enrutador decide qué hacer con la visita
         // nueva"). El `newVisit` que entrega se DESCARTABA: había que
@@ -286,9 +636,14 @@ export function boot(root) {
         // Solo se cambia el hash, igual que el resto de la navegación de
         // este panel (D28/attachNav); el listener de 'hashchange' de abajo
         // es quien vuelve a pintar, no una llamada a render() aquí.
-        onCreated: (newVisit) => {
-          selectedVisitId = newVisit.id;
-          location.hash = '#/itinerary';
+        // Etapa D — recibe el resultado del store, no la visita. La visita
+        // solo existe si el servidor la aceptó, y antes esa diferencia no
+        // viajaba a ningún lado: un alta rechazada se veía igual que una
+        // buena, con `newVisit` en undefined, y el `.id` tronaba.
+        onCreated: (res) => {
+          if (!aplicarResultado(res)) return render();
+          seleccionar(res.visit.id);
+          irA('#/itinerary');
         },
         // itinerary.js/lodging.js mutan la MISMA visita y se quedan en la
         // misma ruta — no hay cambio de hash que un listener de
@@ -296,12 +651,14 @@ export function boot(root) {
         // pantalla refleje la mutación es volver a llamar render()
         // directamente. Barato e idempotente para el tamaño de esta demo.
         //
-        // El argumento opcional es el mensaje a mostrar DESPUÉS de
-        // repintar (lodging.js manda 'saved'); itinerary.js llama sin
-        // argumento y no anuncia nada, porque ahí el cambio se ve solo en
-        // las tarjetas.
-        onChange: (nextFlash) => {
-          pendingFlash = typeof nextFlash === 'string' ? nextFlash : null;
+        // Etapa D — el primer argumento es el resultado del store; el
+        // segundo, opcional, el mensaje a mostrar si salió bien (lodging.js
+        // manda 'saved'; itinerary.js no manda ninguno porque ahí el cambio
+        // se ve solo en las tarjetas). Antes solo llegaba el mensaje, así
+        // que un rechazo del servidor se repintaba idéntico a un guardado
+        // correcto: la cita simplemente no aparecía y nadie decía por qué.
+        onChange: (res, flashOk) => {
+          aplicarResultado(res, flashOk);
           render();
         },
         // qpass.js deliberadamente no pinta su propio estado "emitido"
@@ -309,29 +666,16 @@ export function boot(root) {
         // render() de nuevo es lo que hace aparecer, ya cableado por
         // attachNav, el botón data-nav="pass-preview" de la vista
         // "emitido".
-        onIssued: render,
+        onIssued: (res) => {
+          aplicarResultado(res);
+          render();
+        },
       };
       mount.innerHTML = screen.render(ctx);
       if (screen.attach) screen.attach(mount, ctx);
     }
 
-    attachNav(root);
-
-    // El toggle de idioma no es un [data-nav] (no navega a ningún lado:
-    // cambia el idioma de la ruta actual), así que se cablea aparte, igual
-    // que data-select-visit más abajo. Persistir ANTES de repintar: si
-    // render() fallara, la preferencia ya quedó guardada y la recarga
-    // muestra el idioma que la coordinadora eligió.
-    root.querySelector('[data-role="lang-toggle"]')?.addEventListener('click', () => {
-      lang = lang === 'es' ? 'en' : 'es';
-      try {
-        localStorage.setItem(LANG_STORAGE_KEY, lang);
-      } catch {
-        // Modo privado / almacenamiento lleno: cambiar de idioma en esta
-        // sesión debe funcionar igual, solo no se recuerda para la próxima.
-      }
-      render();
-    });
+    cablearChrome();
 
     // data-select-visit (visits.js) no es un destino fijo de navegación —
     // carga un id variable que data-nav no puede expresar — así que este
@@ -340,7 +684,7 @@ export function boot(root) {
     // fijos).
     root.querySelectorAll('[data-select-visit]').forEach((el) => {
       el.addEventListener('click', () => {
-        selectedVisitId = el.dataset.selectVisit;
+        seleccionar(el.dataset.selectVisit);
         // Aterrizaje default tras elegir una visita: esta demo no tiene
         // una pantalla de "detalle" propia, y el itinerario es lo primero
         // que necesita ver una coordinadora de una visita ya existente.
@@ -350,5 +694,6 @@ export function boot(root) {
   }
 
   window.addEventListener('hashchange', render);
-  render();
+  render();          // pinta "verificando sesión…" de inmediato
+  verificarSesion(); // y pregunta; cuando conteste, vuelve a pintar
 }

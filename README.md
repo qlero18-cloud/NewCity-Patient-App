@@ -11,12 +11,12 @@ Las siete pantallas del paciente (Inicio, Mi itinerario, Mapa y accesos, Plaza, 
 - Mapa esquemático interactivo con resaltado sincronizado a la ruta — `phase-04-map-svg.md`.
 - Bilingüe ES/EN con paridad de cadenas probada, tema claro/oscuro, `index.html` autocontenido (cero peticiones a terceros) — `phase-05-patient-ui.md`.
 - QPASS con símbolo QR o Code128 generado sin dependencias externas, con caché para seguir viéndose sin conexión — `phase-06-qpass-render.md`.
-- Demo del panel de coordinadores — alta de visita, itinerario (agregar, editar, mover, cancelar), hospedaje y emisión de QPASS (subiendo una imagen ya existente) — punto de entrada aparte (`coordinator.html`), sin login, todo en memoria del navegador sobre su propia copia de `src/data/fixtures.js` — `phase-09-coordinator-demo.md`.
+- Panel de coordinadores (`coordinator.html`) — alta de visita, itinerario (agregar, editar, mover, cancelar), hospedaje y emisión de QPASS (subiendo una imagen ya existente), con cuenta propia por persona y todo guardado del lado del servidor. **Ya no es una demo en memoria**: desde la Etapa D lo que se captura sobrevive a recargar la página y a abrirla en otra máquina, y cada cambio queda firmado con quién lo hizo — `phase-09-coordinator-demo.md` describe el flujo de pantallas, que no cambió; lo que cambió está en `docs/DECISIONS.md` D37–D38 y D45–D58.
 
 ## Qué NO hace (a propósito)
 
-- **Panel de coordinadores con backend real** (fase 08): persistencia de verdad, autenticación de coordinadoras y que lo que ahí se capture alimente de verdad la sesión de un paciente real. Fuera del prototipo — se planea, no se construye. La demo de fase 09 (arriba) ensaya el mismo flujo de clic, pero por completo en memoria del navegador: se pierde al recargar y nunca toca la sesión real de ningún paciente ni persiste nada más allá de la pestaña abierta.
-- **Backend real**: no hay servidor, base de datos ni autenticación. El "token" de la URL (`?p=`) se resuelve contra las fixtures en el propio navegador.
+- **Que el paciente vea lo que capturó coordinación.** Es lo único que falta para cerrar el circuito, y es la Etapa E: hoy el panel guarda de verdad, pero `src/ui/app.js` todavía resuelve el token de la URL (`?p=`) contra las fixtures embebidas, así que una visita creada por una coordinadora no se puede abrir todavía. Tampoco existe aún la pantalla de entrega (enlace + QR + WhatsApp) que le pasa esa visita al paciente.
+- **Nada probado contra Netlify Blobs de verdad.** Toda la suite —y la verificación en navegador de la Etapa D— corre contra un almacén llave/valor en memoria, a propósito (D45): el núcleo no importa la plataforma. Lo que eso deja sin comprobar es el envoltorio (`netlify/functions/_kv.mjs`) y el comportamiento real de Blobs bajo escrituras simultáneas, que es justo la limitación anotada en D54.
 - **Resultados clínicos, expediente, pagos ni login** — fuera del v1 desde el PRD (D09).
 - **Posicionamiento en vivo dentro del edificio** — el ruteo es paso a paso pre-escrito (D06), no un "estás aquí" en tiempo real.
 
@@ -69,6 +69,16 @@ http://localhost:8743/app.html?p=fixture-token-v-demo1&now=2026-03-10T10:00-07:0
 `python3 -m http.server` no manda `Cache-Control` en sus respuestas, así que tras editar un archivo y recargar, el navegador puede seguir sirviendo una copia vieja de algún `.js` desde su propio caché (comprobado de primera mano verificando la fase 09: un `.click()` sobre una pestaña que llevaba rato abierta seguía corriendo `pass.js` de antes de un fix ya guardado en disco). Si un cambio no se refleja, recarga forzando caché vacío (Cmd+Shift+R en Mac) en vez de una recarga normal.
 
 `p` es el token de una de las fixtures de `src/data/fixtures.js` (`fixture-token-v-demo1`, `-v-demo2`, `-v-longstay`, `-v-expired`, `-v-revoked`). `now` es un escape hatch de este prototipo (D20): ancla la hora "actual" a la fecha de la fixture — sin él, la fecha real eventualmente deja cualquier fixture vencida (INV-3), porque no hay backend que las mantenga vigentes.
+
+### El panel de coordinación necesita las Functions
+
+`coordinator.html` no funciona con un servidor estático a secas: desde la Etapa D cada pantalla habla con `/api/auth/*` y `/api/coordinator/*`, y con `python3 -m http.server` esas rutas devuelven 404 — la pantalla de acceso se ve bien y no deja entrar. Hace falta levantar las Functions:
+
+```bash
+npx netlify dev
+```
+
+Aviso de honestidad: **este comando no se ha corrido en este entorno.** `netlify-cli` no está instalado aquí y no se instaló (es una dependencia grande, y Blobs en local pide sesión de Netlify). La verificación en navegador de la Etapa D se hizo montando los mismos handlers de `src/server/` sobre un KV en memoria, que es exactamente lo que hacen las pruebas. Lo que eso comprueba es el panel completo —entrar, capturar, validar, recargar, salir— y lo que NO comprueba es la capa de Netlify por debajo.
 
 ## Cuentas de coordinación y variables de entorno
 
@@ -127,7 +137,7 @@ Cada fase tiene su propio comando exacto en la sección "Verificación" de `docs
 
 ```bash
 cd "newcity-patient-app"
-npm test                              # los 509 casos automatizados de todas las fases y etapas
+npm test                              # los 637 casos automatizados de todas las fases y etapas
 python3 build.py                      # genera index.html autocontenido
 node test/e2e/patient-journey.mjs     # los 10 pasos del recorrido, fase 07
 ```

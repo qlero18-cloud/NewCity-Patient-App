@@ -6,7 +6,11 @@
 // archivo sigue ese diseño al pie de la letra, no lo reinterpreta.
 //
 // ctx de renderQpassScreen: { store, visitId, lang, t }.
-// ctx de attachQpassScreen: lo anterior + { now, onIssued }.
+// ctx de attachQpassScreen: lo anterior + { onIssued }.
+//
+// Etapa D — `now` desapareció: la hora de emisión la pone el servidor. El
+// reloj de la máquina de coordinación no tiene por qué ser el que quede
+// escrito en el expediente.
 //
 // "Emitido" para ESTA pantalla significa específicamente que la visita ya
 // tiene un QPass con format:'image' — no "la visita ya tiene algún QPass".
@@ -25,6 +29,7 @@ import { escapeHtml } from '../../util.js';
 import { renderCard } from '../../components/card.js';
 import { renderBadge } from '../../components/badge.js';
 import { isRevoked } from '../../../domain/passes.js';
+import { errorText } from './formErrors.js';
 
 const SCOPES = ['torre', 'piso27', 'estacionamiento'];
 
@@ -149,7 +154,7 @@ export function renderQpassScreen(ctx) {
 // para la misma ruta, para que el botón data-nav="pass-preview" que
 // aparece recién nazca ya cableado.
 export function attachQpassScreen(rootEl, ctx) {
-  const { store, visitId, now, onIssued, t } = ctx;
+  const { store, visitId, onIssued, t } = ctx;
 
   // Local al closure de ESTA llamada (no variable de módulo): una segunda
   // llamada a attach para otra visita no debe heredar la imagen de la
@@ -169,11 +174,15 @@ export function attachQpassScreen(rootEl, ctx) {
   // nuevo". Se separan porque son dos decisiones distintas para quien las
   // toma, aunque compartan implementación.
   for (const btn of [revokeBtn, reissueBtn]) {
-    btn?.addEventListener('click', () => {
+    btn?.addEventListener('click', async () => {
       const passId = btn.dataset.passId;
       if (!passId) return;
-      store.revokeQpass(visitId, passId, now);
-      onIssued?.(); // mismo callback: "el estado del pase cambió, vuelve a pintar"
+      btn.disabled = true; // aquí sí: revocar dos veces el mismo pase es un 404 confuso, y no hay nada escrito que perder
+      const res = await store.revokeQpass(visitId, passId);
+      // Mismo callback: "el estado del pase cambió, vuelve a pintar". Ahora
+      // lleva el resultado, para que un fallo no se vea igual que un éxito.
+      onIssued?.(res);
+      if (!res.ok) btn.disabled = false;
     });
   }
 
@@ -193,6 +202,19 @@ export function attachQpassScreen(rootEl, ctx) {
       errorEl.textContent = t(`coordinator.qpass.error.${reason}`);
       errorEl.hidden = false;
     }
+  }
+
+  // El store devuelve banderas, no códigos: aquí se elige cuál explica
+  // mejor lo que pasó. `gone` (la visita ya no está) es el caso en que
+  // reintentar no sirve de nada.
+  //
+  // La sesión caída NO sale por aquí: no es un problema de esta pantalla
+  // sino del panel entero, y se resuelve volviendo a entrar. Se le pasa al
+  // router, que es quien sabe pintar la pantalla de acceso.
+  function motivoDeFallo(res) {
+    if (res.notFound) return 'gone';
+    if (res.errors) return Object.values(res.errors)[0] ?? 'invalid';
+    return 'network';
   }
 
   function clearError() {
@@ -226,11 +248,34 @@ export function attachQpassScreen(rootEl, ctx) {
     reader.readAsDataURL(file);
   });
 
-  issueBtn?.addEventListener('click', () => {
+  issueBtn?.addEventListener('click', async () => {
     if (!qpassImageDataUrl) return;
     const scope = scopeSelect?.value ?? SCOPES[0];
-    store.issueQpass(visitId, { format: 'image', payload: qpassImageDataUrl, scope }, now);
-    onIssued?.();
+
+    clearError();
+    issueBtn.disabled = true; // la imagen puede pesar 2 MB: la subida tarda y el doble clic emitiría dos pases
+    const res = await store.issueQpass(visitId, { format: 'image', payload: qpassImageDataUrl, scope });
+
+    if (!res.ok) {
+      // Sesión caída: la arregla el router volviendo a pedir acceso, no
+      // esta pantalla con un renglón rojo.
+      if (res.unauthenticated) {
+        onIssued?.(res);
+        return;
+      }
+      // A diferencia de showError, esto NO tira la imagen ni vacía la vista
+      // previa: lo que falló fue el viaje, no el archivo, y volver a elegir
+      // una foto de 2 MB por un tropiezo de red es trabajo perdido por nada.
+      // Tampoco se repinta la pantalla, por lo mismo.
+      if (errorEl) {
+        errorEl.textContent = errorText(t, motivoDeFallo(res));
+        errorEl.hidden = false;
+      }
+      issueBtn.disabled = false;
+      return;
+    }
+
+    onIssued?.(res);
   });
 }
 

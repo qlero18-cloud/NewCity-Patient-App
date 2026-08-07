@@ -9,11 +9,26 @@
 // (el enrutador, construido aparte) decide qué hacer con la visita nueva
 // vía el callback onCreated; por eso este archivo no trae ningún
 // data-nav.
+//
+// Etapa D — onCreated ya no recibe la visita, recibe el resultado entero
+// del store: { ok, visit } o { ok: false, errors } . La visita solo existe
+// si el servidor la aceptó, y antes esa diferencia no viajaba a ningún
+// lado. El servidor valida lo mismo que el `required` de los campos, y
+// además lo que el navegador no puede: que las fechas se entiendan y que
+// endsAt vaya después de startsAt.
 
 import { escapeHtml } from '../../util.js';
+import { renderFormErrors, renderRequestError } from './formErrors.js';
+
+const CAMPOS = {
+  patientFirstName: 'coordinator.intake.firstNameLabel',
+  lang: 'coordinator.intake.langLabel',
+  startsAt: 'coordinator.intake.startsAtLabel',
+  endsAt: 'coordinator.intake.endsAtLabel',
+};
 
 export function renderIntakeScreen(ctx) {
-  const { t } = ctx;
+  const { t, errors, requestError } = ctx;
 
   return `
     <section class="nc-screen">
@@ -42,6 +57,9 @@ export function renderIntakeScreen(ctx) {
           <input type="text" name="endsAt" class="nc-input" placeholder="2026-03-12T12:00-07:00" required />
         </label>
 
+        ${renderRequestError(requestError, t)}
+        ${renderFormErrors(errors, t, CAMPOS)}
+
         <button type="submit" class="nc-button nc-button--primary">${escapeHtml(t('coordinator.intake.save'))}</button>
       </form>
     </section>
@@ -51,16 +69,26 @@ export function renderIntakeScreen(ctx) {
 export function attachIntakeScreen(rootEl, ctx = {}) {
   const { store, onCreated } = ctx;
   const form = rootEl.querySelector('[data-role="intake-form"]');
-  form?.addEventListener('submit', (event) => {
+  form?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const data = new FormData(form);
-    const newVisit = store.createVisit({
+    // Deshabilitar el botón mientras viaja no es cosmética aquí: crear dos
+    // veces la misma visita deja dos expedientes con dos tokens, y el
+    // paciente recibe uno de los dos sin manera de saber cuál es el bueno.
+    const boton = form.querySelector('button[type="submit"]');
+    if (boton) boton.disabled = true;
+
+    const res = await store.createVisit({
       patientFirstName: data.get('patientFirstName'),
       lang: data.get('lang'),
       startsAt: data.get('startsAt'),
       endsAt: data.get('endsAt'),
     });
-    onCreated?.(newVisit);
+
+    // Sin repintado no hay botón nuevo: si falló, se reactiva este. Si
+    // salió bien, el router se lleva la pantalla por delante y da igual.
+    if (!res.ok && boton) boton.disabled = false;
+    onCreated?.(res);
   });
 }
 
