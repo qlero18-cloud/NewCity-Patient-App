@@ -52,7 +52,9 @@ https://nchpatient.netlify.app/demo
 
 ## Cómo correrlo localmente
 
-Este proyecto no tiene dependencias (ni `npm install` que correr). Sirve los archivos con cualquier servidor estático — **no lo abras como `file://` directo**: la mayoría de navegadores (confirmado en el navegador integrado de este entorno) descartan la query string en esa modalidad, y `?p=` es obligatorio para ver algo.
+Desde la Etapa B el proyecto **sí** tiene una dependencia (`@netlify/blobs`), así que hay un `npm install` que correr. Las pruebas siguen sin necesitarla: corren contra un almacén en memoria y no tocan la red (D45).
+
+Para las pantallas del paciente basta un servidor estático — **no lo abras como `file://` directo**: la mayoría de navegadores (confirmado en el navegador integrado de este entorno) descartan la query string en esa modalidad, y `?p=` es obligatorio para ver algo.
 
 ```bash
 cd "newcity-patient-app" && python3 -m http.server 8743
@@ -68,13 +70,64 @@ http://localhost:8743/app.html?p=fixture-token-v-demo1&now=2026-03-10T10:00-07:0
 
 `p` es el token de una de las fixtures de `src/data/fixtures.js` (`fixture-token-v-demo1`, `-v-demo2`, `-v-longstay`, `-v-expired`, `-v-revoked`). `now` es un escape hatch de este prototipo (D20): ancla la hora "actual" a la fecha de la fixture — sin él, la fecha real eventualmente deja cualquier fixture vencida (INV-3), porque no hay backend que las mantenga vigentes.
 
+## Cuentas de coordinación y variables de entorno
+
+Esta parte **no la hago yo**. Construí el mecanismo y el script de alta; las cuentas reales y sus contraseñas las capturas tú, y ni las contraseñas ni el secreto de sesión pasan por mí ni quedan escritos en ninguna conversación.
+
+### 1. `SESSION_SECRET` (obligatorio)
+
+Es la llave con la que se firman las cookies de sesión. **No tiene valor por defecto a propósito**: si falta, la Function de auth responde 500 desde el primer intento. Un respaldo silencioso significaría que la misma llave firma en todas partes y cualquiera que haya visto el repo se fabrica una sesión válida (D53).
+
+Generar uno:
+
+```bash
+node scripts/create-coordinator.mjs --gen-secret
+```
+
+Pegarlo en Netlify → *Site configuration* → *Environment variables* → `SESSION_SECRET`. No lo commitees. Cambiarlo cierra la sesión de todas las coordinadoras al instante, que es justo lo que quieres si crees que se filtró.
+
+### 2. Dar de alta a cada persona
+
+El script habla con el Blobs del sitio desde tu máquina, y para eso hacen falta dos variables más — el runtime de Netlify las inyecta solo cuando el código corre allá, no en tu terminal:
+
+| Variable | Dónde sale |
+|---|---|
+| `NETLIFY_SITE_ID` | *Site configuration* → *General* → Site ID |
+| `NETLIFY_AUTH_TOKEN` | *User settings* → *Applications* → Personal access tokens |
+
+Ese token es de administración del sitio: no lo pegues en el repo, no lo mandes por chat, y bórralo de Netlify cuando termines de dar de alta.
+
+```bash
+node scripts/create-coordinator.mjs --username ana.ruiz --name "Ana Ruiz"
+```
+
+La contraseña se pide por teclado, sin eco, y se confirma dos veces. **No se puede pasar por argumento**, y no es un descuido: la línea de comandos queda en el historial de la shell y la ve cualquiera que corra `ps` mientras el script trabaja. Mínimo 12 caracteres, sin reglas de composición (NIST SP 800-63B). Entrégasela a la persona por un canal distinto de aquel por el que le mandes el usuario.
+
+Los otros comandos:
+
+```bash
+node scripts/create-coordinator.mjs --list
+```
+
+```bash
+node scripts/create-coordinator.mjs --delete ana.ruiz
+```
+
+Dar de baja surte efecto en la siguiente petición, no hasta que caduque su cookie: cada mutación vuelve a comprobar que la cuenta siga existiendo (D53). Borrar pide teclear el usuario completo, no un "s/n".
+
+### 3. Lo que este mecanismo NO resuelve
+
+Cinco intentos fallidos bloquean la cuenta 15 minutos y el bloqueo se vence solo — frena la adivinanza a fuerza bruta, no la vuelve imposible, y con peticiones simultáneas el contador puede quedarse corto porque Blobs no tiene comparar-y-fijar (D54). No hay segundo factor, ni recuperación de contraseña: si alguien la olvida, se da de baja la cuenta y se vuelve a dar de alta.
+
+Y lo más importante, que es decisión del hospital y no de la implementación: **antes de capturar pacientes reales**, el tratamiento de datos de salud (LFPDPPP, y lo que aplique del lado estadounidense si hay pacientes cruzando) tiene que estar resuelto por quien es responsable de esos datos. Este README documenta el mecanismo; no constituye una evaluación de cumplimiento.
+
 ## Verificación
 
 Cada fase tiene su propio comando exacto en la sección "Verificación" de `docs/phases/phase-0N-*.md`. El resumen:
 
 ```bash
 cd "newcity-patient-app"
-npm test                              # los 246 casos automatizados de todas las fases
+npm test                              # los 509 casos automatizados de todas las fases y etapas
 python3 build.py                      # genera index.html autocontenido
 node test/e2e/patient-journey.mjs     # los 10 pasos del recorrido, fase 07
 ```

@@ -10,8 +10,12 @@
 
 import { getStore } from '@netlify/blobs';
 
-export function blobsKv(storeName) {
-  const store = getStore(storeName);
+// `options` solo lo usa scripts/create-coordinator.mjs, que corre en la
+// máquina de quien administra y no dentro de Netlify: allá el runtime inyecta
+// solo las credenciales del sitio, aquí hay que pasarle { siteID, token } a
+// mano. Las Functions siguen llamando blobsKv(STORE) sin nada más.
+export function blobsKv(storeName, options) {
+  const store = options ? getStore({ name: storeName, ...options }) : getStore(storeName);
 
   return {
     // `type: 'json'` ya devuelve null si la llave no existe, que es
@@ -41,3 +45,9 @@ export function blobsKv(storeName) {
 // hospedaje viven DENTRO del registro de la visita (misma forma que
 // src/data/fixtures.js), así que no hacen falta almacenes aparte.
 export const VISITS_STORE = 'visits';
+
+// Las cuentas van en OTRO almacén, no en otro prefijo del mismo (Etapa C).
+// Son lo único que puede darle a alguien acceso a todos los expedientes, así
+// que separarlas hace que un `list()` sobre las visitas no las roce nunca y
+// que se puedan respaldar, migrar o borrar por su cuenta.
+export const ACCOUNTS_STORE = 'accounts';
