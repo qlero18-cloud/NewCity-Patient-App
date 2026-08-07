@@ -2325,16 +2325,30 @@ const CODE128_CONFIG = { minChar: MIN_CHAR, maxChar: MAX_CHAR };
 // --- src/render/qr.js ---
 // Fase 06 — generador de QR sin dependencias externas (ISO/IEC 18004).
 //
-// ALCANCE DELIBERADAMENTE ACOTADO, no un generador general: Versión 3
-// (29×29), nivel de corrección de errores M, modo byte, un solo bloque
-// (sin entrelazado). PRD §15.7 no tiene todavía el formato real del
-// payload del QPASS confirmado — en vez de construir las 40 versiones ×
-// 4 niveles del spec completo sin saber qué hace falta de verdad,
-// se acota a una configuración que cubre payloads cortos (hasta 42 bytes
-// UTF-8) y se documenta el límite: un payload real más largo obliga a
-// ampliar esto, no a que el generador falle en silencio (por eso
-// generateQrMatrix lanza una excepción clara si no cabe, en vez de
-// truncar o corromper el símbolo).
+// ALCANCE DELIBERADAMENTE ACOTADO, no un generador general: versiones 3
+// (29×29) y 4 (33×33), nivel de corrección de errores M, modo byte. PRD
+// §15.7 no tiene todavía el formato real del payload del QPASS confirmado
+// — en vez de construir las 40 versiones × 4 niveles del spec completo sin
+// saber qué hace falta de verdad, se acota a lo que el producto necesita y
+// se documenta el límite: un payload más largo obliga a ampliar esto, no a
+// que el generador falle en silencio (por eso generateQrMatrix lanza una
+// excepción clara si no cabe, en vez de truncar o corromper el símbolo).
+//
+// La versión 4 entró en la Etapa E: el enlace de visita lleva un token de
+// 128 bits y mide ~55 bytes, y en la 3 solo caben 42. La 4 trae la primera
+// complicación real del spec — el mensaje ya no es un bloque sino DOS, con
+// sus codewords de corrección calculados por separado y luego ENTRELAZADOS
+// (D1₁, D2₁, D1₂, D2₂, …). Un entrelazado mal hecho produce un símbolo que
+// se ve perfecto y que decodeQrMatrix lee sin quejarse —porque
+// de-entrelaza con el mismo error— pero que ningún teléfono puede leer.
+// Por eso la comparación contra la implementación de referencia dejó de
+// ser un ejercicio de una sola vez y vive congelada en
+// test/render/qrReference.fixture.js.
+//
+// generateQrMatrix elige la versión MÁS CHICA donde quepa el payload, no
+// la más grande: el QPASS de la fase 06 sigue pendiente de la prueba con
+// lectora física, y subirlo a versión 4 en silencio invalidaría justo esa
+// verificación. Lo que cabía en la 3 se sigue emitiendo idéntico.
 //
 // Verificación real de este archivo (no solo que mi propio decodificador
 // esté de acuerdo consigo mismo, que es una prueba débil — encoder y
@@ -2415,11 +2429,59 @@ function rsComputeEcc(dataCodewords, numEccCodewords) {
   return remainder.slice(dataCodewords.length);
 }
 
-// --- Versión 3 / nivel M — constantes verificadas, ver comentario de cabecera ---
-const SIZE = 29;
-const DATA_CODEWORDS = 44;
-const ECC_CODEWORDS = 26;
-const MAX_BYTES = Math.floor((DATA_CODEWORDS * 8 - 4 - 8) / 8); // 4 bits modo + 8 bits contador (bytes, versión ≤9) — 42
+// --- Nivel M, modo byte — constantes verificadas, ver comentario de cabecera ---
+//
+// `blocks` es lo que separa a la 3 de la 4: la versión 4 parte el mensaje
+// en dos bloques de 32 codewords, cada uno con sus 18 de corrección. Los
+// dos bloques miden lo mismo, así que el entrelazado es una simple
+// alternancia; las versiones donde los bloques son de tamaños distintos
+// (grupo 1 / grupo 2) no están soportadas y no hace falta que lo estén.
+const QR_VERSION_SPECS = {
+  3: { blocks: 1, dataPerBlock: 44, eccPerBlock: 26 },
+  4: { blocks: 2, dataPerBlock: 32, eccPerBlock: 18 },
+};
+
+// El resto se deriva: repetir a mano `size: 29` o `maxBytes: 42` sería
+// dejar dos fuentes que pueden separarse. 4 bits de modo + 8 bits de
+// contador (bytes, versión ≤9) = 2 codewords que el payload no puede usar.
+const QR_VERSIONS = Object.fromEntries(
+  Object.entries(QR_VERSION_SPECS).map(([v, spec]) => {
+    const version = Number(v);
+    const dataCodewords = spec.blocks * spec.dataPerBlock;
+    return [
+      version,
+      {
+        ...spec,
+        version,
+        size: 17 + version * 4,
+        dataCodewords,
+        eccCodewords: spec.blocks * spec.eccPerBlock,
+        maxBytes: dataCodewords - 2,
+      },
+    ];
+  }),
+);
+
+const VERSIONS_ASCENDENTES = Object.values(QR_VERSIONS).sort((a, b) => a.version - b.version);
+const QR_MAX_BYTES = VERSIONS_ASCENDENTES[VERSIONS_ASCENDENTES.length - 1].maxBytes;
+
+// La versión más chica donde quepa: ver el comentario de cabecera sobre por
+// qué no se usa siempre la más grande.
+function versionForBytes(numBytes) {
+  const spec = VERSIONS_ASCENDENTES.find((v) => numBytes <= v.maxBytes);
+  if (!spec) {
+    throw new Error(`qr: el payload mide ${numBytes} bytes UTF-8 y el máximo que este generador sabe emitir es ${QR_MAX_BYTES} (versión 4, nivel M, modo byte)`);
+  }
+  return spec.version;
+}
+
+function specForVersion(version) {
+  const spec = QR_VERSIONS[version];
+  if (!spec) {
+    throw new Error(`qr: versión ${version} no soportada; este generador solo emite ${Object.keys(QR_VERSIONS).join(' y ')}`);
+  }
+  return spec;
+}
 
 // Strings de información de formato (15 bits, ya con BCH + máscara XOR
 // aplicados) para nivel M, índice = patrón de máscara 0–7. Verificados por
@@ -2453,23 +2515,23 @@ function alignmentPatternCenters(version) {
   return positions;
 }
 
-function isNearFinder(r, c) {
+function isNearFinder(r, c, size) {
   const inTopLeft = r < 9 && c < 9;
-  const inTopRight = r < 9 && c >= SIZE - 8;
-  const inBottomLeft = r >= SIZE - 8 && c < 9;
+  const inTopRight = r < 9 && c >= size - 8;
+  const inBottomLeft = r >= size - 8 && c < 9;
   return inTopLeft || inTopRight || inBottomLeft;
 }
 
-function createGrid(fill) {
-  return Array.from({ length: SIZE }, () => new Array(SIZE).fill(fill));
+function createGrid(fill, size) {
+  return Array.from({ length: size }, () => new Array(size).fill(fill));
 }
 
-function stampFinderPattern(modules, reserved, topRow, leftCol) {
+function stampFinderPattern(modules, reserved, topRow, leftCol, size) {
   for (let r = -1; r <= 7; r++) {
     for (let c = -1; c <= 7; c++) {
       const rr = topRow + r;
       const cc = leftCol + c;
-      if (rr < 0 || rr >= SIZE || cc < 0 || cc >= SIZE) continue;
+      if (rr < 0 || rr >= size || cc < 0 || cc >= size) continue;
       reserved[rr][cc] = true;
       if (r < 0 || r > 6 || c < 0 || c > 6) {
         modules[rr][cc] = false; // separador
@@ -2494,34 +2556,35 @@ function stampAlignmentPattern(modules, reserved, centerRow, centerCol) {
   }
 }
 
-function buildFunctionPatterns() {
-  const modules = createGrid(false);
-  const reserved = createGrid(false);
+function buildFunctionPatterns(spec) {
+  const { size, version } = spec;
+  const modules = createGrid(false, size);
+  const reserved = createGrid(false, size);
 
-  stampFinderPattern(modules, reserved, 0, 0);
-  stampFinderPattern(modules, reserved, 0, SIZE - 7);
-  stampFinderPattern(modules, reserved, SIZE - 7, 0);
+  stampFinderPattern(modules, reserved, 0, 0, size);
+  stampFinderPattern(modules, reserved, 0, size - 7, size);
+  stampFinderPattern(modules, reserved, size - 7, 0, size);
 
   // Patrón de temporización (timing): fila 6 y columna 6, alternando,
   // entre los separadores de los tres buscadores.
-  for (let i = 8; i < SIZE - 8; i++) {
+  for (let i = 8; i < size - 8; i++) {
     modules[6][i] = i % 2 === 0;
     reserved[6][i] = true;
     modules[i][6] = i % 2 === 0;
     reserved[i][6] = true;
   }
 
-  const centers = alignmentPatternCenters(3);
+  const centers = alignmentPatternCenters(version);
   for (const cr of centers) {
     for (const cc of centers) {
-      if (isNearFinder(cr, cc)) continue;
+      if (isNearFinder(cr, cc, size)) continue;
       stampAlignmentPattern(modules, reserved, cr, cc);
     }
   }
 
   // Módulo oscuro fijo, versión V: (4V+9, 8) en (fila, columna).
-  modules[4 * 3 + 9][8] = true;
-  reserved[4 * 3 + 9][8] = true;
+  modules[4 * version + 9][8] = true;
+  reserved[4 * version + 9][8] = true;
 
   // Áreas reservadas para información de formato (se rellenan después de
   // elegir máscara): franjas junto a los tres buscadores. Deben calzar
@@ -2537,10 +2600,10 @@ function buildFunctionPatterns() {
     reserved[i][8] = true; // copia 1, segunda mitad: columna 8, filas 0–8
   }
   for (let i = 0; i < 8; i++) {
-    reserved[8][SIZE - 1 - i] = true; // copia 2, primera mitad: fila 8, columnas 21–28
+    reserved[8][size - 1 - i] = true; // copia 2, primera mitad: fila 8, las 8 últimas columnas
   }
   for (let i = 8; i < 15; i++) {
-    reserved[SIZE - 15 + i][8] = true; // copia 2, segunda mitad: columna 8, filas 22–28
+    reserved[size - 15 + i][8] = true; // copia 2, segunda mitad: columna 8, las 7 últimas filas
   }
 
   return { modules, reserved };
@@ -2559,7 +2622,7 @@ function bitAt(bits, i) {
   return bits[14 - i] === '1';
 }
 
-function stampFormatInfo(modules, maskPattern) {
+function stampFormatInfo(modules, maskPattern, size) {
   const bits = FORMAT_INFO_M[maskPattern];
   // Copia 1 — envuelve la esquina del buscador superior izquierdo: baja
   // por la columna 8 (bits 0–5, filas 0–5), gira en (7,8)/(8,8) [bits
@@ -2571,16 +2634,16 @@ function stampFormatInfo(modules, maskPattern) {
   modules[8][7] = bitAt(bits, 8);
   for (let i = 9; i < 15; i++) modules[8][14 - i] = bitAt(bits, i);
 
-  // Copia 2: fila 8 cerca del buscador superior derecho (bits 0–7,
-  // columnas 28..21), luego columna 8 cerca del buscador inferior
-  // izquierdo (bits 8–14, filas 22..28).
-  for (let i = 0; i < 8; i++) modules[8][SIZE - 1 - i] = bitAt(bits, i);
-  for (let i = 8; i < 15; i++) modules[SIZE - 15 + i][8] = bitAt(bits, i);
+  // Copia 2: fila 8 cerca del buscador superior derecho (bits 0–7, las 8
+  // últimas columnas de derecha a izquierda), luego columna 8 cerca del
+  // buscador inferior izquierdo (bits 8–14, las 7 últimas filas).
+  for (let i = 0; i < 8; i++) modules[8][size - 1 - i] = bitAt(bits, i);
+  for (let i = 8; i < 15; i++) modules[size - 15 + i][8] = bitAt(bits, i);
 }
 
-function encodeDataCodewords(bytes) {
-  if (bytes.length > MAX_BYTES) {
-    throw new Error(`qr: el payload mide ${bytes.length} bytes UTF-8, el máximo para esta configuración (versión 3, nivel M, modo byte) es ${MAX_BYTES}`);
+function encodeDataCodewords(bytes, spec) {
+  if (bytes.length > spec.maxBytes) {
+    throw new Error(`qr: el payload mide ${bytes.length} bytes UTF-8, el máximo para la versión ${spec.version} (nivel M, modo byte) es ${spec.maxBytes}`);
   }
   const bits = [];
   const pushBits = (value, len) => {
@@ -2590,7 +2653,7 @@ function encodeDataCodewords(bytes) {
   pushBits(bytes.length, 8); // contador de caracteres, 8 bits (versión ≤9, modo byte)
   for (const b of bytes) pushBits(b, 8);
 
-  const capacityBits = DATA_CODEWORDS * 8;
+  const capacityBits = spec.dataCodewords * 8;
   for (let i = 0; i < 4 && bits.length < capacityBits; i++) bits.push(0); // terminador, hasta 4 ceros
   while (bits.length % 8 !== 0) bits.push(0); // relleno a byte completo
 
@@ -2602,11 +2665,43 @@ function encodeDataCodewords(bytes) {
   }
   const pads = [0xec, 0x11];
   let padIndex = 0;
-  while (codewords.length < DATA_CODEWORDS) {
+  while (codewords.length < spec.dataCodewords) {
     codewords.push(pads[padIndex % 2]);
     padIndex++;
   }
   return codewords;
+}
+
+// Entrelazado (ISO/IEC 18004 §8.6). Con más de un bloque, los codewords NO
+// van en el símbolo en el orden del mensaje: se toma el primero de cada
+// bloque, luego el segundo de cada bloque, y así — y lo mismo, por
+// separado, con los de corrección. Es lo que hace que una mancha sobre el
+// símbolo reparta el daño entre los dos bloques en vez de destruir uno
+// entero. Con un solo bloque esto es la identidad, y por eso la versión 3
+// sale byte a byte igual que antes de la Etapa E.
+function interleave(dataCodewords, spec) {
+  const { blocks, dataPerBlock, eccPerBlock } = spec;
+  const bloques = [];
+  for (let b = 0; b < blocks; b++) {
+    const data = dataCodewords.slice(b * dataPerBlock, (b + 1) * dataPerBlock);
+    bloques.push({ data, ecc: rsComputeEcc(data, eccPerBlock) });
+  }
+  const out = [];
+  for (let i = 0; i < dataPerBlock; i++) for (const bl of bloques) out.push(bl.data[i]);
+  for (let i = 0; i < eccPerBlock; i++) for (const bl of bloques) out.push(bl.ecc[i]);
+  return out;
+}
+
+// La inversa: de la tira leída del símbolo al mensaje original. Solo los
+// codewords de datos — este decodificador no corrige errores, así que los
+// de corrección no se tocan (ver el comentario de decodeQrMatrix).
+function deinterleaveData(codewords, spec) {
+  const { blocks, dataPerBlock } = spec;
+  const mensaje = [];
+  for (let b = 0; b < blocks; b++) {
+    for (let i = 0; i < dataPerBlock; i++) mensaje.push(codewords[i * blocks + b]);
+  }
+  return mensaje;
 }
 
 // Recorre las columnas de derecha a izquierda en pares, de abajo hacia
@@ -2619,15 +2714,14 @@ function encodeDataCodewords(bytes) {
 // ubicaba el símbolo (los patrones buscadores estaban bien) pero no podía
 // decodificar el contenido — exactamente el síntoma de un mapeo de bits
 // de datos incorrecto. Con el puntero `right` mutable y arrastrado entre
-// iteraciones, las 28 columnas de datos (todas menos la 6) se visitan
-// una vez cada una.
-function walkColumnPairs(callback) {
+// iteraciones, todas las columnas menos la 6 se visitan una vez cada una.
+function walkColumnPairs(size, callback) {
   let upward = true;
-  let right = SIZE - 1;
+  let right = size - 1;
   while (right >= 1) {
     if (right === 6) right = 5;
-    for (let step = 0; step < SIZE; step++) {
-      const row = upward ? SIZE - 1 - step : step;
+    for (let step = 0; step < size; step++) {
+      const row = upward ? size - 1 - step : step;
       callback(row, right);
       callback(row, right - 1);
     }
@@ -2636,13 +2730,13 @@ function walkColumnPairs(callback) {
   }
 }
 
-function placeDataBits(modules, reserved, allCodewords) {
+function placeDataBits(modules, reserved, allCodewords, size) {
   const bits = [];
   for (const byte of allCodewords) {
     for (let i = 7; i >= 0; i--) bits.push((byte >> i) & 1);
   }
   let bitIndex = 0;
-  walkColumnPairs((row, c) => {
+  walkColumnPairs(size, (row, c) => {
     if (reserved[row][c]) return;
     const bit = bitIndex < bits.length ? bits[bitIndex] : 0;
     modules[row][c] = bit === 1;
@@ -2651,11 +2745,11 @@ function placeDataBits(modules, reserved, allCodewords) {
   return modules;
 }
 
-function applyMask(modules, reserved, maskPattern) {
+function applyMask(modules, reserved, maskPattern, size) {
   const maskFn = MASK_FUNCTIONS[maskPattern];
-  const out = createGrid(false);
-  for (let r = 0; r < SIZE; r++) {
-    for (let c = 0; c < SIZE; c++) {
+  const out = createGrid(false, size);
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
       const bit = modules[r][c];
       out[r][c] = reserved[r][c] ? bit : bit !== maskFn(r, c);
     }
@@ -2678,20 +2772,20 @@ const MASK_FUNCTIONS = [
 // estándar — más bajo es mejor. Se usa para elegir, de las 8 máscaras
 // posibles, la que produce el símbolo más "parejo" (mejor fiabilidad de
 // lectura real, aunque cualquiera de las 8 sea técnicamente decodificable).
-function maskPenalty(modules) {
+function maskPenalty(modules, size) {
   let penalty = 0;
 
   // Regla 1: 5+ módulos iguales seguidos, por fila y por columna.
-  for (let r = 0; r < SIZE; r++) {
-    penalty += runPenalty(Array.from({ length: SIZE }, (_, c) => modules[r][c]));
+  for (let r = 0; r < size; r++) {
+    penalty += runPenalty(Array.from({ length: size }, (_, c) => modules[r][c]));
   }
-  for (let c = 0; c < SIZE; c++) {
-    penalty += runPenalty(Array.from({ length: SIZE }, (_, r) => modules[r][c]));
+  for (let c = 0; c < size; c++) {
+    penalty += runPenalty(Array.from({ length: size }, (_, r) => modules[r][c]));
   }
 
   // Regla 2: bloques 2×2 del mismo color.
-  for (let r = 0; r < SIZE - 1; r++) {
-    for (let c = 0; c < SIZE - 1; c++) {
+  for (let r = 0; r < size - 1; r++) {
+    for (let c = 0; c < size - 1; c++) {
       const v = modules[r][c];
       if (v === modules[r][c + 1] && v === modules[r + 1][c] && v === modules[r + 1][c + 1]) {
         penalty += 3;
@@ -2702,14 +2796,14 @@ function maskPenalty(modules) {
   // Regla 3: patrón 1:1:3:1:1 (como un buscador) con margen de 4 claros.
   const finderLike = [true, false, true, true, true, false, true, false, false, false, false];
   const finderLikeRev = [...finderLike].reverse();
-  for (let r = 0; r < SIZE; r++) {
-    for (let c = 0; c <= SIZE - 11; c++) {
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c <= size - 11; c++) {
       const window = Array.from({ length: 11 }, (_, i) => modules[r][c + i]);
       if (arraysEqual(window, finderLike) || arraysEqual(window, finderLikeRev)) penalty += 40;
     }
   }
-  for (let c = 0; c < SIZE; c++) {
-    for (let r = 0; r <= SIZE - 11; r++) {
+  for (let c = 0; c < size; c++) {
+    for (let r = 0; r <= size - 11; r++) {
       const window = Array.from({ length: 11 }, (_, i) => modules[r + i][c]);
       if (arraysEqual(window, finderLike) || arraysEqual(window, finderLikeRev)) penalty += 40;
     }
@@ -2717,8 +2811,8 @@ function maskPenalty(modules) {
 
   // Regla 4: qué tan lejos del 50% está la proporción de módulos oscuros.
   let dark = 0;
-  for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) if (modules[r][c]) dark++;
-  const percent = (dark * 100) / (SIZE * SIZE);
+  for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) if (modules[r][c]) dark++;
+  const percent = (dark * 100) / (size * size);
   penalty += Math.floor(Math.abs(percent - 50) / 5) * 10;
 
   return penalty;
@@ -2747,26 +2841,27 @@ function utf8Bytes(text) {
   return Array.from(new TextEncoder().encode(text));
 }
 
-// generateQrMatrix(text) -> { size: 29, modules: boolean[29][29] }
-// modules[row][col] === true significa módulo oscuro.
-function generateQrMatrix(text) {
+// generateQrMatrix(text, { version }) -> { size, modules: boolean[size][size] }
+// modules[row][col] === true significa módulo oscuro. Sin `version`, se usa
+// la más chica donde quepa el payload.
+function generateQrMatrix(text, { version } = {}) {
   const bytes = utf8Bytes(text);
-  const dataCodewords = encodeDataCodewords(bytes);
-  const eccCodewords = rsComputeEcc(dataCodewords, ECC_CODEWORDS);
-  const allCodewords = dataCodewords.concat(eccCodewords);
+  const spec = specForVersion(version === undefined ? versionForBytes(bytes.length) : version);
 
-  const { modules: base, reserved } = buildFunctionPatterns();
-  const withData = placeDataBits(base, reserved, allCodewords);
+  const allCodewords = interleave(encodeDataCodewords(bytes, spec), spec);
+
+  const { modules: base, reserved } = buildFunctionPatterns(spec);
+  const withData = placeDataBits(base, reserved, allCodewords, spec.size);
 
   let best = null;
   for (let mask = 0; mask < 8; mask++) {
-    const masked = applyMask(withData, reserved, mask);
-    stampFormatInfo(masked, mask);
-    const penalty = maskPenalty(masked);
+    const masked = applyMask(withData, reserved, mask, spec.size);
+    stampFormatInfo(masked, mask, spec.size);
+    const penalty = maskPenalty(masked, spec.size);
     if (best === null || penalty < best.penalty) best = { mask, modules: masked, penalty };
   }
 
-  return { size: SIZE, modules: best.modules, maskPattern: best.mask };
+  return { size: spec.size, modules: best.modules, maskPattern: best.mask };
 }
 
 function renderQrSvg(matrix, { quietZone = 4, moduleSize = 8 } = {}) {
@@ -2787,27 +2882,35 @@ function renderQrSvg(matrix, { quietZone = 4, moduleSize = 8 } = {}) {
 // --- decodeQrMatrix — SOLO para probar el redondeo encode→decode en las
 // pruebas de esta fase (test/render/qr.test.js). No es un lector general:
 // no corrige errores (no usa los codewords EC para reparar nada), asume
-// exactamente la versión 3 / nivel M / modo byte que este archivo genera.
+// nivel M / modo byte y una de las dos versiones que este archivo genera.
 // Un lector real de verdad es justo lo que la fase deja para la prueba
 // física con lectora, no algo que este archivo deba reemplazar.
 function decodeQrMatrix(matrix) {
+  // La versión se deduce del tamaño (size = 4V + 17), no se recibe como
+  // parámetro: así una matriz ajena —la de la implementación de referencia,
+  // por ejemplo— se lee sin que nadie tenga que decir de qué versión es.
+  const spec = specForVersion((matrix.size - 17) / 4);
+  const { size } = spec;
   const maskPattern = detectMaskPattern(matrix);
-  const { reserved } = buildFunctionPatterns();
+  const { reserved } = buildFunctionPatterns(spec);
   const maskFn = MASK_FUNCTIONS[maskPattern];
-  const unmasked = createGrid(false);
-  for (let r = 0; r < SIZE; r++) {
-    for (let c = 0; c < SIZE; c++) {
+  const unmasked = createGrid(false, size);
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
       unmasked[r][c] = reserved[r][c] ? matrix.modules[r][c] : matrix.modules[r][c] !== maskFn(r, c);
     }
   }
-  const bits = readDataBits(unmasked, reserved);
-  const codewordsBits = bits.slice(0, DATA_CODEWORDS * 8);
-  const dataCodewords = [];
+  const bits = readDataBits(unmasked, reserved, size);
+  // Se leen los de datos, que en el símbolo van entrelazados y ANTES que
+  // los de corrección; de-interleaveData los devuelve al orden del mensaje.
+  const codewordsBits = bits.slice(0, spec.dataCodewords * 8);
+  const entrelazados = [];
   for (let i = 0; i < codewordsBits.length; i += 8) {
     let byte = 0;
     for (let j = 0; j < 8; j++) byte = (byte << 1) | codewordsBits[i + j];
-    dataCodewords.push(byte);
+    entrelazados.push(byte);
   }
+  const dataCodewords = deinterleaveData(entrelazados, spec);
   const mode = dataCodewords[0] >> 4;
   if (mode !== 0b0100) throw new Error(`qr decode: modo inesperado ${mode.toString(2)}, este decodificador solo entiende modo byte`);
   const length = ((dataCodewords[0] & 0x0f) << 4) | (dataCodewords[1] >> 4);
@@ -2837,16 +2940,14 @@ function detectMaskPattern(matrix) {
   return idx;
 }
 
-function readDataBits(modules, reserved) {
+function readDataBits(modules, reserved, size) {
   const bits = [];
-  walkColumnPairs((row, c) => {
+  walkColumnPairs(size, (row, c) => {
     if (reserved[row][c]) return;
     bits.push(modules[row][c] ? 1 : 0);
   });
   return bits;
 }
-
-const QR_CONFIG = { size: SIZE, dataCodewords: DATA_CODEWORDS, eccCodewords: ECC_CODEWORDS, maxBytes: MAX_BYTES };
 
 // --- src/ui/passCache.js ---
 // Fase 06 — guarda el último estado de pases conocido en el dispositivo
