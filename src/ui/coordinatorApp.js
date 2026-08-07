@@ -32,7 +32,7 @@
 
 import { createCoordinatorStore } from './coordinatorStore.js';
 import { resolveInitialLang, translate } from './i18n.js';
-import { escapeHtml } from './util.js';
+import { escapeHtml, classNames } from './util.js';
 import { attachNav } from './nav.js';
 import { THEME_CSS } from './theme.js';
 import { CARD_CSS } from './components/card.js';
@@ -44,7 +44,15 @@ import { renderLodgingScreen, attachLodgingScreen, LODGING_CSS } from './screens
 import { renderQpassScreen, attachQpassScreen, QPASS_CSS } from './screens/coordinator/qpass.js';
 import { renderPassScreen, attachPassScreen, PASS_SCREEN_CSS } from './screens/pass.js';
 
-const ALL_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, ITINERARY_CSS, LODGING_CSS, QPASS_CSS, PASS_SCREEN_CSS].join('\n');
+// Envoltorio flex nada más — el botón en sí (color, tamaño mínimo de
+// toque, tipografía) ya sale completo de .nc-button/.nc-button--primary
+// (THEME_CSS); no hace falta ninguna regla de color nueva para esto (D36).
+const SUBNAV_CSS = `
+.nc-visit-subnav { display: flex; gap: 8px; padding: 10px 16px; background: var(--nc-surface); border-bottom: 1px solid var(--nc-card-border); overflow-x: auto; }
+.nc-visit-subnav .nc-button { flex: 1; white-space: nowrap; }
+`;
+
+const ALL_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, ITINERARY_CSS, LODGING_CSS, QPASS_CSS, PASS_SCREEN_CSS, SUBNAV_CSS].join('\n');
 
 function injectStylesOnce() {
   if (document.getElementById('nc-styles')) return;
@@ -76,6 +84,42 @@ const SCREENS = {
   qpass: { render: renderQpassScreen, attach: attachQpassScreen, needsVisit: true },
 };
 const ROUTES = new Set([...Object.keys(SCREENS), 'pass-preview']);
+
+// Fix (D36): bug real reportado por el cliente — no existía NINGÚN
+// [data-nav] real que llevara de Itinerario a Hospedaje o QPASS (o
+// viceversa) para la misma visita, solo "volver a visitas" en el
+// encabezado. VISIT_SUBNAV_ROUTES se deriva de SCREENS (needsVisit: true)
+// en vez de un arreglo aparte, para que nunca puedan desincronizarse — hoy
+// coincide con ['itinerary', 'lodging', 'qpass'], pass-preview queda fuera
+// a propósito (no es una pantalla propia de coordinator/, ver más abajo).
+const VISIT_SUBNAV_ROUTES = Object.keys(SCREENS).filter((id) => SCREENS[id].needsVisit);
+// Reusa la misma llave i18n que cada pantalla ya usa en su propio <h1> —
+// sin cadenas nuevas, mismo criterio que D33/D29 ya aplicaron en esta fase.
+const VISIT_SUBNAV_LABEL_KEY = {
+  itinerary: 'coordinator.itinerary.title',
+  lodging: 'coordinator.lodging.title',
+  qpass: 'coordinator.qpass.title',
+};
+
+// Pieza pura, exportada para prueba directa por substring (test/ui/
+// coordinator/subnav.test.js) — mismo criterio que cada render*Screen de
+// screens/coordinator/. Reusa .nc-button/.nc-button--primary (THEME_CSS)
+// para el estado activo en vez del patrón .nc-tab/.nc-tab--active propio
+// de tabs.js (barra inferior del paciente): son dos contextos visuales a
+// propósito distintos, no un descuido — tabs.js es chrome permanente de 5
+// pestañas siempre visible, este subnav son 3 botones contextuales que
+// solo aparecen con una visita ya elegida (ver dónde se cablea, abajo en
+// render()).
+export function renderVisitSubnav(route, t) {
+  const items = VISIT_SUBNAV_ROUTES.map((id) => {
+    const isActive = id === route;
+    return `<button type="button" class="${classNames(['nc-button', isActive && 'nc-button--primary'])}" data-nav="${id}" role="tab" aria-selected="${isActive}">${escapeHtml(t(VISIT_SUBNAV_LABEL_KEY[id]))}</button>`;
+  }).join('\n');
+  // aria-label fijo en español, nunca traducido: mismo precedente ya
+  // establecido por tabs.js ("Navegación principal") para esta misma app
+  // bilingüe — no se "corrige" aquí como cambio suelto fuera de alcance.
+  return `<nav class="nc-visit-subnav" role="tablist" aria-label="Navegación de la visita">${items}</nav>`;
+}
 
 function currentRoute() {
   const hash = location.hash.replace(/^#\/?/, '');
@@ -130,6 +174,14 @@ export function boot(root) {
       return;
     }
 
+    // Mismas tres rutas que needsVisit ya filtra arriba (VISIT_SUBNAV_
+    // ROUTES) — para cuando llegamos aquí, needsVisit && !selectedVisitId
+    // ya habría cortado con el return de arriba, así que route !==
+    // 'pass-preview' && SCREENS[route].needsVisit basta, sin repetir el
+    // chequeo de selectedVisitId (D36 — ver también el comentario junto a
+    // renderVisitSubnav, más arriba).
+    const showSubnav = route !== 'pass-preview' && SCREENS[route].needsVisit;
+
     document.title = t('coordinator.appName'); // constante a propósito, nunca nombre de paciente — mismo espíritu que INV-6 del lado app.js
     document.documentElement.lang = lang;
     // pass.js nunca usa tema oscuro (fase 06): mismo mecanismo que
@@ -146,6 +198,7 @@ export function boot(root) {
         <span class="nc-header-title">${escapeHtml(t('coordinator.appName'))}</span>
         <button type="button" class="nc-button" data-nav="visits">${escapeHtml(t('coordinator.backToVisits'))}</button>
       </header>
+      ${showSubnav ? renderVisitSubnav(route, t) : ''}
       <main class="nc-main" data-role="screen-mount"></main>
     `;
     const mount = root.querySelector('[data-role="screen-mount"]');
