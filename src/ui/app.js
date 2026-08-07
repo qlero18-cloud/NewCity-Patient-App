@@ -29,6 +29,7 @@ import { isExpired } from '../domain/index.js';
 import { fixtures } from '../data/fixtures.js';
 import { STRINGS, resolveInitialLang, translate } from './i18n.js';
 import { escapeHtml } from './util.js';
+import { attachNav } from './nav.js';
 import { THEME_CSS } from './theme.js';
 import { renderTabBar, TABS_CSS } from './components/tabs.js';
 import { CARD_CSS } from './components/card.js';
@@ -172,11 +173,7 @@ export function boot(root, { navigatorLanguage = navigator.language, search = lo
       localStorage.setItem(lastViewedKey, now);
     }
 
-    root.querySelectorAll('[data-nav]').forEach((el) => {
-      el.addEventListener('click', () => {
-        location.hash = `#/${el.dataset.nav}`;
-      });
-    });
+    attachNav(root);
     root.querySelector('[data-role="lang-toggle"]')?.addEventListener('click', () => {
       lang = lang === 'es' ? 'en' : 'es';
       localStorage.setItem(LANG_STORAGE_KEY, lang);

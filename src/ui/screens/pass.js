@@ -28,8 +28,22 @@ import { generateCode128Bars, renderCode128Svg } from '../../render/code128.js';
 import { savePassCache, getCachedVisiblePasses } from '../passCache.js';
 import { escapeHtml } from '../util.js';
 
-function renderSymbol(pass) {
+// t como segundo parámetro (fase 09, D29): la rama 'image' necesita
+// traducir pass.scope para el atributo alt de la imagen — a diferencia de
+// 'qr'/'code128', que nunca tocaron t. Sin este parámetro la rama nueva
+// lanzaría ReferenceError la primera vez que corriera (t no existe en el
+// scope de nivel de módulo de esta función, solo dentro de
+// attachPassScreen más abajo). Documentado así en el doc de fase 09 antes
+// de escribir este archivo, precisamente para no repetir ese error.
+function renderSymbol(pass, t) {
   try {
+    if (pass.format === 'image') {
+      // QPASS real (D29): una imagen que ya subió la coordinadora, no un
+      // payload corto para que este archivo lo codifique — el símbolo ya
+      // viene armado, solo se pinta. No pasa por generateQrMatrix ni por
+      // el generador de Code128.
+      return `<img src="${escapeHtml(pass.payload)}" alt="${escapeHtml(t(`pass.scope.${pass.scope}`))}" class="nc-pass-image" />`;
+    }
     if (pass.format === 'code128') {
       return renderCode128Svg(pass.payload);
     }
@@ -61,7 +75,13 @@ export function attachPassScreen(rootEl, ctx) {
   const live = visiblePasses(passes, now);
   let source, savedAt;
   if (live.length > 0) {
-    savePassCache(visit.id, passes, now);
+    // format:'image' (D29) queda fuera del caché: es una data: URL
+    // completa, no el string corto que este mecanismo manejaba hasta
+    // ahora, y la demo de fase 09 promete que nada de lo que emite
+    // sobrevive un refresh — si se guardara aquí, esa promesa se
+    // rompería justo por este archivo. qr/code128 se siguen cacheando
+    // exactamente igual que en fase 06.
+    savePassCache(visit.id, passes.filter((p) => p.format !== 'image'), now);
     source = live;
     savedAt = null;
   } else {
@@ -93,7 +113,7 @@ export function attachPassScreen(rootEl, ctx) {
         : '';
     mount.innerHTML = `
       ${offlineNotice}
-      <div class="nc-pass-symbol">${renderSymbol(pass)}</div>
+      <div class="nc-pass-symbol">${renderSymbol(pass, t)}</div>
       <p class="nc-pass-scope">${escapeHtml(t(`pass.scope.${pass.scope}`))}</p>
       <p class="nc-pass-expiry">${escapeHtml(validUntilText)}</p>
       ${nav}
@@ -133,7 +153,7 @@ export const PASS_SCREEN_CSS = `
 .nc-pass-screen { background: #FFFFFF; color: #000000; margin: -16px; padding: 16px; min-height: 100%; }
 .nc-pass-brightness-hint { font-size: 12px; opacity: 0.7; margin: 0 0 12px; }
 .nc-pass-symbol { background: #FFFFFF; padding: 12px; max-width: 320px; margin: 0 auto; }
-.nc-pass-symbol svg { display: block; width: 100%; height: auto; }
+.nc-pass-symbol svg, .nc-pass-symbol img { display: block; width: 100%; height: auto; }
 .nc-pass-scope { text-align: center; font-size: 20px; font-weight: 700; margin: 16px 0 4px; }
 .nc-pass-expiry { text-align: center; font-size: 13px; opacity: 0.75; margin: 0; }
 .nc-pass-offline { text-align: center; font-size: 12px; background: #FBEBD2; color: #8A5A00; padding: 6px; border-radius: 8px; margin: 0 0 12px; }

@@ -762,6 +762,63 @@ const STRINGS = {
       validUntil: (time) => `Válido hasta las ${time}`,
       noExpiry: 'Sin fecha de caducidad',
     },
+    // Fase 09 — demo del panel de coordinadores (docs/phases/phase-09-
+    // coordinator-demo.md). Texto de interfaz nuevo, sin dato del
+    // paciente — mismo criterio del resto de este archivo. Reutiliza
+    // pass.scope.* para el selector de alcance del QPASS en vez de
+    // duplicar esas tres cadenas aquí.
+    coordinator: {
+      appName: 'NewCity — Coordinación',
+      backToVisits: 'Volver a visitas',
+      visits: {
+        title: 'Visitas',
+        empty: 'No hay visitas todavía.',
+        newVisit: 'Nueva visita',
+      },
+      intake: {
+        title: 'Alta de visita',
+        firstNameLabel: 'Nombre de pila',
+        langLabel: 'Idioma',
+        startsAtLabel: 'Inicio de la visita',
+        endsAtLabel: 'Fin de la visita',
+        save: 'Guardar visita',
+      },
+      itinerary: {
+        title: 'Itinerario',
+        empty: 'Esta visita todavía no tiene citas.',
+        addAppointment: 'Agregar cita',
+        serviceNameLabel: 'Estudio o consulta',
+        startsAtLabel: 'Fecha y hora',
+        durationLabel: 'Duración (minutos)',
+        locationLabel: 'Ubicación',
+        move: 'Mover',
+        cancel: 'Cancelar',
+        cancelledBadge: 'Cancelada',
+        movedBadge: 'Movida',
+        save: 'Guardar cita',
+      },
+      lodging: {
+        title: 'Hospedaje',
+        hotelLabel: 'Hotel',
+        reservationCodeLabel: 'Código de reservación',
+        checkInLabel: 'Check-in',
+        checkOutLabel: 'Check-out',
+        breakfastLabel: 'Desayuno incluido',
+        recoveryLabel: 'Habitación recovery',
+        save: 'Guardar hospedaje',
+      },
+      qpass: {
+        title: 'Emitir QPASS',
+        uploadLabel: 'Subir imagen del pase',
+        scopeLabel: 'Alcance',
+        noImage: 'Todavía no se ha subido ninguna imagen.',
+        previewTitle: 'Vista previa',
+        issue: 'Emitir QPASS',
+        pendingBadge: 'QPASS pendiente',
+        issuedBadge: 'QPASS emitido',
+        viewAsPatient: 'Ver como paciente',
+      },
+    },
   },
   en: {
     common: {
@@ -871,6 +928,58 @@ const STRINGS = {
       validUntil: (time) => `Valid until ${time}`,
       noExpiry: 'No expiration date',
     },
+    coordinator: {
+      appName: 'NewCity — Coordination',
+      backToVisits: 'Back to visits',
+      visits: {
+        title: 'Visits',
+        empty: 'No visits yet.',
+        newVisit: 'New visit',
+      },
+      intake: {
+        title: 'Visit intake',
+        firstNameLabel: 'First name',
+        langLabel: 'Language',
+        startsAtLabel: 'Visit start',
+        endsAtLabel: 'Visit end',
+        save: 'Save visit',
+      },
+      itinerary: {
+        title: 'Itinerary',
+        empty: 'This visit has no appointments yet.',
+        addAppointment: 'Add appointment',
+        serviceNameLabel: 'Study or consultation',
+        startsAtLabel: 'Date and time',
+        durationLabel: 'Duration (minutes)',
+        locationLabel: 'Location',
+        move: 'Move',
+        cancel: 'Cancel',
+        cancelledBadge: 'Cancelled',
+        movedBadge: 'Moved',
+        save: 'Save appointment',
+      },
+      lodging: {
+        title: 'Lodging',
+        hotelLabel: 'Hotel',
+        reservationCodeLabel: 'Reservation code',
+        checkInLabel: 'Check-in',
+        checkOutLabel: 'Check-out',
+        breakfastLabel: 'Breakfast included',
+        recoveryLabel: 'Recovery room',
+        save: 'Save lodging',
+      },
+      qpass: {
+        title: 'Issue QPASS',
+        uploadLabel: 'Upload pass image',
+        scopeLabel: 'Scope',
+        noImage: 'No image uploaded yet.',
+        previewTitle: 'Preview',
+        issue: 'Issue QPASS',
+        pendingBadge: 'QPASS pending',
+        issuedBadge: 'QPASS issued',
+        viewAsPatient: 'View as patient',
+      },
+    },
   },
 };
 
@@ -899,6 +1008,33 @@ function translate(lang, path) {
   }, dict);
   if (value === undefined) throw new Error(`i18n: falta la llave "${path}" en "${lang}"`);
   return value;
+}
+
+// --- src/ui/nav.js ---
+// Fase 09 (D28) — attachNav(root): cablea todo elemento [data-nav] de root
+// a navegación por hash (location.hash = '#/<valor>'). Extraído del
+// cableado que antes vivía inline dentro de render() en src/ui/app.js,
+// para que src/ui/coordinatorApp.js (fase 09) use exactamente el mismo
+// mecanismo — no una copia independiente que pudiera volver a divergir en
+// el nombre del atributo, que es justo la causa raíz de D28
+// (docs/DECISIONS.md): src/ui/components/tabs.js emitía data-tab="${id}"
+// mientras que app.js solo escuchaba [data-nav], y la barra inferior del
+// paciente nunca navegó al tocarla, en ningún despliegue, hasta que el
+// cliente lo reportó en producción.
+//
+// Requisito para cualquier pantalla nueva que agregue un elemento
+// clicable de navegación: usar data-nav="<destino>", nunca otro nombre.
+// test/ui/nav.test.js prueba el comportamiento real de clic→hash con un
+// doble mínimo de DOM (mismo criterio que ya usa createHighlighter en
+// test/map/ids.test.js) — a diferencia de un render*Screen, esto SÍ es
+// lógica de cableado, no solo texto, y D28 ya probó que puede fallar en
+// silencio si nadie la prueba.
+function attachNav(root) {
+  root.querySelectorAll('[data-nav]').forEach((el) => {
+    el.addEventListener('click', () => {
+      location.hash = `#/${el.dataset.nav}`;
+    });
+  });
 }
 
 // --- src/data/support.js ---
@@ -2555,8 +2691,22 @@ function getCachedVisiblePasses(visitId, now) {
 
 
 
-function renderSymbol(pass) {
+// t como segundo parámetro (fase 09, D29): la rama 'image' necesita
+// traducir pass.scope para el atributo alt de la imagen — a diferencia de
+// 'qr'/'code128', que nunca tocaron t. Sin este parámetro la rama nueva
+// lanzaría ReferenceError la primera vez que corriera (t no existe en el
+// scope de nivel de módulo de esta función, solo dentro de
+// attachPassScreen más abajo). Documentado así en el doc de fase 09 antes
+// de escribir este archivo, precisamente para no repetir ese error.
+function renderSymbol(pass, t) {
   try {
+    if (pass.format === 'image') {
+      // QPASS real (D29): una imagen que ya subió la coordinadora, no un
+      // payload corto para que este archivo lo codifique — el símbolo ya
+      // viene armado, solo se pinta. No pasa por generateQrMatrix ni por
+      // el generador de Code128.
+      return `<img src="${escapeHtml(pass.payload)}" alt="${escapeHtml(t(`pass.scope.${pass.scope}`))}" class="nc-pass-image" />`;
+    }
     if (pass.format === 'code128') {
       return renderCode128Svg(pass.payload);
     }
@@ -2588,7 +2738,13 @@ function attachPassScreen(rootEl, ctx) {
   const live = visiblePasses(passes, now);
   let source, savedAt;
   if (live.length > 0) {
-    savePassCache(visit.id, passes, now);
+    // format:'image' (D29) queda fuera del caché: es una data: URL
+    // completa, no el string corto que este mecanismo manejaba hasta
+    // ahora, y la demo de fase 09 promete que nada de lo que emite
+    // sobrevive un refresh — si se guardara aquí, esa promesa se
+    // rompería justo por este archivo. qr/code128 se siguen cacheando
+    // exactamente igual que en fase 06.
+    savePassCache(visit.id, passes.filter((p) => p.format !== 'image'), now);
     source = live;
     savedAt = null;
   } else {
@@ -2620,7 +2776,7 @@ function attachPassScreen(rootEl, ctx) {
         : '';
     mount.innerHTML = `
       ${offlineNotice}
-      <div class="nc-pass-symbol">${renderSymbol(pass)}</div>
+      <div class="nc-pass-symbol">${renderSymbol(pass, t)}</div>
       <p class="nc-pass-scope">${escapeHtml(t(`pass.scope.${pass.scope}`))}</p>
       <p class="nc-pass-expiry">${escapeHtml(validUntilText)}</p>
       ${nav}
@@ -2660,7 +2816,7 @@ const PASS_SCREEN_CSS = `
 .nc-pass-screen { background: #FFFFFF; color: #000000; margin: -16px; padding: 16px; min-height: 100%; }
 .nc-pass-brightness-hint { font-size: 12px; opacity: 0.7; margin: 0 0 12px; }
 .nc-pass-symbol { background: #FFFFFF; padding: 12px; max-width: 320px; margin: 0 auto; }
-.nc-pass-symbol svg { display: block; width: 100%; height: auto; }
+.nc-pass-symbol svg, .nc-pass-symbol img { display: block; width: 100%; height: auto; }
 .nc-pass-scope { text-align: center; font-size: 20px; font-weight: 700; margin: 16px 0 4px; }
 .nc-pass-expiry { text-align: center; font-size: 13px; opacity: 0.75; margin: 0; }
 .nc-pass-offline { text-align: center; font-size: 12px; background: #FBEBD2; color: #8A5A00; padding: 6px; border-radius: 8px; margin: 0 0 12px; }
@@ -3122,6 +3278,7 @@ body {
 
 
 
+
 const ALL_CSS = [THEME_CSS, TABS_CSS, CARD_CSS, BADGE_CSS, FICHA_CSS, HOME_CSS, ITINERARY_CSS, MAP_SCREEN_CSS, PLAZA_CSS, STAY_CSS, HELP_CSS, PASS_SCREEN_CSS].join('\n');
 
 function injectStylesOnce() {
@@ -3251,11 +3408,7 @@ function boot(root, { navigatorLanguage = navigator.language, search = location.
       localStorage.setItem(lastViewedKey, now);
     }
 
-    root.querySelectorAll('[data-nav]').forEach((el) => {
-      el.addEventListener('click', () => {
-        location.hash = `#/${el.dataset.nav}`;
-      });
-    });
+    attachNav(root);
     root.querySelector('[data-role="lang-toggle"]')?.addEventListener('click', () => {
       lang = lang === 'es' ? 'en' : 'es';
       localStorage.setItem(LANG_STORAGE_KEY, lang);
