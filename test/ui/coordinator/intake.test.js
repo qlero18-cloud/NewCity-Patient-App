@@ -76,3 +76,40 @@ describe('attachIntakeScreen — cableado defensivo sin DOM real', () => {
     assert.doesNotThrow(() => attachIntakeScreen(rootEl, { store: undefined, onCreated: undefined }));
   });
 });
+
+describe('renderIntakeScreen — idioma del paciente sin códigos crudos (Etapa A, #14)', () => {
+  test('las opciones muestran el nombre del idioma, no "es"/"en" en pantalla', () => {
+    for (const lang of ['es', 'en']) {
+      const html = renderIntakeScreen(ctx(lang));
+      assert.doesNotMatch(
+        html,
+        /<option value="es">\s*es\s*<\/option>/,
+        `la opción "es" sigue mostrando el código crudo en ${lang}`
+      );
+      assert.doesNotMatch(
+        html,
+        /<option value="en">\s*en\s*<\/option>/,
+        `la opción "en" sigue mostrando el código crudo en ${lang}`
+      );
+    }
+  });
+
+  test('el value sigue siendo el código (lo que guarda la store), solo cambia lo que se lee', () => {
+    const html = renderIntakeScreen(ctx('es'));
+    assert.match(html, /<option value="es">/, 'el value de la opción española debe seguir siendo "es"');
+    assert.match(html, /<option value="en">/, 'el value de la opción inglesa debe seguir siendo "en"');
+  });
+
+  test('el nombre de cada idioma se muestra en ese idioma (endónimo), igual en los dos idiomas de la interfaz', () => {
+    // Un selector de idioma se lee mejor con el endónimo: quien busca
+    // "Español" lo reconoce aunque el panel esté en inglés. Por eso
+    // common.langName.* es idéntico en es y en, a propósito.
+    for (const lang of ['es', 'en']) {
+      const html = renderIntakeScreen(ctx(lang));
+      assert.ok(html.includes(translate(lang, 'common.langName.es')), `falta el nombre del español en ${lang}`);
+      assert.ok(html.includes(translate(lang, 'common.langName.en')), `falta el nombre del inglés en ${lang}`);
+    }
+    assert.strictEqual(translate('es', 'common.langName.es'), translate('en', 'common.langName.es'));
+    assert.strictEqual(translate('es', 'common.langName.en'), translate('en', 'common.langName.en'));
+  });
+});

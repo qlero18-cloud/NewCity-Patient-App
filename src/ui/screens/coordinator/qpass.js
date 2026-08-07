@@ -24,43 +24,82 @@
 import { escapeHtml } from '../../util.js';
 import { renderCard } from '../../components/card.js';
 import { renderBadge } from '../../components/badge.js';
+import { isRevoked } from '../../../domain/passes.js';
 
 const SCOPES = ['torre', 'piso27', 'estacionamiento'];
 
-function hasIssuedImagePass(passes) {
-  return passes.some((p) => p.format === 'image');
+// 2 MB. La imagen se guarda como data URL en el pase (payload), así que
+// el peso del archivo se convierte casi 1:1 en peso del registro y de lo
+// que después viaja a la pantalla del paciente. El límite es de producto,
+// no técnico: una foto de un pase impreso cabe de sobra.
+export const QPASS_MAX_BYTES = 2 * 1024 * 1024;
+
+// Puro y exportado a propósito: es la única forma de probar la validación
+// bajo la restricción de este proyecto de no simular DOM en node:test —
+// el <input type="file"> y FileReader no existen ahí, pero el criterio sí
+// se puede ejercitar con un objeto { type, size }.
+//
+// accept="image/*" en el input es una sugerencia del navegador, no una
+// garantía: el selector de archivos deja cambiar el filtro a "todos", y
+// arrastrar y soltar lo ignora por completo. Por eso se vuelve a revisar
+// aquí. Motivos: 'missing' | 'type' | 'size'.
+export function validateQpassFile(file) {
+  if (!file) return { ok: false, reason: 'missing' };
+  if (typeof file.type !== 'string' || !file.type.startsWith('image/')) {
+    return { ok: false, reason: 'type' };
+  }
+  if (typeof file.size === 'number' && file.size > QPASS_MAX_BYTES) {
+    return { ok: false, reason: 'size' };
+  }
+  return { ok: true };
+}
+
+// "Emitido" = tiene un QPass de imagen VIGENTE. Un pase revocado sigue en
+// record.passes (es historia, ver coordinatorStore.revokeQpass), pero no
+// debe dejar la pantalla atorada en el estado emitido: si se revocó, la
+// coordinadora tiene que poder subir otro. isRevoked viene de domain/
+// passes.js — el mismo criterio que usa R3 del lado del paciente.
+function activeImagePass(passes) {
+  return passes.find((p) => p.format === 'image' && !isRevoked(p)) ?? null;
 }
 
 export function renderQpassScreen(ctx) {
-  const { store, visitId, lang, t } = ctx;
+  const { store, visitId, t } = ctx;
   const title = t('coordinator.qpass.title');
   const record = store.getVisit(visitId);
 
   // Guard: visita inexistente -> fallback corto, sin formulario, sin
   // lanzar (misma disciplina de defensa en profundidad que ya usa
   // src/ui/screens/stay.js para lodging ausente, y
-  // src/ui/screens/coordinator/lodging.js para visitId inexistente). No
-  // hay llave i18n bajo coordinator.* para "visita no encontrada" — texto
-  // literal corto en vez de inventar una llave nueva compartida (ver
-  // reporte final de esta tarea).
+  // src/ui/screens/coordinator/lodging.js para visitId inexistente).
+  // coordinator.visitNotFound es compartida con itinerary.js y lodging.js
+  // — ver el comentario de itinerary.js para el porqué.
   if (!record) {
-    const fallback = lang === 'en' ? 'Visit not found.' : 'Visita no encontrada.';
     return `
       <section class="nc-screen">
         <h1 class="nc-screen-title">${escapeHtml(title)}</h1>
-        <p class="nc-qpass-fallback">${escapeHtml(fallback)}</p>
+        <p class="nc-qpass-fallback">${escapeHtml(t('coordinator.visitNotFound'))}</p>
       </section>
     `;
   }
 
-  const issued = hasIssuedImagePass(record.passes);
+  const active = activeImagePass(record.passes);
 
-  if (issued) {
+  if (active) {
+    // Revocar lleva el data-pass-id del pase vigente: la visita puede
+    // tener varios pases de imagen a lo largo del tiempo (uno revocado y
+    // otro nuevo), así que el botón no puede decir "revoca el de imagen"
+    // en abstracto. "Emitir otro" no necesita id: revoca este y vuelve al
+    // formulario, en un solo clic (attachQpassScreen, abajo).
     return `
       <section class="nc-screen">
         <h1 class="nc-screen-title">${escapeHtml(title)}</h1>
         <p class="nc-qpass-status">${renderBadge(t('coordinator.qpass.issuedBadge'), 'updated')}</p>
         <button type="button" class="nc-button nc-button--primary" data-nav="pass-preview">${escapeHtml(t('coordinator.qpass.viewAsPatient'))}</button>
+        <div class="nc-qpass-actions">
+          <button type="button" class="nc-button" data-role="reissue-qpass" data-pass-id="${escapeHtml(active.id)}">${escapeHtml(t('coordinator.qpass.reissue'))}</button>
+          <button type="button" class="nc-button" data-role="revoke-qpass" data-pass-id="${escapeHtml(active.id)}">${escapeHtml(t('coordinator.qpass.revoke'))}</button>
+        </div>
       </section>
     `;
   }
@@ -90,6 +129,7 @@ export function renderQpassScreen(ctx) {
         <div class="nc-qpass-preview" data-role="qpass-preview">
           <p class="nc-qpass-preview-empty">${escapeHtml(t('coordinator.qpass.noImage'))}</p>
         </div>
+        <p class="nc-qpass-error" data-role="qpass-error" role="alert" hidden></p>
 
         <button type="button" class="nc-button nc-button--primary" data-role="issue-qpass" disabled>${escapeHtml(t('coordinator.qpass.issue'))}</button>
       `)}
@@ -116,14 +156,61 @@ export function attachQpassScreen(rootEl, ctx) {
   // anterior.
   let qpassImageDataUrl = null; // efímera a propósito: solo en memoria, nunca localStorage ni servidor (docs/phases/phase-09-coordinator-demo.md, "Emisión de QPASS")
 
+  // Vista "emitido": revocar y re-emitir. Ninguno de los dos existe en la
+  // vista de captura, y viceversa — por eso ambos bloques usan `?.` y
+  // conviven en la misma función, igual que el resto de attach*Screen.
+  const revokeBtn = rootEl.querySelector('[data-role="revoke-qpass"]');
+  const reissueBtn = rootEl.querySelector('[data-role="reissue-qpass"]');
+
+  // Los dos hacen lo mismo en el store — la diferencia es de intención, y
+  // se nota en lo que ve la coordinadora después: "revocar" deja la visita
+  // sin pase (y la pantalla, al re-renderizarse, vuelve al formulario
+  // vacío), "emitir otro" es el mismo camino leído como "empiezo de
+  // nuevo". Se separan porque son dos decisiones distintas para quien las
+  // toma, aunque compartan implementación.
+  for (const btn of [revokeBtn, reissueBtn]) {
+    btn?.addEventListener('click', () => {
+      const passId = btn.dataset.passId;
+      if (!passId) return;
+      store.revokeQpass(visitId, passId, now);
+      onIssued?.(); // mismo callback: "el estado del pase cambió, vuelve a pintar"
+    });
+  }
+
   const input = rootEl.querySelector('[data-role="qpass-image-input"]');
   const scopeSelect = rootEl.querySelector('[data-role="qpass-scope-select"]');
   const preview = rootEl.querySelector('[data-role="qpass-preview"]');
   const issueBtn = rootEl.querySelector('[data-role="issue-qpass"]');
+  const errorEl = rootEl.querySelector('[data-role="qpass-error"]');
+
+  function showError(reason) {
+    qpassImageDataUrl = null;
+    if (issueBtn) issueBtn.disabled = true; // que no quede emitible con la imagen anterior
+    if (preview) {
+      preview.innerHTML = `<p class="nc-qpass-preview-empty">${escapeHtml(t('coordinator.qpass.noImage'))}</p>`;
+    }
+    if (errorEl) {
+      errorEl.textContent = t(`coordinator.qpass.error.${reason}`);
+      errorEl.hidden = false;
+    }
+  }
+
+  function clearError() {
+    if (errorEl) {
+      errorEl.textContent = '';
+      errorEl.hidden = true;
+    }
+  }
 
   input?.addEventListener('change', () => {
     const file = input.files?.[0];
-    if (!file) return;
+    if (!file) return; // cancelar el diálogo no es un error: no se toca nada
+    const check = validateQpassFile(file);
+    if (!check.ok) {
+      showError(check.reason);
+      return;
+    }
+    clearError();
     const reader = new FileReader();
     reader.onload = () => {
       qpassImageDataUrl = reader.result; // "data:image/...;base64,...."
@@ -132,6 +219,10 @@ export function attachQpassScreen(rootEl, ctx) {
       }
       if (issueBtn) issueBtn.disabled = false;
     };
+    // Antes no existía: un archivo ilegible (permisos, unidad de red que
+    // se cayó, archivo borrado entre elegirlo y leerlo) dejaba la pantalla
+    // en silencio, con el botón deshabilitado y sin decir por qué.
+    reader.onerror = () => showError('read');
     reader.readAsDataURL(file);
   });
 
@@ -153,4 +244,6 @@ export const QPASS_CSS = `
 .nc-qpass-preview-empty { margin: 0; font-size: 13px; opacity: 0.65; text-align: center; }
 .nc-qpass-preview-image { display: block; max-width: 100%; max-height: 220px; border-radius: 6px; }
 .nc-qpass-fallback { font-size: 14px; opacity: 0.75; }
+.nc-qpass-error { margin: 0 0 14px; font-size: 13px; color: var(--nc-danger, #b3261e); }
+.nc-qpass-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 `;

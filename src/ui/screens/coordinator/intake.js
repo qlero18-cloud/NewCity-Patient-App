@@ -27,8 +27,8 @@ export function renderIntakeScreen(ctx) {
         <label class="nc-field">
           <span class="nc-field-label">${escapeHtml(t('coordinator.intake.langLabel'))}</span>
           <select name="lang" class="nc-input">
-            <option value="es">es</option>
-            <option value="en">en</option>
+            <option value="es">${escapeHtml(t('common.langName.es'))}</option>
+            <option value="en">${escapeHtml(t('common.langName.en'))}</option>
           </select>
         </label>
 

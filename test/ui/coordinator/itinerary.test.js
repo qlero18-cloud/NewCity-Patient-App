@@ -11,8 +11,21 @@ import assert from 'node:assert/strict';
 import { renderItineraryScreen } from '../../../src/ui/screens/coordinator/itinerary.js';
 import { createCoordinatorStore } from '../../../src/ui/coordinatorStore.js';
 import { translate } from '../../../src/ui/i18n.js';
+import { locations, LOCATION_IDS } from '../../../src/data/locations.js';
+import { locationName, escapeHtml } from '../../../src/ui/util.js';
 
 const NOW = '2026-03-10T10:00-07:00';
+
+// Los nombres de ubicación traen ·, &, paréntesis y apóstrofes. Hay que
+// pasarlos por escapeHtml (así viajan en el HTML: "Quartz Hotel &amp; Spa")
+// y luego escapar los metacaracteres de RegExp.
+function locationNameHtml(locationId, lang) {
+  return escapeHtml(locationName(locations, locationId, lang));
+}
+
+function escapeRe(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function ctx(store, visitId, lang) {
   return { store, visitId, lang, t: (path) => translate(lang, path) };
@@ -53,8 +66,25 @@ for (const lang of ['es', 'en']) {
       assert.ok(html.includes('Laboratorio'), 'falta serviceName en la tarjeta');
       assert.ok(html.includes('2026-03-10T08:00-07:00'), 'falta startsAt en crudo (sin formateo de dominio)');
       assert.ok(html.includes('45'), 'falta durationMin en crudo');
-      assert.ok(html.includes('compass'), 'falta locationId en crudo');
-      assert.ok(html.includes('scheduled'), 'falta status en crudo');
+      // D40: la tarjeta ya no pinta el locationId crudo — pinta el nombre de
+      // la ubicación. No basta con `includes('compass')`: ese substring
+      // aparece igual en los <option value="compass"> del <select>, así que
+      // la aserción pasaría sin que la tarjeta muestre nada. Se ancla al
+      // renglón concreto.
+      assert.ok(
+        html.includes(locationNameHtml('compass', lang)),
+        'la tarjeta debe mostrar el nombre de la ubicación, no el id crudo'
+      );
+      assert.match(
+        html,
+        new RegExp(`nc-coord-itin-row"><span>[^<]*</span> ${escapeRe(locationNameHtml('compass', lang))}`),
+        'el nombre de la ubicación debe ir en el renglón de ubicación de la tarjeta'
+      );
+      assert.ok(
+        html.includes(translate(lang, 'itinerary.status.scheduled')),
+        'el status debe mostrarse traducido (itinerary.status.*), no como el enum crudo'
+      );
+      assert.doesNotMatch(html, /nc-coord-itin-status">scheduled</, 'no debe pintarse el enum crudo "scheduled"');
       assert.match(
         html,
         new RegExp(`data-role="move-appointment"[^>]*data-appointment-id="${appt.id}"`),
@@ -86,8 +116,8 @@ for (const lang of ['es', 'en']) {
 
       assert.match(
         html,
-        /class="nc-itin-what nc-itin-what--cancelled">Resonancia magnética</,
-        'la línea de serviceName de una cita cancelada debe traer nc-itin-what--cancelled (mismo tratamiento que la pantalla del paciente)'
+        /class="nc-coord-itin-what nc-coord-itin-what--cancelled">Resonancia magnética</,
+        'la línea de serviceName de una cita cancelada debe traer nc-coord-itin-what--cancelled (mismo tratamiento que la pantalla del paciente)'
       );
       assert.doesNotMatch(html, /data-role="cancel-appointment"/, 'una cita ya cancelada no debe traer control de cancelar');
       // Editar detalles (serviceName/durationMin/locationId) de una cita ya
@@ -113,6 +143,122 @@ for (const lang of ['es', 'en']) {
       assert.match(html, /name="durationMin"/, 'falta el campo durationMin');
       assert.match(html, /name="locationId"/, 'falta el campo locationId');
       assert.ok(html.includes(translate(lang, 'coordinator.itinerary.addAppointment')), 'falta el texto del botón de envío');
+    });
+
+    // D40 — la razón de todo esto: un locationId escrito a mano que no
+    // coincida con ninguna Location de src/data/locations.js deja el mapa
+    // sin nada que resaltar ni rutear para esa cita. Un <select> lo cierra
+    // estructuralmente en vez de confiar en que se teclee bien.
+    describe(`ubicación como <select> (D40) — [${lang}]`, () => {
+      test('el campo locationId es un <select>, no un <input> de texto libre', () => {
+        const store = createCoordinatorStore();
+        const visit = newVisit(store, lang);
+        const html = renderItineraryScreen(ctx(store, visit.id, lang));
+
+        assert.match(html, /<select[^>]*name="locationId"/, 'locationId debe ser un <select>');
+        assert.doesNotMatch(html, /<input[^>]*name="locationId"/, 'no debe quedar ningún <input> de texto para locationId');
+      });
+
+      test('el <select> ofrece exactamente las 7 ubicaciones de locations.js, con su nombre en el idioma activo', () => {
+        const store = createCoordinatorStore();
+        const visit = newVisit(store, lang);
+        const html = renderItineraryScreen(ctx(store, visit.id, lang));
+
+        for (const id of LOCATION_IDS) {
+          assert.match(
+            html,
+            new RegExp(`<option value="${id}"[^>]*>${escapeRe(locationNameHtml(id, lang))}</option>`),
+            `falta la opción de ${id} con su nombre traducido`
+          );
+        }
+        const optionCount = (html.match(/<option value="/g) ?? []).length;
+        assert.strictEqual(
+          optionCount,
+          LOCATION_IDS.length,
+          'el <select> no debe ofrecer más opciones que las ubicaciones reales del catálogo'
+        );
+      });
+    });
+
+    // D40 — mover y editar usaban window.prompt() (D33), que no puede ser un
+    // <select>: dejaban abierta exactamente la misma puerta que el dropdown
+    // cierra en el formulario de agregar. Ahora son formularios inline.
+    describe(`mover y editar como formularios inline (D40) — [${lang}]`, () => {
+      function withAppointment(store, lang) {
+        const visit = newVisit(store, lang);
+        const appt = store.addAppointment(
+          visit.id,
+          { serviceName: 'Laboratorio', startsAt: '2026-03-10T08:00-07:00', durationMin: 45, locationId: 'compass' },
+          NOW
+        );
+        return { visit, appt };
+      }
+
+      test('editar trae un formulario inline con su propio <select> de ubicación', () => {
+        const store = createCoordinatorStore();
+        const { visit, appt } = withAppointment(store, lang);
+        const html = renderItineraryScreen(ctx(store, visit.id, lang));
+
+        assert.match(
+          html,
+          new RegExp(`<form[^>]*data-role="edit-appointment-form"[^>]*data-appointment-id="${appt.id}"`),
+          'falta el formulario inline de editar para esa cita'
+        );
+        assert.match(html, /<select[^>]*name="editLocationId"/, 'el formulario de editar debe traer un <select> de ubicación');
+      });
+
+      test('el <select> de editar llega con la ubicación actual de la cita ya seleccionada', () => {
+        const store = createCoordinatorStore();
+        const { visit } = withAppointment(store, lang);
+        const html = renderItineraryScreen(ctx(store, visit.id, lang));
+
+        assert.match(
+          html,
+          /<option value="compass" selected>/,
+          'la ubicación actual de la cita debe venir preseleccionada, no un cuadro en blanco'
+        );
+      });
+
+      test('mover trae un formulario inline con campo de fecha/hora, no un prompt', () => {
+        const store = createCoordinatorStore();
+        const { visit, appt } = withAppointment(store, lang);
+        const html = renderItineraryScreen(ctx(store, visit.id, lang));
+
+        assert.match(
+          html,
+          new RegExp(`<form[^>]*data-role="move-appointment-form"[^>]*data-appointment-id="${appt.id}"`),
+          'falta el formulario inline de mover para esa cita'
+        );
+        assert.match(html, /name="moveStartsAt"/, 'el formulario de mover debe traer su campo de fecha/hora');
+      });
+
+      test('una cita cancelada no trae formulario de editar (mismo criterio que su botón)', () => {
+        const store = createCoordinatorStore();
+        const { visit, appt } = withAppointment(store, lang);
+        store.cancelAppointment(visit.id, appt.id, NOW);
+        const html = renderItineraryScreen(ctx(store, visit.id, lang));
+
+        assert.doesNotMatch(html, /data-role="edit-appointment-form"/, 'una cita cancelada no debe traer formulario de editar');
+        assert.match(html, /data-role="move-appointment-form"/, 'una cita cancelada sí sigue pudiendo moverse');
+      });
+    });
+
+    test('los campos del formulario traen el tipo y la ayuda que corresponden', () => {
+      const store = createCoordinatorStore();
+      const visit = newVisit(store, lang);
+      const html = renderItineraryScreen(ctx(store, visit.id, lang));
+
+      assert.match(
+        html,
+        /<input[^>]*name="durationMin"[^>]*type="number"|<input[^>]*type="number"[^>]*name="durationMin"/,
+        'durationMin debe ser type="number": hoy acepta texto libre y termina en Number() -> NaN'
+      );
+      assert.match(html, /<input[^>]*name="durationMin"[^>]*min="1"|<input[^>]*min="1"[^>]*name="durationMin"/, 'durationMin debe tener min="1"');
+      assert.match(
+        html,
+        /<input[^>]*name="startsAt"[^>]*placeholder="[^"]+"|<input[^>]*placeholder="[^"]+"[^>]*name="startsAt"/,
+        'startsAt debe traer placeholder con el formato ISO esperado, como ya hacen los de intake'
+      );
     });
 
     test('visita inexistente no truena — fallback corto en vez de excepción', () => {

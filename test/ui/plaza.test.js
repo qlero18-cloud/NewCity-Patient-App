@@ -10,6 +10,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderPlazaScreen } from '../../src/ui/screens/plaza.js';
 import { plazaVenues } from '../../src/data/plaza.js';
+import { escapeHtml } from '../../src/ui/util.js';
 import { translate } from '../../src/ui/i18n.js';
 
 function ctx(lang) {
@@ -28,8 +29,13 @@ describe('renderPlazaScreen — tres secciones', () => {
 
   test('Restaurantes sigue mostrando exactamente los venues de gastronomía (Farmer\'s Table, The Park Restaurante, Boka, José Café)', () => {
     const html = renderPlazaScreen(ctx('es'));
+    // escapeHtml() sobre el nombre esperado, no el nombre crudo: desde que
+    // escapa también la comilla simple, "Farmer's Table" viaja en el HTML
+    // como "Farmer&#39;s Table" (se ve igual en pantalla). La prueba sigue
+    // comprobando lo mismo — que el venue aparece — pero contra lo que de
+    // verdad emite el render.
     for (const name of ["Farmer's Table", 'The Park Restaurante', 'Boka', 'José Café']) {
-      assert.ok(html.includes(name), `falta "${name}" en la pantalla`);
+      assert.ok(html.includes(escapeHtml(name)), `falta "${name}" en la pantalla`);
     }
   });
 

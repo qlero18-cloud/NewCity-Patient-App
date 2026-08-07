@@ -16,7 +16,12 @@ import { instantMs } from './time.js';
 
 const SCOPE_ORDER = { torre: 0, piso27: 1, estacionamiento: 2 };
 
-function isRevoked(pass) {
+// Exportada (antes era local a este módulo): la pantalla de emisión del
+// panel necesita el MISMO criterio de "revocado" para no contar un pase
+// revocado como pase vigente (src/ui/screens/coordinator/qpass.js). Que
+// sean dos definiciones distintas de "revocado" es exactamente el bug
+// que INV-4 no perdona, así que hay una sola.
+export function isRevoked(pass) {
   return pass.revokedAt !== null && pass.revokedAt !== undefined;
 }
 

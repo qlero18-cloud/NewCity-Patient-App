@@ -50,6 +50,9 @@ import { renderPassScreen, attachPassScreen, PASS_SCREEN_CSS } from './screens/p
 const SUBNAV_CSS = `
 .nc-visit-subnav { display: flex; gap: 8px; padding: 10px 16px; background: var(--nc-surface); border-bottom: 1px solid var(--nc-card-border); overflow-x: auto; }
 .nc-visit-subnav .nc-button { flex: 1; white-space: nowrap; }
+/* El encabezado pasó de un solo botón a dos (volver + idioma); sin esto,
+   el segundo se apila en vez de quedar a un lado. */
+.nc-coord-header-actions { display: flex; gap: 8px; align-items: center; }
 `;
 
 const ALL_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, ITINERARY_CSS, LODGING_CSS, QPASS_CSS, PASS_SCREEN_CSS, SUBNAV_CSS].join('\n');
@@ -115,10 +118,41 @@ export function renderVisitSubnav(route, t) {
     const isActive = id === route;
     return `<button type="button" class="${classNames(['nc-button', isActive && 'nc-button--primary'])}" data-nav="${id}" role="tab" aria-selected="${isActive}">${escapeHtml(t(VISIT_SUBNAV_LABEL_KEY[id]))}</button>`;
   }).join('\n');
-  // aria-label fijo en español, nunca traducido: mismo precedente ya
-  // establecido por tabs.js ("Navegación principal") para esta misma app
-  // bilingüe — no se "corrige" aquí como cambio suelto fuera de alcance.
-  return `<nav class="nc-visit-subnav" role="tablist" aria-label="Navegación de la visita">${items}</nav>`;
+  // El aria-label ya no está fijo en español (lo estuvo, siguiendo el
+  // precedente de tabs.js): con el panel traducible de verdad — ahora tiene
+  // su propio botón de idioma, ver renderCoordinatorHeader — dejar la única
+  // etiqueta accesible en español significaba que un lector de pantalla en
+  // inglés anunciaba este nav en otro idioma que el resto de la pantalla.
+  return `<nav class="nc-visit-subnav" role="tablist" aria-label="${escapeHtml(t('coordinator.subnavLabel'))}">${items}</nav>`;
+}
+
+// Encabezado del panel. Pieza pura y exportada por la misma razón que
+// renderVisitSubnav: render() vive dentro de boot(), cerrado sobre
+// document/location, y así el chrome sí se puede probar por substring
+// (test/ui/coordinator/header.test.js).
+//
+// Dos cambios respecto a la fase 09:
+//   - Botón de idioma (data-role="lang-toggle"). El panel resolvía `lang`
+//     una sola vez al boot y no había forma de cambiarlo sin tocar el
+//     idioma del navegador o escribir localStorage a mano. Reutiliza
+//     common.langToggle, la misma llave del lado paciente (src/ui/app.js),
+//     así que no entra ninguna cadena nueva.
+//   - "Volver a visitas" ya no se pinta estando en #/visits: ahí el clic no
+//     llevaba a ningún lado (el hash no cambia, no hay 'hashchange', no
+//     pasa nada). Un control que no hace nada es peor que ninguno.
+export function renderCoordinatorHeader(route, t) {
+  const backButton = route === 'visits'
+    ? ''
+    : `<button type="button" class="nc-button" data-nav="visits">${escapeHtml(t('coordinator.backToVisits'))}</button>`;
+  return `
+    <header class="nc-header">
+      <span class="nc-header-title">${escapeHtml(t('coordinator.appName'))}</span>
+      <div class="nc-coord-header-actions">
+        ${backButton}
+        <button type="button" class="nc-button" data-role="lang-toggle">${escapeHtml(t('common.langToggle'))}</button>
+      </div>
+    </header>
+  `;
 }
 
 function currentRoute() {
@@ -133,24 +167,34 @@ export function boot(root) {
   let selectedVisitId = null;
 
   const storedLang = localStorage.getItem(LANG_STORAGE_KEY);
-  const lang = resolveInitialLang(navigator.language, storedLang);
-  // Sin selector de idioma en esta demo — el encargo de esta pantalla
-  // describe el alcance mínimo pedido para su chrome ("just enough to
-  // navigate"): un botón para volver a la lista de visitas, nada más. lang
-  // se resuelve una sola vez al boot y no cambia dentro de la sesión;
-  // cambiar el idioma del navegador/SO, o escribir 'nc-coordinator-lang' a
-  // mano en localStorage antes de abrir la pestaña, sigue siendo la forma
-  // de ver la demo en el otro idioma — mismo mecanismo de
-  // resolveInitialLang que usa app.js para su propio primer render. Nota
-  // aparte, no una corrección: si esta pantalla llega a necesitar su
-  // propio botón de idioma más adelante, la llave de localStorage ya
-  // distinta de la de app.js (ver arriba) es justo lo que evita que ese
-  // futuro cambio choque con la preferencia del lado paciente.
+  // `let`, no `const`: el panel ya tiene su propio botón de idioma
+  // (renderCoordinatorHeader). Antes se resolvía una sola vez al boot y la
+  // única forma de ver el panel en el otro idioma era cambiar el idioma del
+  // navegador/SO o escribir 'nc-coordinator-lang' a mano en localStorage —
+  // impracticable para una coordinadora que atiende pacientes en los dos
+  // idiomas. Mismo mecanismo que ya usa app.js del lado paciente; la llave
+  // de localStorage distinta (ver arriba) es justo lo que evita que las dos
+  // preferencias se pisen.
+  let lang = resolveInitialLang(navigator.language, storedLang);
   function t(path) {
     return translate(lang, path);
   }
 
+  // Mensaje de confirmación que debe sobrevivir EXACTAMENTE un repintado.
+  // Vive aquí y no en la pantalla porque la pantalla se destruye y se
+  // vuelve a construir en cada render(): cualquier cosa que una pantalla
+  // escriba en su propio DOM justo antes de pedir un repintado se pierde.
+  // render() lo consume y lo limpia, así que navegar o volver a pintar por
+  // cualquier otro motivo ya no lo muestra.
+  //
+  // render() se queda SIN parámetros a propósito: también es el listener
+  // de 'hashchange', y ahí recibiría un Event como primer argumento.
+  let pendingFlash = null;
+
   function render() {
+    const flash = pendingFlash;
+    pendingFlash = null;
+
     // Recalculado en cada render(), nunca cacheado al boot (ver
     // encabezado del archivo): una coordinadora que lleve rato con la
     // demo abierta no debe arrastrar un `now` viejo a una acción
@@ -174,13 +218,15 @@ export function boot(root) {
       return;
     }
 
-    // Mismas tres rutas que needsVisit ya filtra arriba (VISIT_SUBNAV_
-    // ROUTES) — para cuando llegamos aquí, needsVisit && !selectedVisitId
-    // ya habría cortado con el return de arriba, así que route !==
-    // 'pass-preview' && SCREENS[route].needsVisit basta, sin repetir el
-    // chequeo de selectedVisitId (D36 — ver también el comentario junto a
-    // renderVisitSubnav, más arriba).
-    const showSubnav = route !== 'pass-preview' && SCREENS[route].needsVisit;
+    // pass-preview ENTRA aquí (antes quedaba fuera): era la misma clase de
+    // callejón sin salida que arregló D36. Desde la vista previa del pase,
+    // el único control era "volver a visitas", que además pierde la visita
+    // seleccionada — no había forma de regresar a QPASS, itinerario u
+    // hospedaje de la MISMA visita sin volver a buscarla en la lista.
+    // Para cuando llegamos aquí ya hay visita garantizada en las dos ramas:
+    // needsVisit && !selectedVisitId cortó con el return de arriba, y
+    // pass-preview cortó con !passRecord.
+    const showSubnav = route === 'pass-preview' || SCREENS[route].needsVisit;
 
     document.title = t('coordinator.appName'); // constante a propósito, nunca nombre de paciente — mismo espíritu que INV-6 del lado app.js
     document.documentElement.lang = lang;
@@ -193,13 +239,14 @@ export function boot(root) {
     // src/ui/app.js).
     document.body.className = route === 'pass-preview' ? 'nc-force-light' : '';
 
+    // role="tabpanel" solo cuando de verdad hay un tablist arriba: los
+    // botones del subnav se anuncian role="tab", y un tab sin panel al que
+    // corresponder es una promesa que la pantalla no cumple.
+    const mainRole = showSubnav ? ' role="tabpanel"' : '';
     root.innerHTML = `
-      <header class="nc-header">
-        <span class="nc-header-title">${escapeHtml(t('coordinator.appName'))}</span>
-        <button type="button" class="nc-button" data-nav="visits">${escapeHtml(t('coordinator.backToVisits'))}</button>
-      </header>
+      ${renderCoordinatorHeader(route, t)}
       ${showSubnav ? renderVisitSubnav(route, t) : ''}
-      <main class="nc-main" data-role="screen-mount"></main>
+      <main class="nc-main" data-role="screen-mount"${mainRole}></main>
     `;
     const mount = root.querySelector('[data-role="screen-mount"]');
 
@@ -227,23 +274,36 @@ export function boot(root) {
         lang,
         t,
         now,
+        flash,
         // intake.js no navega por sí mismo (su propio reporte lo dice
         // explícito: "el enrutador decide qué hacer con la visita
-        // nueva"). Aterrizar de vuelta en la lista es justo lo que hace
-        // "visible de inmediato" a la visita nueva (criterio de
-        // aceptación de esta fase) — solo se cambia el hash, igual que el
-        // resto de la navegación de esta demo (D28/attachNav); el
-        // listener de 'hashchange' de abajo es quien de verdad vuelve a
-        // pintar, no una llamada a render() aquí.
-        onCreated: () => {
-          location.hash = '#/visits';
+        // nueva"). El `newVisit` que entrega se DESCARTABA: había que
+        // volver a buscar la visita recién creada en la lista y hacer clic
+        // para poder capturarle nada. Ahora queda seleccionada y se
+        // aterriza en su itinerario — el mismo destino al que lleva elegir
+        // una visita de la lista (ver [data-select-visit], abajo), y lo
+        // primero que hay que capturar tras dar de alta a alguien.
+        // Solo se cambia el hash, igual que el resto de la navegación de
+        // este panel (D28/attachNav); el listener de 'hashchange' de abajo
+        // es quien vuelve a pintar, no una llamada a render() aquí.
+        onCreated: (newVisit) => {
+          selectedVisitId = newVisit.id;
+          location.hash = '#/itinerary';
         },
         // itinerary.js/lodging.js mutan la MISMA visita y se quedan en la
         // misma ruta — no hay cambio de hash que un listener de
         // 'hashchange' pueda aprovechar, así que la única forma de que la
         // pantalla refleje la mutación es volver a llamar render()
         // directamente. Barato e idempotente para el tamaño de esta demo.
-        onChange: render,
+        //
+        // El argumento opcional es el mensaje a mostrar DESPUÉS de
+        // repintar (lodging.js manda 'saved'); itinerary.js llama sin
+        // argumento y no anuncia nada, porque ahí el cambio se ve solo en
+        // las tarjetas.
+        onChange: (nextFlash) => {
+          pendingFlash = typeof nextFlash === 'string' ? nextFlash : null;
+          render();
+        },
         // qpass.js deliberadamente no pinta su propio estado "emitido"
         // (ver su propio encabezado): solo muta la store y llama esto.
         // render() de nuevo es lo que hace aparecer, ya cableado por
@@ -256,6 +316,23 @@ export function boot(root) {
     }
 
     attachNav(root);
+
+    // El toggle de idioma no es un [data-nav] (no navega a ningún lado:
+    // cambia el idioma de la ruta actual), así que se cablea aparte, igual
+    // que data-select-visit más abajo. Persistir ANTES de repintar: si
+    // render() fallara, la preferencia ya quedó guardada y la recarga
+    // muestra el idioma que la coordinadora eligió.
+    root.querySelector('[data-role="lang-toggle"]')?.addEventListener('click', () => {
+      lang = lang === 'es' ? 'en' : 'es';
+      try {
+        localStorage.setItem(LANG_STORAGE_KEY, lang);
+      } catch {
+        // Modo privado / almacenamiento lleno: cambiar de idioma en esta
+        // sesión debe funcionar igual, solo no se recuerda para la próxima.
+      }
+      render();
+    });
+
     // data-select-visit (visits.js) no es un destino fijo de navegación —
     // carga un id variable que data-nav no puede expresar — así que este
     // router lo cablea aparte, con su propio listener, en vez de forzar

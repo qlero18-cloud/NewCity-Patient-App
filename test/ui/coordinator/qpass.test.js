@@ -11,7 +11,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderQpassScreen } from '../../../src/ui/screens/coordinator/qpass.js';
+import { renderQpassScreen, validateQpassFile, QPASS_MAX_BYTES } from '../../../src/ui/screens/coordinator/qpass.js';
 import { createCoordinatorStore } from '../../../src/ui/coordinatorStore.js';
 import { translate } from '../../../src/ui/i18n.js';
 
@@ -143,5 +143,83 @@ describe('renderQpassScreen — visita inexistente (guardia defensiva, store.get
     assert.ok(html.includes(translate('es', 'coordinator.qpass.title')));
     assert.ok(!html.includes('data-role="qpass-image-input"'));
     assert.ok(!html.includes('data-nav="pass-preview"'));
+  });
+});
+
+describe('validateQpassFile — validación de la imagen subida (Etapa A, #4)', () => {
+  test('acepta una imagen de tamaño razonable', () => {
+    assert.deepStrictEqual(
+      validateQpassFile({ type: 'image/jpeg', size: 200 * 1024 }),
+      { ok: true }
+    );
+  });
+
+  test('rechaza lo que no es imagen: accept="image/*" es una sugerencia del selector, no una garantía', () => {
+    // El usuario puede cambiar el filtro a "todos los archivos" en el
+    // diálogo del sistema, y arrastrar-y-soltar lo ignora por completo.
+    for (const type of ['application/pdf', 'text/plain', 'application/octet-stream', '']) {
+      const result = validateQpassFile({ type, size: 1024 });
+      assert.strictEqual(result.ok, false, `debería rechazar type="${type}"`);
+      assert.strictEqual(result.reason, 'type');
+    }
+  });
+
+  test('rechaza una imagen más grande que el tope', () => {
+    const result = validateQpassFile({ type: 'image/png', size: QPASS_MAX_BYTES + 1 });
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, 'size');
+    // El tope importa porque el payload se guarda como data: URL en base64
+    // (D29), que crece ~33% sobre el archivo original.
+    assert.ok(QPASS_MAX_BYTES > 0 && QPASS_MAX_BYTES <= 10 * 1024 * 1024);
+  });
+
+  test('justo en el tope se acepta (el límite no es "menor que")', () => {
+    assert.strictEqual(validateQpassFile({ type: 'image/png', size: QPASS_MAX_BYTES }).ok, true);
+  });
+
+  test('sin archivo no revienta', () => {
+    assert.strictEqual(validateQpassFile(null).ok, false);
+    assert.strictEqual(validateQpassFile(undefined).ok, false);
+  });
+
+  test('cada motivo de rechazo tiene su mensaje en los dos idiomas', () => {
+    for (const reason of ['type', 'size', 'read']) {
+      for (const lang of ['es', 'en']) {
+        const msg = translate(lang, `coordinator.qpass.error.${reason}`);
+        assert.ok(typeof msg === 'string' && msg.length > 0, `falta coordinator.qpass.error.${reason} en ${lang}`);
+      }
+    }
+  });
+});
+
+describe('renderQpassScreen — re-emitir y revocar (Etapa A, #3)', () => {
+  test('la vista de emitido ofrece re-emitir y revocar: emitir ya no era una puerta de un solo sentido', () => {
+    const store = createCoordinatorStore();
+    store.issueQpass('v_demo2', { format: 'image', payload: 'data:image/png;base64,AAA', scope: 'torre' }, NOW);
+    for (const lang of ['es', 'en']) {
+      const html = renderQpassScreen(ctx(lang, store, 'v_demo2'));
+      assert.ok(html.includes('data-role="reissue-qpass"'), `falta el control de re-emitir en ${lang}`);
+      assert.ok(html.includes('data-role="revoke-qpass"'), `falta el control de revocar en ${lang}`);
+      assert.ok(html.includes(translate(lang, 'coordinator.qpass.reissue')), `falta el texto de re-emitir en ${lang}`);
+      assert.ok(html.includes(translate(lang, 'coordinator.qpass.revoke')), `falta el texto de revocar en ${lang}`);
+    }
+  });
+
+  test('tras revocar el pase de imagen, la pantalla vuelve al formulario de carga', () => {
+    const store = createCoordinatorStore();
+    const pass = store.issueQpass('v_demo2', { format: 'image', payload: 'data:image/png;base64,AAA', scope: 'torre' }, NOW);
+    store.revokeQpass('v_demo2', pass.id, NOW);
+    const html = renderQpassScreen(ctx('es', store, 'v_demo2'));
+    assert.ok(html.includes('data-role="qpass-image-input"'), 'debería volver a ofrecer la carga de imagen');
+    assert.ok(!html.includes(translate('es', 'coordinator.qpass.issuedBadge')), 'no debería seguir diciendo "emitido"');
+  });
+
+  test('un pase revocado NO cuenta como emitido, aunque siga en la lista de pases (queda como rastro)', () => {
+    const store = createCoordinatorStore();
+    const pass = store.issueQpass('v_demo2', { format: 'image', payload: 'data:image/png;base64,AAA', scope: 'torre' }, NOW);
+    store.revokeQpass('v_demo2', pass.id, NOW);
+    const { passes } = store.getVisitWithPasses('v_demo2');
+    assert.ok(passes.some((p) => p.id === pass.id), 'el pase revocado no debe borrarse: es historial');
+    assert.ok(passes.find((p) => p.id === pass.id).revokedAt, 'debería quedar marcado con revokedAt');
   });
 });

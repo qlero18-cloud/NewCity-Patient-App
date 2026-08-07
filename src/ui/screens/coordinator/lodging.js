@@ -19,6 +19,51 @@
 
 import { escapeHtml } from '../../util.js';
 import { renderCard } from '../../components/card.js';
+import { instantMs } from '../../../domain/time.js';
+
+// Puro y exportado: bajo la restricción de no simular DOM en node:test,
+// esta es la única forma de probar la validación de verdad. Devuelve
+// { ok, errors } con un motivo por campo ('required' | 'invalidDate' |
+// 'order'), no un mensaje: el texto lo pone la pantalla desde i18n, para
+// que esta función no dependa del idioma.
+//
+// hotel/checkIn/checkOut son obligatorios; reservationCode no: el hotel a
+// veces se aparta antes de que exista el código, y obligarlo empujaría a
+// la coordinadora a inventar uno.
+//
+// El orden importa: si una fecha ni siquiera se puede interpretar, el
+// motivo es 'invalidDate' y NO se compara contra la otra — comparar NaN
+// daría siempre falso y reportaría 'order', que manda a corregir el campo
+// equivocado.
+export function validateLodging(values) {
+  const errors = {};
+  const trimmed = (v) => (typeof v === 'string' ? v.trim() : '');
+
+  for (const field of ['hotel', 'checkIn', 'checkOut']) {
+    if (!trimmed(values?.[field])) errors[field] = 'required';
+  }
+
+  const parse = (field) => {
+    if (errors[field]) return null; // ya está marcado como vacío
+    const ms = instantMs(trimmed(values[field]));
+    if (!Number.isFinite(ms)) {
+      errors[field] = 'invalidDate';
+      return null;
+    }
+    return ms;
+  };
+
+  const inMs = parse('checkIn');
+  const outMs = parse('checkOut');
+
+  // Igual (no solo anterior) también es error: una estancia de duración
+  // cero no es un dato real, es un dedazo.
+  if (inMs !== null && outMs !== null && outMs <= inMs) {
+    errors.checkOut = 'order';
+  }
+
+  return { ok: Object.keys(errors).length === 0, errors };
+}
 
 // name siempre es un literal fijo en cada punto de llamada (nunca dato de
 // paciente/coordinadora) — igual se envuelve en escapeHtml aquí (fix de
@@ -30,7 +75,8 @@ function textField(name, value, label) {
   return `
     <label class="nc-lodging-field">
       <span class="nc-lodging-field-label">${escapeHtml(label)}</span>
-      <input type="text" name="${escapeHtml(name)}" value="${escapeHtml(value ?? '')}" class="nc-lodging-input" />
+      <input type="text" name="${escapeHtml(name)}" value="${escapeHtml(value ?? '')}" class="nc-lodging-input" aria-describedby="nc-lodging-error-${escapeHtml(name)}" />
+      <span class="nc-lodging-error" id="nc-lodging-error-${escapeHtml(name)}" data-role="lodging-error" data-field="${escapeHtml(name)}" hidden></span>
     </label>
   `;
 }
@@ -45,17 +91,20 @@ function checkboxField(name, checked, label) {
 }
 
 export function renderLodgingScreen(ctx) {
-  const { store, visitId, t } = ctx;
+  const { store, visitId, t, flash } = ctx;
   const title = t('coordinator.lodging.title');
   const record = store.getVisit(visitId);
 
   // Guard: visita inexistente -> fallback corto, sin formulario, sin
   // lanzar (misma disciplina de defensa en profundidad que ya usa
-  // src/ui/screens/stay.js para lodging ausente).
+  // src/ui/screens/stay.js para lodging ausente). Antes esto devolvía solo
+  // el <h1>: una pantalla vacía sin explicación. Ahora dice lo mismo que
+  // itinerary.js y qpass.js, desde la misma llave.
   if (!record) {
     return `
       <section class="nc-screen">
         <h1 class="nc-screen-title">${escapeHtml(title)}</h1>
+        <p class="nc-empty-state">${escapeHtml(t('coordinator.visitNotFound'))}</p>
       </section>
     `;
   }
@@ -74,6 +123,7 @@ export function renderLodgingScreen(ctx) {
           ${checkboxField('breakfastIncluded', !!lodging?.breakfastIncluded, t('coordinator.lodging.breakfastLabel'))}
           ${checkboxField('recoveryRoom', !!lodging?.recoveryRoom, t('coordinator.lodging.recoveryLabel'))}
         `)}
+        ${flash === 'saved' ? `<p class="nc-lodging-saved" data-role="lodging-saved" role="status">${escapeHtml(t('coordinator.lodging.saved'))}</p>` : ''}
         <button type="submit" class="nc-button nc-button--primary nc-lodging-submit">${escapeHtml(t('coordinator.lodging.save'))}</button>
       </form>
     </section>
@@ -84,26 +134,75 @@ export function renderLodgingScreen(ctx) {
 // attach*Screen interactivos de esta fase): se llama después de insertar
 // el HTML en el DOM, nunca antes.
 export function attachLodgingScreen(rootEl, ctx) {
-  const { store, visitId, onChange } = ctx;
+  const { store, visitId, onChange, t } = ctx;
   const form = rootEl.querySelector('[data-role="lodging-form"]');
   if (!form) return;
+
+  const errorEls = [...rootEl.querySelectorAll('[data-role="lodging-error"]')];
+
+  // Solo los errores se manejan aquí, de forma imperativa, y a propósito:
+  // el camino inválido NO repinta (repintar borraría lo que la persona
+  // acaba de teclear, que es justo lo que hay que corregir). El camino
+  // válido sí repinta, así que su confirmación no puede vivir en el DOM
+  // — la pinta renderLodgingScreen desde ctx.flash.
+  //
+  // Como el camino inválido no repinta, la confirmación del guardado
+  // ANTERIOR seguiría en pantalla junto al error nuevo ("Hospedaje
+  // guardado." arriba de "Fecha no reconocida"), que es peor que no
+  // decir nada. Se quita al empezar cada intento.
+  function clearFeedback() {
+    for (const el of errorEls) {
+      el.textContent = '';
+      el.hidden = true;
+    }
+    rootEl.querySelector('[data-role="lodging-saved"]')?.remove();
+  }
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const fields = form.elements;
-    store.setLodging(visitId, {
+    const values = {
       hotel: fields.hotel.value,
       reservationCode: fields.reservationCode.value,
       checkIn: fields.checkIn.value,
       checkOut: fields.checkOut.value,
       breakfastIncluded: fields.breakfastIncluded.checked,
       recoveryRoom: fields.recoveryRoom.checked,
-    });
-    onChange?.();
+    };
+
+    clearFeedback();
+
+    // No se guarda nada si algo falla. Antes se guardaba siempre, así que
+    // un check-out mal escrito llegaba tal cual a la pantalla del paciente
+    // (src/ui/screens/stay.js lo muestra sin validar) y ahí ya no había
+    // quién lo notara.
+    const { ok, errors } = validateLodging(values);
+    if (!ok) {
+      for (const el of errorEls) {
+        const reason = errors[el.dataset.field];
+        if (!reason) continue;
+        el.textContent = t(`coordinator.lodging.error.${reason}`);
+        el.hidden = false;
+      }
+      form.querySelector(`[name="${Object.keys(errors)[0]}"]`)?.focus();
+      return;
+    }
+
+    store.setLodging(visitId, values);
+    // 'saved' viaja al repintado (coordinatorApp.js lo pasa como
+    // ctx.flash y lo consume en el siguiente render). Sin confirmación no
+    // había ninguna señal de que el clic hubiera servido: el formulario es
+    // el mismo para alta y edición, y se queda idéntico después de
+    // guardar.
+    onChange?.('saved');
   });
 }
 
 export const LODGING_CSS = `
+/* Copia propia, no importada: no hay garantía de orden de carga entre las
+   pantallas hermanas de coordinator/ (mismo criterio ya escrito en el
+   encabezado de itinerary.js). */
+.nc-empty-state { font-size: 13px; opacity: 0.65; }
 .nc-lodging-form { display: flex; flex-direction: column; gap: 14px; }
 .nc-lodging-field { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
 .nc-lodging-field:last-child { margin-bottom: 0; }
@@ -112,4 +211,6 @@ export const LODGING_CSS = `
 .nc-lodging-field--checkbox { flex-direction: row; align-items: center; min-height: 44px; gap: 10px; cursor: pointer; }
 .nc-lodging-checkbox { width: 22px; height: 22px; flex-shrink: 0; }
 .nc-lodging-submit { align-self: flex-start; }
+.nc-lodging-error { font-size: 12px; color: var(--nc-danger, #b3261e); }
+.nc-lodging-saved { margin: 0; font-size: 13px; opacity: 0.85; }
 `;

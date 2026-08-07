@@ -87,3 +87,23 @@ describe('renderVisitSubnav — convención data-nav (D28)', () => {
     assert.doesNotMatch(html, /data-target=/);
   });
 });
+
+describe('renderVisitSubnav — etiqueta accesible traducida (Etapa A, #13)', () => {
+  test('el aria-label del <nav> sale de i18n y cambia con el idioma', () => {
+    for (const lang of ['es', 'en']) {
+      const html = renderVisitSubnav('itinerary', (path) => translate(lang, path));
+      assert.ok(
+        html.includes(`aria-label="${translate(lang, 'coordinator.subnavLabel')}"`),
+        `el aria-label del subnav no sale de coordinator.subnavLabel en ${lang}`
+      );
+    }
+  });
+
+  test('la etiqueta de verdad está traducida: es y en no son la misma cadena', () => {
+    assert.notStrictEqual(
+      translate('es', 'coordinator.subnavLabel'),
+      translate('en', 'coordinator.subnavLabel'),
+      'coordinator.subnavLabel quedó igual en los dos idiomas — vuelve a ser una etiqueta fija'
+    );
+  });
+});

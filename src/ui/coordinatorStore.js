@@ -147,5 +147,23 @@ export function createCoordinatorStore(initialFixtures = fixtures) {
       r.passes.push(qpass);
       return qpass;
     },
+
+    // Revocar NO borra el pase: le estampa revokedAt y lo deja en la
+    // lista. Un pase emitido es historia de la visita — quién entró con
+    // qué y hasta cuándo — y esa historia no se reescribe (§6.5: revocar
+    // es el único mecanismo de invalidación de un pase sin caducidad, y
+    // solo funciona si el registro sobrevive para decir que se revocó).
+    // Ya revocado se deja como está: la primera revocación es la que
+    // vale, volver a llamar no debe correr la hora hacia adelante.
+    revokeQpass(visitId, passId, now) {
+      const r = record(visitId);
+      if (!r) return null;
+      const qpass = r.passes.find((p) => p.id === passId);
+      if (!qpass) return null;
+      if (qpass.revokedAt === null || qpass.revokedAt === undefined) {
+        qpass.revokedAt = now;
+      }
+      return qpass;
+    },
   };
 }

@@ -72,16 +72,77 @@ describe('resolveRoute (PRD §8, fase 02)', () => {
     assert.deepStrictEqual(result, { kind: 'same_location', locationId: 'compass' });
   });
 
-  test('un par sin ruta en el catálogo devuelve null y no lanza excepción', () => {
-    assert.strictEqual(resolveRoute('farmacia', 'quartz', routes), null);
-  });
-
   test('un par presente en el catálogo devuelve la Route con sus pasos', () => {
     const result = resolveRoute('estacionamiento', 'compass', routes);
     assert.ok(result, 'debería existir la ruta estacionamiento → compass');
     assert.strictEqual(result.fromLocationId, 'estacionamiento');
     assert.strictEqual(result.toLocationId, 'compass');
     assert.ok(Array.isArray(result.steps) && result.steps.length > 0);
+    assert.notStrictEqual(result.composed, true, 'un par directo no debe componerse');
+  });
+
+  test('una ubicación desconocida sigue devolviendo null, no una ruta inventada', () => {
+    assert.strictEqual(resolveRoute('no_existe', 'compass', routes), null);
+    assert.strictEqual(resolveRoute('compass', 'no_existe', routes), null);
+  });
+});
+
+// D41 — el catálogo directo no cubre los 42 pares ordenados y no tiene por
+// qué: lobby_torre es el nodo por el que pasa todo el complejo, así que un
+// par sin ruta directa se compone A → lobby_torre → B. Es provisional igual
+// que el resto (PRD §15.1), pero es cierto estructuralmente — no contenido
+// inventado par por par.
+describe('resolveRoute — composición por el lobby (D41)', () => {
+  test('farmacia → quartz no es directo pero ahora resuelve, compuesto por el lobby', () => {
+    const result = resolveRoute('farmacia', 'quartz', routes);
+    assert.ok(result, 'farmacia → quartz debería resolver por composición');
+    assert.strictEqual(result.composed, true);
+    assert.strictEqual(result.fromLocationId, 'farmacia');
+    assert.strictEqual(result.toLocationId, 'quartz');
+  });
+
+  test('estacionamiento → piso27 resuelve: es el caso que rompía el mapa (origen R7 por defecto)', () => {
+    const result = resolveRoute('estacionamiento', 'piso27', routes);
+    assert.ok(result, 'estacionamiento → piso27 debe tener ruta: es el origen por defecto de la primera cita del día');
+    assert.ok(result.steps.length > 0);
+  });
+
+  test('una ruta compuesta renumera sus pasos 1..N y suma los minutos de los dos tramos', () => {
+    const first = resolveRoute('farmacia', 'lobby_torre', routes);
+    const second = resolveRoute('lobby_torre', 'quartz', routes);
+    const composed = resolveRoute('farmacia', 'quartz', routes);
+
+    assert.deepStrictEqual(
+      composed.steps.map((s) => s.order),
+      Array.from({ length: first.steps.length + second.steps.length }, (_, i) => i + 1)
+    );
+    assert.strictEqual(composed.estimatedMinutes, first.estimatedMinutes + second.estimatedMinutes);
+  });
+
+  test('una ruta compuesta sigue marcada unconfirmed y conserva la forma que consume el mapa', () => {
+    const composed = resolveRoute('farmacia', 'quartz', routes);
+    assert.strictEqual(composed.unconfirmed, true);
+    assert.strictEqual(typeof composed.id, 'string');
+    for (const step of composed.steps) {
+      assert.strictEqual(typeof step.instruction.es, 'string');
+      assert.strictEqual(typeof step.instruction.en, 'string');
+      assert.ok(MAP_HIGHLIGHT_IDS.includes(step.mapHighlightId));
+    }
+  });
+
+  test('los 42 pares ordenados de las 7 ubicaciones resuelven — ninguno deja el mapa en blanco', () => {
+    // Ids de src/data/locations.js, inline a propósito: esta fase no importa
+    // de fase 03 (misma razón que `knownFromPhase04` más arriba).
+    const LOCATION_IDS = ['estacionamiento', 'lobby_torre', 'compass', 'piso27', 'quartz', 'nivel1', 'farmacia'];
+
+    for (const from of LOCATION_IDS) {
+      for (const to of LOCATION_IDS) {
+        if (from === to) continue;
+        const result = resolveRoute(from, to, routes);
+        assert.ok(result, `${from} → ${to} no resuelve: el mapa se quedaría sin ruta que dibujar`);
+        assert.ok(result.steps.length > 0, `${from} → ${to} resuelve pero sin pasos`);
+      }
+    }
   });
 });
 
@@ -126,7 +187,12 @@ describe('Integridad del catálogo provisional (src/data/routes.js)', () => {
     }
   });
 
-  test('el catálogo cubre los 10 pares mínimos documentados en la fase, en el sentido dado', () => {
+  test('el catálogo directo cubre exactamente los pares redactados a mano, en el sentido dado', () => {
+    // Hasta D41 eran los 10 pares mínimos de la fase 02. Ahora son 17: los
+    // 10 originales más los 7 que faltaban contra el lobby, que es lo que
+    // permite componer cualquier par restante (ver describe de composición).
+    // Sigue siendo una lista cerrada a propósito: agregar una ruta obliga a
+    // tocar este test, no a que aparezca contenido nuevo sin que nadie mire.
     const pairs = routes.map((r) => `${r.fromLocationId}->${r.toLocationId}`).sort();
     const expected = [
       'estacionamiento->lobby_torre',
@@ -139,8 +205,37 @@ describe('Integridad del catálogo provisional (src/data/routes.js)', () => {
       'piso27->farmacia',
       'quartz->lobby_torre',
       'lobby_torre->quartz',
+      'lobby_torre->estacionamiento',
+      'compass->lobby_torre',
+      'piso27->lobby_torre',
+      'nivel1->lobby_torre',
+      'lobby_torre->nivel1',
+      'farmacia->lobby_torre',
+      'lobby_torre->farmacia',
     ].sort();
     assert.deepStrictEqual(pairs, expected);
+  });
+
+  test('toda ubicación tiene ruta directa hacia y desde lobby_torre — es lo que hace posible componer', () => {
+    const LOCATION_IDS = ['estacionamiento', 'lobby_torre', 'compass', 'piso27', 'quartz', 'nivel1', 'farmacia'];
+    const pairs = new Set(routes.map((r) => `${r.fromLocationId}->${r.toLocationId}`));
+
+    for (const id of LOCATION_IDS) {
+      if (id === 'lobby_torre') continue;
+      assert.ok(pairs.has(`${id}->lobby_torre`), `falta la ruta directa ${id} → lobby_torre`);
+      assert.ok(pairs.has(`lobby_torre->${id}`), `falta la ruta directa lobby_torre → ${id}`);
+    }
+  });
+
+  test('ninguna ruta del catálogo directo sale y llega a la misma ubicación', () => {
+    for (const route of routes) {
+      assert.notStrictEqual(route.fromLocationId, route.toLocationId, `ruta ${route.id}: origen y destino iguales`);
+    }
+  });
+
+  test('no hay dos rutas para el mismo par ordenado', () => {
+    const pairs = routes.map((r) => `${r.fromLocationId}->${r.toLocationId}`);
+    assert.strictEqual(new Set(pairs).size, pairs.length, 'hay pares duplicados en el catálogo');
   });
 
   test('todo el contenido del catálogo está marcado unconfirmed: true (PRD §15, provisional hasta planos oficiales)', () => {

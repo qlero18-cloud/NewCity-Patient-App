@@ -17,6 +17,12 @@ export const STRINGS = {
     common: {
       appName: 'NewCity',
       langToggle: 'English',
+      // Endónimo: el nombre de cada idioma EN ese idioma, por eso es
+      // idéntico en el bloque es y en el bloque en. Es lo que espera quien
+      // usa un selector de idioma — "Español" se reconoce aunque la
+      // interfaz esté en inglés — y evita que la coordinadora tenga que
+      // traducir mentalmente para elegir el idioma del paciente.
+      langName: { es: 'Español', en: 'English' },
       unconfirmedBadge: 'POR CONFIRMAR',
       backButton: 'Atrás',
       loading: 'Cargando…',
@@ -129,6 +135,12 @@ export const STRINGS = {
     coordinator: {
       appName: 'NewCity — Coordinación',
       backToVisits: 'Volver a visitas',
+      subnavLabel: 'Navegación de la visita',
+      // Un solo mensaje para las tres pantallas que necesitan una visita
+      // seleccionada (itinerario/hospedaje/QPASS). Antes cada una lo
+      // resolvía por su cuenta con un `lang === 'en' ? … : …` escrito a
+      // mano, y hospedaje ni siquiera mostraba nada.
+      visitNotFound: 'No encontramos esa visita.',
       visits: {
         title: 'Visitas',
         empty: 'No hay visitas todavía.',
@@ -165,6 +177,12 @@ export const STRINGS = {
         breakfastLabel: 'Desayuno incluido',
         recoveryLabel: 'Habitación recovery',
         save: 'Guardar hospedaje',
+        saved: 'Hospedaje guardado.',
+        error: {
+          required: 'Este dato es obligatorio.',
+          invalidDate: 'Fecha no reconocida. Usa el formato 2026-03-09T15:00-07:00.',
+          order: 'El check-out debe ser posterior al check-in.',
+        },
       },
       qpass: {
         title: 'Emitir QPASS',
@@ -176,6 +194,13 @@ export const STRINGS = {
         pendingBadge: 'QPASS pendiente',
         issuedBadge: 'QPASS emitido',
         viewAsPatient: 'Ver como paciente',
+        reissue: 'Emitir otro QPASS',
+        revoke: 'Revocar QPASS',
+        error: {
+          type: 'Ese archivo no es una imagen. Sube una foto o captura del pase.',
+          size: 'La imagen pesa demasiado. Usa uno de menos de 2 MB.',
+          read: 'No se pudo leer el archivo. Inténtalo otra vez.',
+        },
       },
     },
   },
@@ -183,6 +208,8 @@ export const STRINGS = {
     common: {
       appName: 'NewCity',
       langToggle: 'Español',
+      // Igual que en el bloque es, a propósito: ver el comentario de allá.
+      langName: { es: 'Español', en: 'English' },
       unconfirmedBadge: 'TO CONFIRM',
       backButton: 'Back',
       loading: 'Loading…',
@@ -290,6 +317,8 @@ export const STRINGS = {
     coordinator: {
       appName: 'NewCity — Coordination',
       backToVisits: 'Back to visits',
+      subnavLabel: 'Visit navigation',
+      visitNotFound: 'We couldn’t find that visit.',
       visits: {
         title: 'Visits',
         empty: 'No visits yet.',
@@ -326,6 +355,12 @@ export const STRINGS = {
         breakfastLabel: 'Breakfast included',
         recoveryLabel: 'Recovery room',
         save: 'Save lodging',
+        saved: 'Lodging saved.',
+        error: {
+          required: 'This field is required.',
+          invalidDate: 'We couldn’t read that date. Use the format 2026-03-09T15:00-07:00.',
+          order: 'Check-out must be after check-in.',
+        },
       },
       qpass: {
         title: 'Issue QPASS',
@@ -337,6 +372,13 @@ export const STRINGS = {
         pendingBadge: 'QPASS pending',
         issuedBadge: 'QPASS issued',
         viewAsPatient: 'View as patient',
+        reissue: 'Issue another QPASS',
+        revoke: 'Revoke QPASS',
+        error: {
+          type: 'That file isn’t an image. Upload a photo or screenshot of the pass.',
+          size: 'That image is too large. Use one under 2 MB.',
+          read: 'We couldn’t read that file. Please try again.',
+        },
       },
     },
   },

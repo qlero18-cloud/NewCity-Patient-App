@@ -7,36 +7,50 @@
 // coordinatorStore.js) — de ahí se lee .appointments, no
 // .visit.appointments.
 //
-// A propósito sin domain/ ni formateo para paciente: serviceName,
-// startsAt, durationMin y locationId se pintan tal cual los guarda la
-// store — captura/consulta cruda para la coordinadora, no la vista pulida
-// que ya tiene el ../itinerary.js del paciente. status es la excepción
-// parcial (fix de revisión adversarial, fase 09): cancelled/moved se
-// traducen vía renderBadge + coordinator.itinerary.{cancelledBadge,
-// movedBadge} (i18n.js) porque esas dos llaves ya existían, sin usar,
-// específicamente para esto — scheduled/in_progress/done se quedan en
-// crudo, sin traducir, porque no hay llave i18n para esos tres (ver
-// renderAppointmentCard abajo).
+// A propósito sin domain/ ni formateo para paciente: serviceName, startsAt
+// y durationMin se pintan tal cual los guarda la store — captura/consulta
+// cruda para la coordinadora, no la vista pulida que ya tiene el
+// ../itinerary.js del paciente.
 //
-// El tachado de una cita cancelada reutiliza la técnica de ese archivo
-// (.nc-itin-what + .nc-itin-what--cancelled sobre la línea de
-// serviceName, con classNames()) copiada aquí a propósito, NO importada
-// — ../itinerary.js es solo referencia de lectura. Este directorio
-// (src/ui/screens/coordinator/) es nuevo y aparte precisamente para no
-// chocar de nombre con las pantallas del paciente ya aprobadas.
+// Dos excepciones, ambas porque "crudo" ahí significaba "en inglés en los
+// dos idiomas":
+//   - status se traduce entero. cancelled/moved vía renderBadge +
+//     coordinator.itinerary.{cancelledBadge,movedBadge}; los otros tres vía
+//     itinerary.status.{scheduled,in_progress,done}. (Una versión anterior
+//     de este comentario afirmaba que no existían llaves i18n para esos
+//     tres — era falso: están en src/ui/i18n.js desde la fase 05.)
+//   - locationId se pinta como nombre de la ubicación, no como slug: el id
+//     ya no lo teclea nadie, lo elige un <select> (D40), así que mostrarlo
+//     en crudo solo servía para depurar.
+//
+// El tachado de una cita cancelada reutiliza la TÉCNICA de ../itinerary.js
+// (una clase modificadora sobre la línea de serviceName, con classNames()),
+// no sus nombres: aquí son .nc-coord-itin-what/--cancelled. Antes eran
+// .nc-itin-what/--cancelled, prestadas literalmente de la pantalla del
+// paciente, lo que contradecía la razón misma de que este directorio
+// exista. No rompía nada todavía —los dos bundles son documentos distintos
+// y las reglas eran idénticas— pero era un conflicto latente: cambiar el
+// tachado del paciente habría dejado al panel con el estilo viejo en
+// silencio. test/ui/coordinator/cssNamespace.test.js lo impide de aquí en
+// adelante para todo el directorio, no solo para este par.
 //
 // Este archivo se basta solo en CSS: no hay garantía de orden de carga
-// entre las pantallas hermanas de coordinator/, así que además de
-// .nc-itin-what/.nc-itin-what--cancelled, también trae su propia copia de
-// .nc-screen-title y .nc-empty-state (mismas reglas ya usadas en el resto
-// del proyecto) en vez de asumir que otra pantalla del panel las define
-// primero.
+// entre las pantallas hermanas de coordinator/, así que además de sus
+// propias clases trae su copia de .nc-screen-title y .nc-empty-state
+// (primitivas compartidas del proyecto, mismas reglas en todos lados) en
+// vez de asumir que otra pantalla del panel las define primero.
 
-import { escapeHtml, classNames } from '../../util.js';
+import { escapeHtml, classNames, locationName, locationOptionsHtml } from '../../util.js';
+import { locations } from '../../../data/locations.js';
 import { renderCard } from '../../components/card.js';
 import { renderBadge } from '../../components/badge.js';
 
-function renderAppointmentCard(appointment, t) {
+// Formato que espera la store para startsAt. Se muestra como placeholder en
+// vez de dejar el campo mudo — mismo criterio que ya usan los dos campos de
+// fecha de intake.js.
+const STARTS_AT_PLACEHOLDER = '2026-03-10T08:00-07:00';
+
+function renderAppointmentCard(appointment, lang, t) {
   const cancelled = appointment.status === 'cancelled';
   const moved = appointment.status === 'moved';
 
@@ -51,12 +65,10 @@ function renderAppointmentCard(appointment, t) {
   // "editarla" (docs/phases/phase-09-coordinator-demo.md) es una acción
   // propia, distinta de "moverla": edita serviceName/durationMin/
   // locationId, nunca startsAt ni status (coordinatorStore.js#
-  // editAppointment). Misma interacción mínima deliberada que ya usa
-  // "mover" (attachItineraryScreen, abajo): tres window.prompt()
-  // encadenados, no un formulario nuevo — ver ese comentario para el
-  // porqué (sin dependencia de date-picker en el proyecto); aquí se
-  // reutiliza el mismo criterio para no introducir dos patrones de
-  // interacción distintos en el mismo archivo para acciones hermanas.
+  // editAppointment). El botón no captura nada: revela el formulario
+  // inline de su tarjeta (renderEditForm, abajo). Mismo patrón que "mover",
+  // para no tener dos interacciones distintas en el mismo archivo para dos
+  // acciones hermanas.
   const editControl = cancelled
     ? ''
     : `<button type="button" class="nc-button" data-role="edit-appointment" data-appointment-id="${escapeHtml(appointment.id)}">${escapeHtml(t('coordinator.itinerary.edit'))}</button>`;
@@ -69,30 +81,82 @@ function renderAppointmentCard(appointment, t) {
   // usa ../itinerary.js (paciente) y qpass.js, no texto libre nuevo.
   // 'updated' es la variante ya usada por el lado paciente para señalar
   // que una cita cambió de horario — mismo significado que "movida" aquí.
+  // Los cinco status ya tienen llave i18n (itinerary.status.*, src/ui/
+  // i18n.js) — el comentario de cabecera de este archivo afirmaba lo
+  // contrario y era falso: scheduled/in_progress/done existen ahí desde la
+  // fase 05. Se pintan traducidos como los otros dos, en vez de dejar el
+  // enum crudo en inglés en ambos idiomas.
   const statusHtml = cancelled
     ? `<p class="nc-coord-itin-status-badge">${renderBadge(t('coordinator.itinerary.cancelledBadge'), 'cancelled')}</p>`
     : moved
       ? `<p class="nc-coord-itin-status-badge">${renderBadge(t('coordinator.itinerary.movedBadge'), 'updated')}</p>`
-      : `<p class="nc-coord-itin-status">${escapeHtml(appointment.status)}</p>`;
+      : `<p class="nc-coord-itin-status">${escapeHtml(t(`itinerary.status.${appointment.status}`))}</p>`;
 
   return renderCard(
     `
-      <p class="${classNames(['nc-itin-what', cancelled && 'nc-itin-what--cancelled'])}">${escapeHtml(appointment.serviceName)}</p>
+      <p class="${classNames(['nc-coord-itin-what', cancelled && 'nc-coord-itin-what--cancelled'])}">${escapeHtml(appointment.serviceName)}</p>
       <p class="nc-coord-itin-row"><span>${escapeHtml(t('coordinator.itinerary.startsAtLabel'))}</span> ${escapeHtml(appointment.startsAt)}</p>
       <p class="nc-coord-itin-row"><span>${escapeHtml(t('coordinator.itinerary.durationLabel'))}</span> ${escapeHtml(appointment.durationMin)}</p>
-      <p class="nc-coord-itin-row"><span>${escapeHtml(t('coordinator.itinerary.locationLabel'))}</span> ${escapeHtml(appointment.locationId)}</p>
+      <p class="nc-coord-itin-row"><span>${escapeHtml(t('coordinator.itinerary.locationLabel'))}</span> ${escapeHtml(locationName(locations, appointment.locationId, lang))}</p>
       ${statusHtml}
       <div class="nc-coord-itin-actions">
         <button type="button" class="nc-button" data-role="move-appointment" data-appointment-id="${escapeHtml(appointment.id)}">${escapeHtml(t('coordinator.itinerary.move'))}</button>
         ${editControl}
         ${cancelControl}
       </div>
+      ${renderMoveForm(appointment, t)}
+      ${cancelled ? '' : renderEditForm(appointment, lang, t)}
     `,
     { extraClass: cancelled ? 'nc-card--muted' : '' }
   );
 }
 
-function renderAddAppointmentForm(t) {
+// D40 — mover y editar eran cadenas de window.prompt() (D33). Un prompt no
+// puede ser un <select>, así que dejaban abierta exactamente la misma puerta
+// que el dropdown cierra en el formulario de agregar: bastaba teclear mal la
+// ubicación al editar para romper el mapa de esa cita.
+//
+// Los dos formularios se pintan siempre, ocultos con [hidden], y el botón
+// correspondiente los muestra. Así no hay estado de "qué tarjeta está en
+// edición" que mantener entre repintados: tras una mutación exitosa el
+// router vuelve a pintar la pantalla desde cero y los formularios vuelven a
+// quedar ocultos solos.
+function renderMoveForm(appointment, t) {
+  return `
+    <form data-role="move-appointment-form" data-appointment-id="${escapeHtml(appointment.id)}" class="nc-coord-itin-form nc-coord-itin-form--inline" hidden>
+      <label class="nc-coord-itin-field">
+        <span>${escapeHtml(t('coordinator.itinerary.startsAtLabel'))}</span>
+        <input type="text" name="moveStartsAt" class="nc-coord-itin-input" required
+               placeholder="${escapeHtml(STARTS_AT_PLACEHOLDER)}" value="${escapeHtml(appointment.startsAt)}" />
+      </label>
+      <button type="submit" class="nc-button nc-button--primary nc-coord-itin-submit">${escapeHtml(t('coordinator.itinerary.move'))}</button>
+    </form>
+  `;
+}
+
+function renderEditForm(appointment, lang, t) {
+  return `
+    <form data-role="edit-appointment-form" data-appointment-id="${escapeHtml(appointment.id)}" class="nc-coord-itin-form nc-coord-itin-form--inline" hidden>
+      <label class="nc-coord-itin-field">
+        <span>${escapeHtml(t('coordinator.itinerary.serviceNameLabel'))}</span>
+        <input type="text" name="editServiceName" class="nc-coord-itin-input" required value="${escapeHtml(appointment.serviceName)}" />
+      </label>
+      <label class="nc-coord-itin-field">
+        <span>${escapeHtml(t('coordinator.itinerary.durationLabel'))}</span>
+        <input type="number" name="editDurationMin" class="nc-coord-itin-input" required min="1" step="1" value="${escapeHtml(appointment.durationMin)}" />
+      </label>
+      <label class="nc-coord-itin-field">
+        <span>${escapeHtml(t('coordinator.itinerary.locationLabel'))}</span>
+        <select name="editLocationId" class="nc-coord-itin-input" required>
+          ${locationOptionsHtml(locations, lang, appointment.locationId)}
+        </select>
+      </label>
+      <button type="submit" class="nc-button nc-button--primary nc-coord-itin-submit">${escapeHtml(t('coordinator.itinerary.edit'))}</button>
+    </form>
+  `;
+}
+
+function renderAddAppointmentForm(lang, t) {
   return `
     <form data-role="add-appointment-form" class="nc-coord-itin-form">
       <label class="nc-coord-itin-field">
@@ -101,15 +165,17 @@ function renderAddAppointmentForm(t) {
       </label>
       <label class="nc-coord-itin-field">
         <span>${escapeHtml(t('coordinator.itinerary.startsAtLabel'))}</span>
-        <input type="text" name="startsAt" class="nc-coord-itin-input" required />
+        <input type="text" name="startsAt" class="nc-coord-itin-input" required placeholder="${escapeHtml(STARTS_AT_PLACEHOLDER)}" />
       </label>
       <label class="nc-coord-itin-field">
         <span>${escapeHtml(t('coordinator.itinerary.durationLabel'))}</span>
-        <input type="text" name="durationMin" class="nc-coord-itin-input" required />
+        <input type="number" name="durationMin" class="nc-coord-itin-input" required min="1" step="1" />
       </label>
       <label class="nc-coord-itin-field">
         <span>${escapeHtml(t('coordinator.itinerary.locationLabel'))}</span>
-        <input type="text" name="locationId" class="nc-coord-itin-input" required />
+        <select name="locationId" class="nc-coord-itin-input" required>
+          ${locationOptionsHtml(locations, lang)}
+        </select>
       </label>
       <button type="submit" class="nc-button nc-button--primary nc-coord-itin-submit">${escapeHtml(t('coordinator.itinerary.addAppointment'))}</button>
     </form>
@@ -123,16 +189,15 @@ export function renderItineraryScreen(ctx) {
 
   // Guard: visita inexistente -> alternativa corta, sin lanzar (misma
   // disciplina de defensa en profundidad que ya usa src/ui/screens/
-  // stay.js para lodging ausente). No existe una llave de i18n para este
-  // caso (no está en coordinator.itinerary.* de src/ui/i18n.js) — literal
-  // corto aquí en vez de tocar ese archivo compartido; ver el reporte
-  // final de esta tarea.
+  // stay.js para lodging ausente). El mensaje sale de
+  // coordinator.visitNotFound, la MISMA llave que usan lodging.js y
+  // qpass.js: antes cada archivo traía su propio `lang === 'en' ? … : …`,
+  // la única traducción del proyecto hecha fuera de i18n.js.
   if (!record) {
-    const fallback = lang === 'en' ? 'Visit not found.' : 'Visita no encontrada.';
     return `
       <section class="nc-screen">
         <h1 class="nc-screen-title">${escapeHtml(title)}</h1>
-        <p class="nc-empty-state">${escapeHtml(fallback)}</p>
+        <p class="nc-empty-state">${escapeHtml(t('coordinator.visitNotFound'))}</p>
       </section>
     `;
   }
@@ -153,13 +218,13 @@ export function renderItineraryScreen(ctx) {
 
   const body = sortedAppointments.length === 0
     ? `<p class="nc-empty-state">${escapeHtml(t('coordinator.itinerary.empty'))}</p>`
-    : `<div class="nc-coord-itin-list">${sortedAppointments.map((a) => renderAppointmentCard(a, t)).join('\n')}</div>`;
+    : `<div class="nc-coord-itin-list">${sortedAppointments.map((a) => renderAppointmentCard(a, lang, t)).join('\n')}</div>`;
 
   return `
     <section class="nc-screen">
       <h1 class="nc-screen-title">${escapeHtml(title)}</h1>
       ${body}
-      ${renderAddAppointmentForm(t)}
+      ${renderAddAppointmentForm(lang, t)}
     </section>
   `;
 }
@@ -189,44 +254,50 @@ export function attachItineraryScreen(rootEl, ctx) {
     onChange?.();
   });
 
+  // D40 — los botones ya no piden datos: revelan el formulario inline de su
+  // propia tarjeta. Mostrar uno esconde cualquier otro abierto, para que no
+  // queden dos ediciones a medias en pantalla al mismo tiempo.
+  function toggleInlineForm(role, appointmentId) {
+    const target = rootEl.querySelector(`[data-role="${role}"][data-appointment-id="${appointmentId}"]`);
+    if (!target) return;
+    const wasHidden = target.hidden;
+    rootEl.querySelectorAll('.nc-coord-itin-form--inline').forEach((f) => { f.hidden = true; });
+    target.hidden = !wasHidden;
+    if (!target.hidden) target.querySelector('input, select')?.focus();
+  }
+
   rootEl.querySelectorAll('[data-role="move-appointment"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      // Interacción mínima deliberada de esta demo (docs/phases/phase-09-
-      // coordinator-demo.md): el proyecto no trae ninguna dependencia de
-      // date-picker, así que "mover" una cita pide la nueva fecha/hora con
-      // window.prompt(). Es un placeholder conocido y minimalista a
-      // propósito — no un patrón de producción.
-      const newStartsAt = window.prompt(t('coordinator.itinerary.startsAtLabel'));
+    btn.addEventListener('click', () => toggleInlineForm('move-appointment-form', btn.dataset.appointmentId));
+  });
+
+  rootEl.querySelectorAll('[data-role="edit-appointment"]').forEach((btn) => {
+    btn.addEventListener('click', () => toggleInlineForm('edit-appointment-form', btn.dataset.appointmentId));
+  });
+
+  rootEl.querySelectorAll('[data-role="move-appointment-form"]').forEach((moveForm) => {
+    moveForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const newStartsAt = moveForm.elements.moveStartsAt.value.trim();
       if (!newStartsAt) return;
-      store.moveAppointment(visitId, btn.dataset.appointmentId, newStartsAt, now);
+      store.moveAppointment(visitId, moveForm.dataset.appointmentId, newStartsAt, now);
       onChange?.();
     });
   });
 
-  rootEl.querySelectorAll('[data-role="edit-appointment"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      // Misma interacción mínima deliberada que "mover" arriba: tres
-      // window.prompt() encadenados, reutilizando las mismas llaves de
-      // etiqueta que ya usa el formulario de agregar (serviceNameLabel/
-      // durationLabel/locationLabel) en vez de inventar copy nueva solo
-      // para estos prompts — igual que "mover" reutiliza startsAtLabel
-      // para el suyo. Cada prompt trae el valor actual como default (2o
-      // argumento de window.prompt) para que la coordinadora vea qué va a
-      // cambiar, no un cuadro vacío. Cancelar en cualquiera de los tres
-      // (null) aborta todo el flujo sin mutar nada — ninguna edición
-      // parcial.
-      const appointmentId = btn.dataset.appointmentId;
-      const current = store.getVisit(visitId)?.appointments.find((a) => a.id === appointmentId);
-      if (!current) return;
-
-      const serviceName = window.prompt(t('coordinator.itinerary.serviceNameLabel'), current.serviceName);
-      if (serviceName === null) return;
-      const durationMinRaw = window.prompt(t('coordinator.itinerary.durationLabel'), String(current.durationMin));
-      if (durationMinRaw === null) return;
-      const locationId = window.prompt(t('coordinator.itinerary.locationLabel'), current.locationId);
-      if (locationId === null) return;
-
-      store.editAppointment(visitId, appointmentId, { serviceName, durationMin: Number(durationMinRaw), locationId }, now);
+  rootEl.querySelectorAll('[data-role="edit-appointment-form"]').forEach((editForm) => {
+    editForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const fields = editForm.elements;
+      store.editAppointment(
+        visitId,
+        editForm.dataset.appointmentId,
+        {
+          serviceName: fields.editServiceName.value.trim(),
+          durationMin: Number(fields.editDurationMin.value),
+          locationId: fields.editLocationId.value,
+        },
+        now
+      );
       onChange?.();
     });
   });
@@ -243,8 +314,8 @@ export const ITINERARY_CSS = `
 .nc-screen-title { font-size: 20px; margin: 4px 0 16px; }
 .nc-empty-state { font-size: 13px; opacity: 0.65; }
 .nc-coord-itin-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
-.nc-itin-what { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
-.nc-itin-what--cancelled { text-decoration: line-through; opacity: 0.6; }
+.nc-coord-itin-what { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.nc-coord-itin-what--cancelled { text-decoration: line-through; opacity: 0.6; }
 .nc-coord-itin-row { display: flex; gap: 6px; margin: 0 0 4px; font-size: 13px; }
 .nc-coord-itin-row span { min-width: 100px; opacity: 0.7; }
 .nc-coord-itin-status { margin: 6px 0 0; font-size: 12px; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.03em; }
@@ -254,4 +325,22 @@ export const ITINERARY_CSS = `
 .nc-coord-itin-field { display: flex; flex-direction: column; gap: 4px; }
 .nc-coord-itin-input { min-height: 44px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--nc-card-border); background: var(--nc-surface); color: var(--nc-ink); font: 400 15px Barlow, system-ui, sans-serif; }
 .nc-coord-itin-submit { align-self: flex-start; }
+/* El <select> de ubicación (D40) necesita su propia flecha: Safari y
+   Firefox no pintan ninguna cuando se le quita la apariencia nativa, y sin
+   esto el campo parece un input de texto deshabilitado. Mismo tratamiento
+   que ya trae select.nc-input en intake.js, repetido aquí porque esa regla
+   está acotada a .nc-input y no alcanza a .nc-coord-itin-input. */
+select.nc-coord-itin-input {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  padding-right: 34px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 16px center, right 11px center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+/* Los formularios inline de mover/editar viven dentro de la tarjeta: se
+   separan de los botones y se marcan con un borde superior para que se lea
+   que pertenecen a esa cita y no al formulario de agregar de abajo. */
+.nc-coord-itin-form--inline { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--nc-card-border); }
+.nc-coord-itin-form--inline[hidden] { display: none; }
 `;

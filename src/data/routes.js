@@ -73,4 +73,44 @@ export const routes = [
   route('r_lobby_torre_quartz', 'lobby_torre', 'quartz', 4, [
     step(1, 'Desde el lobby, dirígete al Quartz Hotel & Spa.', 'From the lobby, head to Quartz Hotel & Spa.', 'mp_quartz'),
   ]),
+
+  // --- Tramos contra el lobby (D41) ---
+  // Los 10 de arriba son los pares mínimos que redactó la fase 02. Estos 7
+  // completan la estrella alrededor de lobby_torre, de forma que TODA
+  // ubicación tenga ruta directa de ida y de vuelta al lobby. Eso es lo que
+  // le permite a resolveRoute() componer cualquiera de los 42 pares
+  // ordenados sin que haya que inventar 32 rutas más a mano.
+  //
+  // Faltaba, entre otros, estacionamiento → piso27: el origen por defecto de
+  // la primera cita del día (R7) contra el destino más común (consultorios),
+  // que hasta ahora dejaba el mapa sin nada que dibujar.
+
+  route('r_lobby_torre_estacionamiento', 'lobby_torre', 'estacionamiento', 4, [
+    step(1, 'Sal del lobby por la entrada principal de la Torre Médica.', 'Exit the lobby through the Medical Tower main entrance.', 'mp_lobby'),
+    step(2, 'Cruza hacia el estacionamiento.', 'Cross over to the parking area.', 'mp_parking'),
+  ]),
+
+  route('r_compass_lobby_torre', 'compass', 'lobby_torre', 3, [
+    step(1, 'Sal de Compass y regresa al lobby de acceso general.', 'Exit Compass and return to the general-access lobby.', 'mp_lobby'),
+  ]),
+
+  route('r_piso27_lobby_torre', 'piso27', 'lobby_torre', 3, [
+    step(1, 'Desde el piso 27, baja en el elevador de la Torre Médica hasta el lobby.', 'From floor 27, take the Medical Tower elevator down to the lobby.', 'mp_lobby'),
+  ]),
+
+  route('r_nivel1_lobby_torre', 'nivel1', 'lobby_torre', 4, [
+    step(1, 'Desde Nivel 1, regresa al lobby de acceso general.', 'From Level 1, head back to the general-access lobby.', 'mp_lobby'),
+  ]),
+
+  route('r_lobby_torre_nivel1', 'lobby_torre', 'nivel1', 4, [
+    step(1, 'Desde el lobby, sube a Nivel 1 (Farmer\'s Table y The Park Restaurante).', 'From the lobby, go up to Level 1 (Farmer\'s Table and The Park Restaurante).', 'mp_level1'),
+  ]),
+
+  route('r_farmacia_lobby_torre', 'farmacia', 'lobby_torre', 2, [
+    step(1, 'Desde la farmacia, regresa al lobby de acceso general.', 'From the pharmacy, head back to the general-access lobby.', 'mp_lobby'),
+  ]),
+
+  route('r_lobby_torre_farmacia', 'lobby_torre', 'farmacia', 2, [
+    step(1, 'La farmacia está cerca del lobby de acceso general.', 'The pharmacy is near the general-access lobby.', 'mp_pharmacy'),
+  ]),
 ];
