@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<!--
+  Fase 09 — fuente única de la demo del panel de coordinadores
+  (docs/phases/phase-09-coordinator-demo.md, "Archivos que toca").
+  Mismo espíritu que app.html (fase 05): un único <script type="module">
+  que llama boot(root). A diferencia de app.html no hay `?p=` ni token que
+  resolver — coordinatorApp.js aterriza directo en la lista de visitas,
+  sin login (ver "Alcance" del doc de esta fase).
+
+  build.py (fase 05, D19) hoy solo empaqueta app.html; el doc de esta fase
+  deja ese ajuste para cuando se decida publicar esta demo empaquetada
+  ("ese ajuste se decide al implementar la fase, no aquí"). Mientras
+  tanto, este archivo se sirve sin construir, igual que app.html sin
+  construir: `python3 -m http.server`, nunca `file://` (mismo motivo que
+  README.md — un import de módulo ES vía file:// falla por CORS en la
+  mayoría de navegadores).
+-->
+<title>NewCity — Coordinación</title>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+  import { boot } from './src/ui/coordinatorApp.js';
+  boot(document.getElementById('app'));
+</script>
+</body>
+</html>

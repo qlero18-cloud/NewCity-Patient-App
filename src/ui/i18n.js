@@ -151,10 +151,10 @@ export const STRINGS = {
         durationLabel: 'Duración (minutos)',
         locationLabel: 'Ubicación',
         move: 'Mover',
+        edit: 'Editar',
         cancel: 'Cancelar',
         cancelledBadge: 'Cancelada',
         movedBadge: 'Movida',
-        save: 'Guardar cita',
       },
       lodging: {
         title: 'Hospedaje',
@@ -312,10 +312,10 @@ export const STRINGS = {
         durationLabel: 'Duration (minutes)',
         locationLabel: 'Location',
         move: 'Move',
+        edit: 'Edit',
         cancel: 'Cancel',
         cancelledBadge: 'Cancelled',
         movedBadge: 'Moved',
-        save: 'Save appointment',
       },
       lodging: {
         title: 'Lodging',

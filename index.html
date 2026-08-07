@@ -552,15 +552,31 @@ function renderUnconfirmedBadge(t) {
   return renderBadge(t('common.unconfirmedBadge'), 'unconfirmed');
 }
 
+// Fix (verificación fase 09): renderBadge(text, variant = 'neutral') tenía
+// 'neutral' como default desde su primera versión (fase 05), y ya se
+// llamaba así en dos pantallas reales — hours.js ("horario desconocido") y
+// screens/coordinator/qpass.js ("QPASS pendiente", fase 09) — pero nunca
+// existió la regla .nc-badge--neutral: esos dos badges se pintaban sin
+// ningún estilo, con solo el markup de .nc-badge desnudo. A diferencia de
+// los otros 3 colores (cada uno ligado a un significado semántico propio:
+// aviso, actualizado, cancelado) 'neutral' no tiene un matiz propio — se
+// funda en --nc-ink (src/ui/theme.js) tal cual, el mismo color de texto ya
+// usado en toda la app, en vez de inventar un gris nuevo sin relación con
+// el resto de la paleta; el fondo es un tinte intermedio entre --nc-bg y
+// --nc-card-border (claro) / --nc-card-bg y --nc-card-border (oscuro) —
+// mismo criterio estructural que los otros 3 pares, sin matiz de color
+// propio.
 const BADGE_CSS = `
 .nc-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 6px; line-height: 1.4; white-space: nowrap; }
 .nc-badge--unconfirmed { background: #FBEBD2; color: #8A5A00; }
 .nc-badge--updated { background: #DFF3EE; color: #106657; }
 .nc-badge--cancelled { background: #F4E1E1; color: #8A2A2A; }
+.nc-badge--neutral { background: #E4E9F1; color: #1C2B53; }
 @media (prefers-color-scheme: dark) {
   .nc-badge--unconfirmed { background: #4A3110; color: #F2C97D; }
   .nc-badge--updated { background: #103B32; color: #8FDFCB; }
   .nc-badge--cancelled { background: #3B1F1F; color: #E9A9A9; }
+  .nc-badge--neutral { background: #2A3654; color: #F2F5FA; }
 }
 `;
 
@@ -792,10 +808,10 @@ const STRINGS = {
         durationLabel: 'Duración (minutos)',
         locationLabel: 'Ubicación',
         move: 'Mover',
+        edit: 'Editar',
         cancel: 'Cancelar',
         cancelledBadge: 'Cancelada',
         movedBadge: 'Movida',
-        save: 'Guardar cita',
       },
       lodging: {
         title: 'Hospedaje',
@@ -953,10 +969,10 @@ const STRINGS = {
         durationLabel: 'Duration (minutes)',
         locationLabel: 'Location',
         move: 'Move',
+        edit: 'Edit',
         cancel: 'Cancel',
         cancelledBadge: 'Cancelled',
         movedBadge: 'Moved',
-        save: 'Save appointment',
       },
       lodging: {
         title: 'Lodging',
@@ -2732,19 +2748,35 @@ function renderPassScreen(ctx) {
 }
 
 function attachPassScreen(rootEl, ctx) {
-  const { visit, passes, now, lang, t } = ctx;
+  const { visit, passes, now, lang, t, ephemeral } = ctx;
   const mount = rootEl.querySelector('[data-role="pass-mount"]');
 
   const live = visiblePasses(passes, now);
   let source, savedAt;
   if (live.length > 0) {
-    // format:'image' (D29) queda fuera del caché: es una data: URL
-    // completa, no el string corto que este mecanismo manejaba hasta
-    // ahora, y la demo de fase 09 promete que nada de lo que emite
-    // sobrevive un refresh — si se guardara aquí, esa promesa se
-    // rompería justo por este archivo. qr/code128 se siguen cacheando
-    // exactamente igual que en fase 06.
-    savePassCache(visit.id, passes.filter((p) => p.format !== 'image'), now);
+    // ephemeral (fase 09, D29): bandera opt-in, default undefined/false —
+    // el resto del proyecto (la sesión real del paciente vía app.js) nunca
+    // la pasa, así que su comportamiento aquí queda byte a byte igual que
+    // fase 06. La única llamada que SÍ pasa ephemeral: true es la ruta
+    // #/pass-preview de coordinatorApp.js: ese botón abre el pase de una
+    // visita AJENA (la que esté armando la coordinadora en ese momento),
+    // sobre el mismo localStorage del navegador — sin este guard,
+    // guardaría ahí el payload real de esa visita, violando la promesa
+    // explícita del doc de esa fase ("nunca... localStorage"). Fix de
+    // revisión adversarial, fase 09 — se coló en la primera pasada porque
+    // nadie había ejecutado #/pass-preview de verdad, solo leído el código
+    // (ver test/ui/pass.test.js para el porqué de la prueba dedicada).
+    //
+    // format:'image' (D29) sigue quedando fuera del caché aparte de esto,
+    // sin importar ephemeral: es una data: URL completa, no el string
+    // corto que este mecanismo manejaba hasta ahora, y la demo de fase 09
+    // promete que nada de lo que emite sobrevive un refresh — si se
+    // guardara aquí, esa promesa se rompería justo por este archivo.
+    // qr/code128 se siguen cacheando exactamente igual que en fase 06
+    // cuando ephemeral no está activo.
+    if (!ephemeral) {
+      savePassCache(visit.id, passes.filter((p) => p.format !== 'image'), now);
+    }
     source = live;
     savedAt = null;
   } else {

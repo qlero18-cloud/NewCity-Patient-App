@@ -11,10 +11,11 @@ Las siete pantallas del paciente (Inicio, Mi itinerario, Mapa y accesos, Plaza, 
 - Mapa esquemático interactivo con resaltado sincronizado a la ruta — `phase-04-map-svg.md`.
 - Bilingüe ES/EN con paridad de cadenas probada, tema claro/oscuro, `index.html` autocontenido (cero peticiones a terceros) — `phase-05-patient-ui.md`.
 - QPASS con símbolo QR o Code128 generado sin dependencias externas, con caché para seguir viéndose sin conexión — `phase-06-qpass-render.md`.
+- Demo del panel de coordinadores — alta de visita, itinerario (agregar, editar, mover, cancelar), hospedaje y emisión de QPASS (subiendo una imagen ya existente) — punto de entrada aparte (`coordinator.html`), sin login, todo en memoria del navegador sobre su propia copia de `src/data/fixtures.js` — `phase-09-coordinator-demo.md`.
 
 ## Qué NO hace (a propósito)
 
-- **Panel de coordinadores** (fase 08): quien da de alta una visita, captura el itinerario y emite el QPASS real. Fuera del prototipo — se planea, no se construye. Hoy los datos vienen de `src/data/fixtures.js`, explícitamente ficticios.
+- **Panel de coordinadores con backend real** (fase 08): persistencia de verdad, autenticación de coordinadoras y que lo que ahí se capture alimente de verdad la sesión de un paciente real. Fuera del prototipo — se planea, no se construye. La demo de fase 09 (arriba) ensaya el mismo flujo de clic, pero por completo en memoria del navegador: se pierde al recargar y nunca toca la sesión real de ningún paciente ni persiste nada más allá de la pestaña abierta.
 - **Backend real**: no hay servidor, base de datos ni autenticación. El "token" de la URL (`?p=`) se resuelve contra las fixtures en el propio navegador.
 - **Resultados clínicos, expediente, pagos ni login** — fuera del v1 desde el PRD (D09).
 - **Posicionamiento en vivo dentro del edificio** — el ruteo es paso a paso pre-escrito (D06), no un "estás aquí" en tiempo real.
@@ -61,6 +62,8 @@ Luego, en el navegador:
 http://localhost:8743/app.html?p=fixture-token-v-demo1&now=2026-03-10T10:00-07:00
 ```
 
+`python3 -m http.server` no manda `Cache-Control` en sus respuestas, así que tras editar un archivo y recargar, el navegador puede seguir sirviendo una copia vieja de algún `.js` desde su propio caché (comprobado de primera mano verificando la fase 09: un `.click()` sobre una pestaña que llevaba rato abierta seguía corriendo `pass.js` de antes de un fix ya guardado en disco). Si un cambio no se refleja, recarga forzando caché vacío (Cmd+Shift+R en Mac) en vez de una recarga normal.
+
 `p` es el token de una de las fixtures de `src/data/fixtures.js` (`fixture-token-v-demo1`, `-v-demo2`, `-v-longstay`, `-v-expired`, `-v-revoked`). `now` es un escape hatch de este prototipo (D20): ancla la hora "actual" a la fecha de la fixture — sin él, la fecha real eventualmente deja cualquier fixture vencida (INV-3), porque no hay backend que las mantenga vigentes.
 
 ## Verificación
@@ -69,7 +72,7 @@ Cada fase tiene su propio comando exacto en la sección "Verificación" de `docs
 
 ```bash
 cd "newcity-patient-app"
-npm test                              # los ~148 casos automatizados de todas las fases
+npm test                              # los 240 casos automatizados de todas las fases
 python3 build.py                      # genera index.html autocontenido
 node test/e2e/patient-journey.mjs     # los 10 pasos del recorrido, fase 07
 ```

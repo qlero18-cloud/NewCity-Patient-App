@@ -94,6 +94,23 @@ export function createCoordinatorStore(initialFixtures = fixtures) {
       return appt;
     },
 
+    // "editarla" (docs/phases/phase-09-coordinator-demo.md) es una acción
+    // propia, distinta de "moverla": cubre serviceName/durationMin/
+    // locationId nada más. startsAt sigue siendo trabajo exclusivo de
+    // moveAppointment de arriba, y status nunca se toca aquí — el enum
+    // cerrado de Appointment.status (PRD §7: scheduled/in_progress/done/
+    // moved/cancelled) no tiene, ni necesita, un valor para "editado";
+    // editar contenido no es un cambio de estado.
+    editAppointment(visitId, appointmentId, { serviceName, durationMin, locationId }, now) {
+      const appt = record(visitId)?.appointments.find((a) => a.id === appointmentId);
+      if (!appt) return null;
+      appt.serviceName = serviceName;
+      appt.durationMin = durationMin;
+      appt.locationId = locationId;
+      appt.updatedAt = now;
+      return appt;
+    },
+
     cancelAppointment(visitId, appointmentId, now) {
       const appt = record(visitId)?.appointments.find((a) => a.id === appointmentId);
       if (!appt) return null;

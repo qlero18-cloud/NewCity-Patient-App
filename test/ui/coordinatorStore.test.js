@@ -89,9 +89,44 @@ describe('createCoordinatorStore — itinerario', () => {
     assert.strictEqual(store.getVisit('v_demo1').appointments.length, 4, 'sigue en el arreglo, solo cambia de estado');
   });
 
-  test('mover o cancelar una cita de un id inexistente devuelve null, no lanza excepción', () => {
+  // "editarla" es una acción propia, distinta de "moverla" (docs/phases/
+  // phase-09-coordinator-demo.md: "agregar una cita, editarla, moverla
+  // (cambiar startsAt) y cancelarla"). editAppointment cubre serviceName/
+  // durationMin/locationId nada más — startsAt sigue siendo trabajo
+  // exclusivo de moveAppointment, y status (el enum cerrado del PRD §7:
+  // scheduled/in_progress/done/moved/cancelled) nunca lo toca: "editar" no
+  // es un valor de status propio, es solo cambiar contenido.
+  test('editAppointment cambia serviceName/durationMin/locationId y estampa updatedAt, sin tocar startsAt ni status', () => {
+    const store = createCoordinatorStore();
+    const edited = store.editAppointment(
+      'v_demo1',
+      'a1',
+      { serviceName: 'Laboratorio (perfil ampliado)', durationMin: 60, locationId: 'piso27' },
+      NOW
+    );
+    assert.strictEqual(edited.serviceName, 'Laboratorio (perfil ampliado)');
+    assert.strictEqual(edited.durationMin, 60);
+    assert.strictEqual(edited.locationId, 'piso27');
+    assert.strictEqual(edited.updatedAt, NOW);
+    assert.strictEqual(edited.startsAt, '2026-03-10T08:00-07:00', 'startsAt es trabajo exclusivo de moveAppointment');
+    assert.strictEqual(edited.status, 'scheduled', 'editar contenido no es un valor de status — el enum se queda intacto');
+  });
+
+  test('editAppointment sobre una cita ya movida conserva su status "moved" (editar contenido no revierte ni reemplaza el estado)', () => {
+    const store = createCoordinatorStore();
+    store.moveAppointment('v_demo1', 'a1', '2026-03-10T11:00-07:00', NOW);
+    const edited = store.editAppointment('v_demo1', 'a1', { serviceName: 'Laboratorio', durationMin: 45, locationId: 'compass' }, NOW);
+    assert.strictEqual(edited.status, 'moved');
+    assert.strictEqual(edited.startsAt, '2026-03-10T11:00-07:00', 'editAppointment no debe pisar el startsAt que dejó moveAppointment');
+  });
+
+  test('mover, editar o cancelar una cita de un id inexistente devuelve null, no lanza excepción', () => {
     const store = createCoordinatorStore();
     assert.strictEqual(store.moveAppointment('v_demo1', 'a-no-existe', NOW, NOW), null);
+    assert.strictEqual(
+      store.editAppointment('v_demo1', 'a-no-existe', { serviceName: 'x', durationMin: 1, locationId: 'x' }, NOW),
+      null
+    );
     assert.strictEqual(store.cancelAppointment('v_demo1', 'a-no-existe', NOW), null);
   });
 });

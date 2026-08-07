@@ -69,19 +69,35 @@ export function renderPassScreen(ctx) {
 }
 
 export function attachPassScreen(rootEl, ctx) {
-  const { visit, passes, now, lang, t } = ctx;
+  const { visit, passes, now, lang, t, ephemeral } = ctx;
   const mount = rootEl.querySelector('[data-role="pass-mount"]');
 
   const live = visiblePasses(passes, now);
   let source, savedAt;
   if (live.length > 0) {
-    // format:'image' (D29) queda fuera del caché: es una data: URL
-    // completa, no el string corto que este mecanismo manejaba hasta
-    // ahora, y la demo de fase 09 promete que nada de lo que emite
-    // sobrevive un refresh — si se guardara aquí, esa promesa se
-    // rompería justo por este archivo. qr/code128 se siguen cacheando
-    // exactamente igual que en fase 06.
-    savePassCache(visit.id, passes.filter((p) => p.format !== 'image'), now);
+    // ephemeral (fase 09, D29): bandera opt-in, default undefined/false —
+    // el resto del proyecto (la sesión real del paciente vía app.js) nunca
+    // la pasa, así que su comportamiento aquí queda byte a byte igual que
+    // fase 06. La única llamada que SÍ pasa ephemeral: true es la ruta
+    // #/pass-preview de coordinatorApp.js: ese botón abre el pase de una
+    // visita AJENA (la que esté armando la coordinadora en ese momento),
+    // sobre el mismo localStorage del navegador — sin este guard,
+    // guardaría ahí el payload real de esa visita, violando la promesa
+    // explícita del doc de esa fase ("nunca... localStorage"). Fix de
+    // revisión adversarial, fase 09 — se coló en la primera pasada porque
+    // nadie había ejecutado #/pass-preview de verdad, solo leído el código
+    // (ver test/ui/pass.test.js para el porqué de la prueba dedicada).
+    //
+    // format:'image' (D29) sigue quedando fuera del caché aparte de esto,
+    // sin importar ephemeral: es una data: URL completa, no el string
+    // corto que este mecanismo manejaba hasta ahora, y la demo de fase 09
+    // promete que nada de lo que emite sobrevive un refresh — si se
+    // guardara aquí, esa promesa se rompería justo por este archivo.
+    // qr/code128 se siguen cacheando exactamente igual que en fase 06
+    // cuando ephemeral no está activo.
+    if (!ephemeral) {
+      savePassCache(visit.id, passes.filter((p) => p.format !== 'image'), now);
+    }
     source = live;
     savedAt = null;
   } else {
