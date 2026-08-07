@@ -14,8 +14,29 @@ import { getStore } from '@netlify/blobs';
 // máquina de quien administra y no dentro de Netlify: allá el runtime inyecta
 // solo las credenciales del sitio, aquí hay que pasarle { siteID, token } a
 // mano. Las Functions siguen llamando blobsKv(STORE) sin nada más.
+// CONSISTENCIA FUERTE, y no es un ajuste fino: es lo único que impide perder
+// datos en silencio. `@netlify/blobs` arranca en `eventual` si no se le dice
+// nada (`this.consistency = consistency ?? "eventual"`), y dentro de una
+// Function eso manda las LECTURAS al edge con caché. Todo el servidor de este
+// proyecto es leer-modificar-escribir —`addAppointment` lee la visita entera,
+// le agrega la cita y vuelve a escribirla— así que dos cambios seguidos
+// pierden el primero: la segunda lectura devuelve la versión anterior y la
+// escritura la pisa. Sin error, sin aviso, sobre el expediente de un paciente.
+//
+// El costo es que la lectura no se cachea, y aquí no importa: son unas cuantas
+// coordinadoras, no tráfico público.
+//
+// Si el runtime alguna vez expusiera `edgeURL` sin `uncachedEdgeURL`, el
+// cliente TIRA `BlobsConsistencyError` en vez de degradar a eventual, y esta
+// función contestaría 500 en la primera petición. Se deja así a propósito, por
+// la misma razón que `SESSION_SECRET` no tiene valor por defecto (D53): un
+// respaldo silencioso reintroduce exactamente el bug que esta línea evita, y
+// encima lo esconde. Un 500 se ve el primer día; una cita que desaparece, no.
+// `scripts/smoke-blobs.mjs` existe para toparse con eso antes que una persona.
+const CONSISTENCIA = 'strong';
+
 export function blobsKv(storeName, options) {
-  const store = options ? getStore({ name: storeName, ...options }) : getStore(storeName);
+  const store = getStore({ name: storeName, consistency: CONSISTENCIA, ...options });
 
   return {
     // `type: 'json'` ya devuelve null si la llave no existe, que es

@@ -168,7 +168,10 @@ export function applyKey(state, ch) {
   return { state, action: 'continue' }; // cualquier otro control, ignorado
 }
 
-function promptHidden(question) {
+// Exportada para scripts/smoke-blobs.mjs, que pide la misma contraseña por el
+// mismo motivo. Duplicarla ahí sería duplicar la parte delicada —modo crudo,
+// sin eco, Ctrl-C a mano— y dejar dos versiones que se separan con el tiempo.
+export function promptHidden(question) {
   const { stdin, stdout } = process;
   if (!stdin.isTTY) {
     return Promise.reject(

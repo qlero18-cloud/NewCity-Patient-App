@@ -16,7 +16,7 @@ Las siete pantallas del paciente (Inicio, Mi itinerario, Mapa y accesos, Plaza, 
 ## Qué NO hace (a propósito)
 
 - **Que el paciente vea lo que capturó coordinación.** Es lo único que falta para cerrar el circuito, y es la Etapa E: hoy el panel guarda de verdad, pero `src/ui/app.js` todavía resuelve el token de la URL (`?p=`) contra las fixtures embebidas, así que una visita creada por una coordinadora no se puede abrir todavía. Tampoco existe aún la pantalla de entrega (enlace + QR + WhatsApp) que le pasa esa visita al paciente.
-- **Nada probado contra Netlify Blobs de verdad.** Toda la suite —y la verificación en navegador de la Etapa D— corre contra un almacén llave/valor en memoria, a propósito (D45): el núcleo no importa la plataforma. Lo que eso deja sin comprobar es el envoltorio (`netlify/functions/_kv.mjs`) y el comportamiento real de Blobs bajo escrituras simultáneas, que es justo la limitación anotada en D54.
+- **Comprobado contra Blobs en producción.** Lo que queda sin cubrir es la escritura simultánea de dos personas sobre la MISMA visita (D54): Blobs no tiene comparar-y-fijar y la segunda escritura pisa a la primera. Con dos o tres personas coordinando la ventana es de milisegundos, y el arreglo de verdad pide un almacén que sepa versionar. Ver abajo cómo se cubre el resto.
 - **Resultados clínicos, expediente, pagos ni login** — fuera del v1 desde el PRD (D09).
 - **Posicionamiento en vivo dentro del edificio** — el ruteo es paso a paso pre-escrito (D06), no un "estás aquí" en tiempo real.
 
@@ -78,7 +78,25 @@ http://localhost:8743/app.html?p=fixture-token-v-demo1&now=2026-03-10T10:00-07:0
 npx netlify dev
 ```
 
-Aviso de honestidad: **este comando no se ha corrido en este entorno.** `netlify-cli` no está instalado aquí y no se instaló (es una dependencia grande, y Blobs en local pide sesión de Netlify). La verificación en navegador de la Etapa D se hizo montando los mismos handlers de `src/server/` sobre un KV en memoria, que es exactamente lo que hacen las pruebas. Lo que eso comprueba es el panel completo —entrar, capturar, validar, recargar, salir— y lo que NO comprueba es la capa de Netlify por debajo.
+Aviso de honestidad: **este comando no se ha corrido en este entorno.** `netlify-cli` no está instalado aquí y no se instaló (es una dependencia grande, y Blobs en local pide sesión de Netlify). La verificación en navegador de la Etapa D se hizo montando los mismos handlers de `src/server/` sobre un KV en memoria, que es exactamente lo que hacen las pruebas. Lo que eso comprueba es el panel completo —entrar, capturar, validar, recargar, salir— y lo que NO comprueba es la capa de Netlify por debajo. Para esa capa están las dos verificaciones de la sección siguiente.
+
+## Probar contra Netlify Blobs de verdad
+
+Son dos cosas distintas y hacen falta las dos.
+
+**1. El adaptador, dentro de `npm test`.** `test/deploy/blobsKv.test.js` corre `netlify/functions/_kv.mjs` contra un servidor de Blobs de verdad —`BlobsServer`, que viene dentro de `@netlify/blobs` y es el mismo que `netlify dev` levanta por debajo— sobre un directorio temporal. Sin red, sin cuenta de Netlify, sin dependencias nuevas: ya corre con el resto de la suite. Cubre lo que el `Map` en memoria no puede: la forma real de `list()`, qué contesta `get()` con una llave que no existe, que los acentos y la estructura anidada sobrevivan el viaje por JSON, y que los dos almacenes estén de verdad separados.
+
+**2. El sitio desplegado, a mano.** Lo único que el punto 1 no puede reproducir es lo que hace peligroso al Blobs de producción: tiene DOS direcciones de edge, una con caché y otra sin ella. El servidor local es un directorio en disco, siempre consistente. Para eso:
+
+```bash
+NETLIFY_SITE_ID=... NETLIFY_AUTH_TOKEN=... node scripts/smoke-blobs.mjs --site https://nchpatient.netlify.app --username tu.usuario
+```
+
+Entra con tu cuenta, crea una visita marcada `PRUEBA-SMOKE`, le agrega **dos citas seguidas sin pausa** —que es justo donde una lectura cacheada pierde la primera—, guarda un hospedaje, y luego relee todo por tres caminos: la API, Blobs directo (sin pasar por la Function, para que no sea el mismo servidor confirmándose a sí mismo) y el endpoint del paciente con el token recién emitido. Al terminar borra lo que creó, también si algo falló a la mitad. Sale con 0 si pasó y con 1 si no.
+
+Pide la contraseña por teclado, nunca por argumento (mismo motivo que `create-coordinator.mjs`), y **se niega a arrancar sin `NETLIFY_SITE_ID` y `NETLIFY_AUTH_TOKEN`**: la API no expone borrado de visitas, así que la limpieza va directa a Blobs, y sin credenciales dejaría un expediente de mentira suelto en producción.
+
+Por qué existe: la consistencia por defecto de `@netlify/blobs` es `eventual`, y todo el servidor de este proyecto es leer-modificar-escribir. Con lectura cacheada, dos cambios seguidos pierden el primero **en silencio** — la coordinadora captura dos citas, ve dos citas, y al día siguiente hay una. `_kv.mjs` pide `strong` para evitarlo (D59); el smoke es lo que comprueba que sigue siendo cierto en producción.
 
 ## Cuentas de coordinación y variables de entorno
 
@@ -137,12 +155,13 @@ Cada fase tiene su propio comando exacto en la sección "Verificación" de `docs
 
 ```bash
 cd "newcity-patient-app"
-npm test                              # los 637 casos automatizados de todas las fases y etapas
+npm test                              # los 660 casos automatizados de todas las fases y etapas
 python3 build.py                      # genera index.html autocontenido
 node test/e2e/patient-journey.mjs     # los 10 pasos del recorrido, fase 07
 ```
 
 Lo que ningún comando automatizado cubre, y que sigue pendiente:
 
+- **`node scripts/smoke-blobs.mjs`** contra el sitio desplegado — ver "Probar contra Netlify Blobs de verdad" arriba. Es lo único que comprueba el comportamiento de Blobs en producción, y necesita un sitio con `SESSION_SECRET` puesto y una cuenta ya creada.
 - **Prueba física con una lectora real** contra la pantalla del QPASS (fase 06) — sin ella esa fase no se considera terminada, es la única forma de saber si el pase realmente abre la puerta.
 - **Prueba en un teléfono real** (iPhone y Android): que la URL publicada cargue, que "Agregar a inicio" produzca ícono y nombre correctos, y que `qr-demo.png` abra el prototipo al escanearlo con la cámara del teléfono — fase 07. La publicación en sí ya está hecha y verificada en navegador (carga correcta, cero peticiones externas, símbolo del pase, cambio de idioma); lo que falta es específicamente la prueba en hardware real, que solo el cliente puede hacer.
