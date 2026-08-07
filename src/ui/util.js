@@ -49,3 +49,30 @@ export function locationOptionsHtml(locations, lang, selectedId = null) {
     })
     .join('\n');
 }
+
+// Etapa G — los puntos de encuentro de un traslado comparten la forma
+// {id, name:{es,en}} con las ubicaciones, pero NO son ubicaciones (D70): no
+// tienen mapPointId ni salen en el plano. Esta función existe para que las
+// pantallas de traslado no llamen algo llamado "location" sobre un catálogo
+// que se separó a propósito; el cuerpo se parece porque la forma se parece.
+export function transferPointName(points, pointId, lang) {
+  const punto = points.find((p) => p.id === pointId) ?? null;
+  if (!punto) return pointId;
+  return punto.name[lang] ?? punto.name.es;
+}
+
+// Aquí sí hay una diferencia real con locationOptionsHtml, y es la razón de
+// que no se reuse: tres de los cinco puntos están sin confirmar (§15.8) y
+// la coordinadora tiene que verlo MIENTRAS elige, no después. Un <option>
+// no admite un elemento de distintivo adentro, así que la marca va como
+// sufijo del texto.
+export function transferPointOptionsHtml(points, lang, selectedId = null, unconfirmedLabel = '') {
+  return points
+    .map((punto) => {
+      const selected = punto.id === selectedId ? ' selected' : '';
+      const nombre = punto.name[lang] ?? punto.name.es;
+      const sufijo = punto.unconfirmed && unconfirmedLabel ? ` [${unconfirmedLabel}]` : '';
+      return `<option value="${escapeHtml(punto.id)}"${selected}>${escapeHtml(nombre + sufijo)}</option>`;
+    })
+    .join('\n');
+}

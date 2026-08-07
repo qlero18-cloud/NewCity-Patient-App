@@ -4,7 +4,7 @@
 // src/domain, src/data, src/map y src/render en la misma secuencia que
 // src/ui/app.js, sin necesidad de un DOM real.
 //
-// La Etapa F le agrega los pasos 11–15: el tramo que EMPIEZA en la
+// La Etapa F le agrega los pasos 11–16: el tramo que EMPIEZA en la
 // coordinadora. Los diez primeros parten de una fixture ya compilada en el
 // bundle, así que por construcción nunca podían fallar por el motivo que
 // abrió todo esto: que una visita capturada en el panel no se pudiera
@@ -12,6 +12,11 @@
 // teléfono— sobre un solo almacén en memoria, y es lo único aquí que
 // responde "¿de dónde sale el QR que la coordinadora le manda al
 // paciente?" con código que corre.
+//
+// La Etapa G le agrega los pasos 17–19 sobre esa misma visita: el traslado
+// contratado. Van juntos porque por separado no prueban nada — que el
+// panel lo guarde no sirve si el servidor no se lo manda al paciente, y que
+// se lo mande no sirve si el enlace ya venció cuando lo va a mirar.
 //
 // Lo que este script SÍ prueba: que la lógica de cada paso da el
 // resultado correcto (siguiente paso, origen por defecto, ruta,
@@ -29,10 +34,11 @@
 // roto.
 
 import assert from 'node:assert/strict';
-import { nextStep, groupByDay, isUpdated, isExpired, visiblePasses } from '../../src/domain/index.js';
+import { nextStep, groupByDay, isUpdated, isExpired, visiblePasses, timelineItems, nextTransfer } from '../../src/domain/index.js';
 import { defaultOrigin, resolveRoute } from '../../src/domain/routing.js';
 import { routes } from '../../src/data/routes.js';
 import { locations } from '../../src/data/locations.js';
+import { TRANSFER_POINT_IDS } from '../../src/data/transferPoints.js';
 import { fixtures } from '../../src/data/fixtures.js';
 import { createHighlighter } from '../../src/map/highlights.js';
 import { resolveInitialLang, translate } from '../../src/ui/i18n.js';
@@ -153,7 +159,7 @@ step(8, 'v_demo2: sin Mi estancia, cita cancelada visible pero no como siguiente
 // --- pasos 9 y 10: v_expired y un token inventado dan la misma pantalla neutra ---
 step(9, 'v_expired: el token existe pero ya venció', () => {
   const expired = fixtures.v_expired;
-  assert.strictEqual(isExpired(expired.visit, expired.appointments, expired.lodging, '2026-08-05T12:00-07:00'), true);
+  assert.strictEqual(isExpired(expired, '2026-08-05T12:00-07:00'), true);
 });
 
 step(10, 'un token inventado no se encuentra — INV-3 exige la MISMA pantalla que un token vencido; src/ui/app.js usa un único camino de código para ambos casos, así que "misma entrada de datos" (ninguna) ya es la garantía — no hay una segunda ruta de código que pudiera divergir', () => {
@@ -177,18 +183,28 @@ const store = createCoordinatorStore({ api: panel });
 // pero contra el store del servidor en vez de fetch. Traduce los códigos
 // igual que el de verdad — y esa traducción es lo que separa "venció" de
 // "no hay señal" en el paso 14.
-const apiDelPaciente = {
-  async getVisit(token) {
-    const res = await handleVisitRequest(
-      new Request('https://nch.test/api/visit', { headers: { [TOKEN_HEADER]: token } }),
-      panel.servidor,
-      NOW,
-    );
-    if (res.status === 404) return { ok: false, notFound: true };
-    if (!res.ok) return { ok: false, failed: true };
-    return { ok: true, record: await res.json() };
-  },
-};
+//
+// Fábrica y no un objeto suelto porque el paso 19 tiene que preguntar por
+// la MISMA visita con un `now` posterior, y el `now` del servidor no se lee
+// nunca de la petición (visitHandler.js: aceptar un `?now=` volvería
+// opcional la caducidad de R1). Duplicar el cliente habría duplicado
+// también esa traducción de códigos, que es justo lo único que aquí separa
+// "venció" de "no hay señal".
+function clienteDelPaciente(now) {
+  return {
+    async getVisit(token) {
+      const res = await handleVisitRequest(
+        new Request('https://nch.test/api/visit', { headers: { [TOKEN_HEADER]: token } }),
+        panel.servidor,
+        now,
+      );
+      if (res.status === 404) return { ok: false, notFound: true };
+      if (!res.ok) return { ok: false, failed: true };
+      return { ok: true, record: await res.json() };
+    },
+  };
+}
+const apiDelPaciente = clienteDelPaciente(NOW);
 // Sin señal: ni 404 ni 200, que es exactamente lo que ve un teléfono en el
 // sótano del estacionamiento.
 const apiSinSenal = { async getVisit() { return { ok: false, failed: true }; } };
@@ -301,5 +317,126 @@ await stepAsync(16, 'un token con forma real pero inventado da la pantalla neutr
   assert.ok(sigueViva, 'el 404 de OTRO token no puede borrar la caché de la visita buena');
 });
 
-console.log('\n16/16 pasos del recorrido pasaron (10 del paciente + 6 del tramo coordinadora→paciente).');
+// =====================================================================
+// Etapa G — el traslado, sobre la misma visita de Bernardo.
+//
+// Los tres pasos van juntos porque solos no prueban nada: que el panel
+// guarde el traslado no sirve si el servidor no se lo manda al paciente, y
+// que se lo mande no sirve si el enlace ya venció cuando lo va a mirar.
+// =====================================================================
+
+const LLEGADA = '2026-03-10T06:00-07:00'; // antes de la cita de las 12:00
+const REGRESO = '2026-03-11T15:00-07:00'; // después de la última cita y del fin de la visita
+
+let idRegreso;
+
+await stepAsync(17, 'la coordinadora captura la llegada y el regreso, y un punto de encuentro inventado lo rechaza el SERVIDOR, no el formulario', async () => {
+  const rechazado = await store.addTransfer(visitId, {
+    kind: 'arrival',
+    scheduledAt: LLEGADA,
+    meetingPointId: 'aeropuerto_de_marte',
+  });
+  assert.strictEqual(rechazado.ok, false, 'un punto de encuentro fuera del catálogo no puede guardarse aunque el formulario lo dejara pasar');
+  assert.strictEqual(rechazado.errors?.meetingPointId, 'unknown', 'y el motivo tiene que volver por campo, para poder marcarlo en la pantalla');
+
+  const llegada = await store.addTransfer(visitId, {
+    kind: 'arrival',
+    scheduledAt: LLEGADA,
+    meetingPointId: 'tij_terminal',
+    flightNumber: 'am654',
+    driver: { name: 'Juan Pérez', phone: '+526641234567' },
+    vehicle: { type: 'van', make: 'Toyota', model: 'Hiace', color: 'Blanca', plate: 'abc-123-d' },
+  });
+  assert.ok(llegada.ok, `el traslado de llegada no se guardó: ${JSON.stringify(llegada)}`);
+  assert.ok(
+    TRANSFER_POINT_IDS.includes(llegada.transfer.meetingPointId),
+    'el punto guardado tiene que existir en el catálogo — misma razón de ser del <select> que en las citas (D40)',
+  );
+  // Se leen en la pantalla del aeropuerto y en la defensa del coche: se
+  // guardan como se leen, no como se teclearon.
+  assert.strictEqual(llegada.transfer.flightNumber, 'AM654');
+  assert.strictEqual(llegada.transfer.vehicle.plate, 'ABC-123-D');
+
+  const regreso = await store.addTransfer(visitId, {
+    kind: 'departure',
+    scheduledAt: REGRESO,
+    meetingPointId: 'quartz',
+  });
+  assert.ok(regreso.ok, `el traslado de regreso no se guardó: ${JSON.stringify(regreso)}`);
+  idRegreso = regreso.transfer.id;
+  // Sin chofer, y tiene que poder guardarse así: al chofer se lo asignan la
+  // víspera. Exigirlo aquí obligaría a inventar un dato que nadie tiene.
+  assert.strictEqual(regreso.transfer.driver.phone, '');
+});
+
+await stepAsync(18, 'los dos traslados viajan en el 200 del paciente y le salen intercalados por hora, no en otra pantalla', async () => {
+  const resuelto = await resolveVisitContext(tokenReal, { api: apiDelPaciente, cache: CACHE, now: NOW });
+  assert.ok(resuelto, 'la visita tiene que seguir abriendo');
+  // El hueco más fácil de no ver de toda la etapa: visitHandler arma la
+  // respuesta campo por campo, así que un traslado guardado en Blobs no
+  // llega al teléfono solo por estar guardado.
+  assert.strictEqual(resuelto.record.transfers.length, 2, 'los traslados tienen que estar en la respuesta del paciente');
+
+  const linea = timelineItems(resuelto.record.appointments, resuelto.record.transfers);
+  assert.deepStrictEqual(
+    linea.map((i) => i.kind),
+    ['transfer', 'appointment', 'transfer'],
+    'la recogida de las 06:00 va ARRIBA de la cita de las 12:00 y el regreso al final',
+  );
+
+  // groupByDay no se tocó en esta etapa y aun así agrupa la línea mezclada:
+  // era genérico desde fase 01 (solo lee `startsAt`), y por eso sus pruebas
+  // siguen significando lo mismo.
+  const grupos = groupByDay(linea, NOW);
+  assert.strictEqual(grupos.length, 2, 'dos días: el de la llegada y la cita, y el del regreso');
+  assert.strictEqual(grupos[0].items.length, 2);
+  assert.strictEqual(grupos[1].items.length, 1);
+
+  // La tarjeta de Inicio (D71): anuncia el traslado que viene, no el que ya
+  // pasó. A las 05:00 es la recogida del aeropuerto; a las 10:00 esa ya fue
+  // y lo que queda por delante es el regreso.
+  assert.strictEqual(nextTransfer(resuelto.record.transfers, '2026-03-10T05:00-07:00').kind, 'arrival');
+  assert.strictEqual(nextTransfer(resuelto.record.transfers, NOW).kind, 'departure');
+});
+
+await stepAsync(19, 'la víspera le asignan chofer al regreso, y el día del regreso el enlace SIGUE vivo — antes de esta etapa el servidor contestaba 404 con el teléfono del chofer adentro', async () => {
+  // PATCH con todos los campos, no solo el que cambia: camposTraslado()
+  // rearma la entidad entera a propósito (nunca esparce el cuerpo), así que
+  // omitir uno lo borraría en vez de dejarlo como estaba.
+  const asignado = await store.editTransfer(visitId, idRegreso, {
+    kind: 'departure',
+    scheduledAt: REGRESO,
+    meetingPointId: 'quartz',
+    driver: { name: 'Luis Ramírez', phone: '+526649876543' },
+    vehicle: { type: 'suv', make: 'Chevrolet', model: 'Suburban', color: 'Negra', plate: 'xyz-987-a' },
+  });
+  assert.ok(asignado.ok, `no se pudo asignar el chofer: ${JSON.stringify(asignado)}`);
+
+  const expediente = store.getVisit(visitId);
+  const sinTraslados = { ...expediente, transfers: [] };
+  const A_LA_HORA_DEL_REGRESO = '2026-03-11T14:00-07:00'; // una hora antes de que pase el coche
+
+  // Las dos mitades de la trampa, sobre el MISMO expediente. La primera es
+  // lo que la app hacía hasta esta etapa: la última cita terminó a las
+  // 12:30 del día anterior, así que a esta hora el enlace llevaba hora y
+  // media muerto — y el paciente esperando el coche sin el teléfono.
+  assert.strictEqual(isExpired(sinTraslados, A_LA_HORA_DEL_REGRESO), true, 'sin contar traslados, R1 ya habría matado el enlace');
+  assert.strictEqual(isExpired(expediente, A_LA_HORA_DEL_REGRESO), false, 'con el traslado de regreso en el máximo de R1, sigue vivo');
+
+  // Y lo que de verdad importa: que eso valga en el SERVIDOR. R1 se aplica
+  // en visitStore.js antes de contestar; si solo valiera en el navegador,
+  // esto sería un 404 y la pantalla neutra.
+  const tarde = clienteDelPaciente(A_LA_HORA_DEL_REGRESO);
+  const resuelto = await resolveVisitContext(tokenReal, { api: tarde, cache: CACHE, now: A_LA_HORA_DEL_REGRESO });
+  assert.ok(resuelto, 'el servidor tiene que servir la visita a la hora del regreso');
+  assert.strictEqual(resuelto.source, 'network', 'servida de verdad, no rescatada de la caché por un error');
+
+  const proximo = nextTransfer(resuelto.record.transfers, A_LA_HORA_DEL_REGRESO);
+  assert.strictEqual(proximo.id, idRegreso);
+  assert.strictEqual(proximo.meetingPointId, 'quartz');
+  assert.strictEqual(proximo.driver.phone, '+526649876543', 'el dato por el que existe la etapa: a quién le marca el paciente si el coche no llega');
+  assert.match(proximo.driver.phone, /^\+\d{8,15}$/, 'E.164 con + (D73): la pantalla arma wa.me/<dígitos> y un número local marcaría a otro país');
+});
+
+console.log('\n19/19 pasos del recorrido pasaron (10 del paciente + 6 del tramo coordinadora→paciente + 3 de traslados).');
 console.log('Pendiente, fuera del alcance de este script: recorrido visual en navegador y prueba en teléfono real.');

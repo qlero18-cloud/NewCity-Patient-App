@@ -120,6 +120,8 @@ describe('el guardia de sesión', () => {
     ['PUT', '/visits/v_1/lodging'],
     ['POST', '/visits/v_1/passes'],
     ['PATCH', '/visits/v_1/passes/q_1'],
+    ['POST', '/visits/v_1/transfers'],
+    ['PATCH', '/visits/v_1/transfers/t_1'],
   ];
 
   for (const [method, ruta] of RUTAS) {
@@ -551,5 +553,156 @@ describe('fallos del almacén', () => {
     assert.equal(res.status, 500);
     const texto = await res.text();
     assert.equal(texto.includes('BLOBS_TOKEN'), false, 'el detalle se queda del lado del servidor');
+  });
+});
+
+// =====================================================================
+// Etapa G — traslados.
+// =====================================================================
+
+const TRASLADO = {
+  kind: 'arrival',
+  scheduledAt: '2026-03-10T06:00:00.000-07:00',
+  meetingPointId: 'tij_terminal',
+  flightNumber: 'AM 654',
+  driver: { name: 'Juan Pérez', phone: '+526641234567' },
+  vehicle: { type: 'van', make: 'Toyota', model: 'Hiace', color: 'blanca', plate: 'ABC-123-D' },
+};
+
+describe('traslados', () => {
+  test('POST agrega, persiste y firma', async () => {
+    const { deps: d, store } = deps();
+    const visitId = await conVisita(d);
+
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${visitId}/transfers`, { method: 'POST', body: TRASLADO }), d,
+    );
+    assert.equal(res.status, 201);
+    const cuerpo = await res.json();
+    assert.equal(cuerpo.transfer.driver.name, 'Juan Pérez');
+    assert.equal(cuerpo.transfer.createdBy, 'ana.ruiz');
+
+    const guardado = await store.getVisit(visitId);
+    assert.equal(guardado.transfers.length, 1, 'quedó escrito, no solo en la respuesta');
+    assert.equal(guardado.transfers[0].meetingPointId, 'tij_terminal');
+  });
+
+  test('rechaza un punto de encuentro fuera del catálogo con 422', async () => {
+    const { deps: d, store } = deps();
+    const visitId = await conVisita(d);
+
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${visitId}/transfers`, { method: 'POST', body: { ...TRASLADO, meetingPointId: 'la esquina' } }), d,
+    );
+    assert.equal(res.status, 422);
+    assert.deepEqual((await res.json()).errors, { meetingPointId: 'unknown' });
+
+    const guardado = await store.getVisit(visitId);
+    assert.equal(guardado.transfers, undefined, 'un 422 no debe dejar rastro en el expediente');
+  });
+
+  test('rechaza un teléfono sin clave de país con 422 — el <select> no cubre el texto libre', async () => {
+    const { deps: d } = deps();
+    const visitId = await conVisita(d);
+
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${visitId}/transfers`, {
+        method: 'POST',
+        body: { ...TRASLADO, driver: { name: 'Juan', phone: '664 123 4567' } },
+      }), d,
+    );
+    assert.equal(res.status, 422);
+    assert.deepEqual((await res.json()).errors, { 'driver.phone': 'invalid' });
+  });
+
+  test('PATCH action:edit actualiza y firma a quien editó', async () => {
+    const { deps: d } = deps();
+    const visitId = await conVisita(d);
+    const alta = await (await handleCoordinatorRequest(
+      pedir(`/visits/${visitId}/transfers`, { method: 'POST', body: TRASLADO }), d,
+    )).json();
+
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${visitId}/transfers/${alta.transfer.id}`, {
+        method: 'PATCH',
+        body: { action: 'edit', ...TRASLADO, driver: { name: 'Beto Lara', phone: '+526649876543' } },
+      }), d,
+    );
+    assert.equal(res.status, 200);
+    const cuerpo = await res.json();
+    assert.equal(cuerpo.transfer.driver.name, 'Beto Lara');
+    assert.equal(cuerpo.transfer.createdBy, 'ana.ruiz', 'quién lo creó no se reescribe');
+  });
+
+  test('PATCH action:cancel marca sin borrar', async () => {
+    const { deps: d, store } = deps();
+    const visitId = await conVisita(d);
+    const alta = await (await handleCoordinatorRequest(
+      pedir(`/visits/${visitId}/transfers`, { method: 'POST', body: TRASLADO }), d,
+    )).json();
+
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${visitId}/transfers/${alta.transfer.id}`, { method: 'PATCH', body: { action: 'cancel' } }), d,
+    );
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).transfer.status, 'cancelled');
+
+    const guardado = await store.getVisit(visitId);
+    assert.equal(guardado.transfers.length, 1, 'cancelar no borra');
+  });
+
+  test('una acción inventada da 422, no un no-op silencioso', async () => {
+    const { deps: d } = deps();
+    const visitId = await conVisita(d);
+    const alta = await (await handleCoordinatorRequest(
+      pedir(`/visits/${visitId}/transfers`, { method: 'POST', body: TRASLADO }), d,
+    )).json();
+
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${visitId}/transfers/${alta.transfer.id}`, { method: 'PATCH', body: { action: 'borrar' } }), d,
+    );
+    assert.equal(res.status, 422);
+    assert.deepEqual((await res.json()).errors, { action: 'unsupported' });
+  });
+
+  test('traslado inexistente dentro de una visita que sí existe: 404', async () => {
+    const { deps: d } = deps();
+    const visitId = await conVisita(d);
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${visitId}/transfers/t_inventado`, { method: 'PATCH', body: { action: 'cancel' } }), d,
+    );
+    assert.equal(res.status, 404);
+  });
+
+  test('el método equivocado da 405 en las dos rutas', async () => {
+    const { deps: d } = deps();
+    const visitId = await conVisita(d);
+    for (const [ruta, method] of [[`/visits/${visitId}/transfers`, 'PUT'], [`/visits/${visitId}/transfers/t_1`, 'POST']]) {
+      const res = await handleCoordinatorRequest(pedir(ruta, { method, body: {} }), d);
+      assert.equal(res.status, 405, `${method} ${ruta}`);
+    }
+  });
+
+  test('una visita que no existe da 404 igual que en toda ruta', async () => {
+    const { deps: d } = deps();
+    const res = await handleCoordinatorRequest(
+      pedir('/visits/v_fantasma/transfers', { method: 'POST', body: TRASLADO }), d,
+    );
+    assert.equal(res.status, 404);
+    assert.deepEqual(await res.json(), { error: 'not_found' });
+  });
+
+  // Lo que amarra la Etapa G con R1: agregar el traslado de regreso tiene
+  // que alargar la vida del enlace del paciente, y eso solo se ve mirando
+  // el expediente que devuelve la mutación.
+  test('el expediente devuelto trae los traslados, para que el panel reemplace su copia entera', async () => {
+    const { deps: d } = deps();
+    const visitId = await conVisita(d);
+    const res = await handleCoordinatorRequest(
+      pedir(`/visits/${visitId}/transfers`, { method: 'POST', body: TRASLADO }), d,
+    );
+    const { record } = await res.json();
+    assert.equal(record.transfers.length, 1);
+    assert.equal(record.visit.id, visitId);
   });
 });

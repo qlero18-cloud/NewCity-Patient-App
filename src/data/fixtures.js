@@ -6,15 +6,16 @@
 // (María, Roberto, Consuelo, Fernando, Alejandra) son nombres de pila
 // genéricos elegidos sin ninguna relación con pacientes reales de
 // NewCity — igual que los tokens, que son cadenas de ejemplo, no valores
-// aleatorios de 128 bits como pide el PRD §6.1 para producción.
+// aleatorios de 128 bits como pide el PRD §6.1 para producción. El chofer
+// de los traslados (Etapa G) es ficticio por lo mismo, y su teléfono es un
+// número de ejemplo: nadie contesta ahí.
 //
 // `Visit.expiresAt` (PRD §7: "derivado, ver R1") se omite a propósito en
 // estos objetos: guardar un valor calculado a mano junto a las citas que
 // lo determinan es la fuente de bugs que R1 ya advierte ("se recalcula
 // cada vez que se agrega, mueve o cancela una cita"). Quien necesite
-// expiresAt lo pide con computeExpiresAt(visit, appointments, lodging)
-// (fase 01) — una sola fuente de verdad, nunca un valor que se puede
-// desincronizar.
+// expiresAt lo pide con computeExpiresAt(expediente) (fase 01) — una sola
+// fuente de verdad, nunca un valor que se puede desincronizar.
 
 function appointment(id, visitId, startsAt, durationMin, serviceName, locationId, status, updatedAt) {
   return { id, visitId, startsAt, durationMin, serviceName, locationId, status, updatedAt };
@@ -32,6 +33,25 @@ function pass(id, visitId, scope, format, validFrom, options = {}) {
     validUntil: options.validUntil ?? null,
     revokedAt: options.revokedAt ?? null,
     issuedAt: options.issuedAt ?? validFrom,
+  };
+}
+
+// Etapa G. `driver` y `vehicle` se pasan enteros y no campo por campo
+// porque son opcionales de verdad: la coordinadora captura el traslado
+// días antes y al chofer se lo asignan la víspera, así que { name: '',
+// phone: '' } es un estado normal del dato, no una fixture a medias.
+function transfer(id, visitId, kind, scheduledAt, meetingPointId, options = {}) {
+  return {
+    id,
+    visitId,
+    kind,
+    scheduledAt,
+    meetingPointId,
+    flightNumber: options.flightNumber ?? '',
+    driver: options.driver ?? { name: '', phone: '' },
+    vehicle: options.vehicle ?? { type: '', make: '', model: '', color: '', plate: '' },
+    status: options.status ?? 'scheduled',
+    notes: options.notes ?? '',
   };
 }
 
@@ -70,6 +90,31 @@ const v_demo1 = {
     breakfastIncluded: true,
     recoveryRoom: false,
   },
+  // Etapa G — la única fixture con traslados, a propósito: es la que
+  // enseña el prototipo y la que se abre en el navegador sin backend, así
+  // que es donde la pantalla nueva tiene que poder verse. Las otras cuatro
+  // no declaran la llave, y eso también se prueba: son el retrato de un
+  // expediente guardado antes de esta etapa.
+  //
+  // El de regreso recoge en el hotel A LA HORA DEL CHECKOUT. No es
+  // casualidad: un traslado posterior al checkout correría la caducidad
+  // (R1) y el ejemplo trabajado del PRD §8 —expiresAt 2026-03-12T12:00—
+  // dejaría de reproducirse dato por dato. Que R1 SÍ tenga que contar el
+  // traslado de regreso se prueba en test/domain/expiry.test.js, con datos
+  // hechos para eso; esta fixture tiene otro trabajo.
+  transfers: [
+    transfer('t_demo1_in', 'v_demo1', 'arrival', '2026-03-10T06:00-07:00', 'tij_terminal', {
+      flightNumber: 'AM654',
+      driver: { name: 'Juan Pérez', phone: '+526641234567' },
+      vehicle: { type: 'van', make: 'Toyota', model: 'Hiace', color: 'Blanca', plate: 'ABC-123-D' },
+      notes: 'El chofer te espera en Llegadas con un letrero con tu nombre.',
+    }),
+    // Sin chofer todavía: es lo normal dos días antes, y es lo que hace
+    // visible el aviso "Te confirmamos el chofer un día antes".
+    transfer('t_demo1_out', 'v_demo1', 'departure', '2026-03-11T12:00-07:00', 'quartz', {
+      flightNumber: 'AM655',
+    }),
+  ],
 };
 
 // ---------------------------------------------------------------------

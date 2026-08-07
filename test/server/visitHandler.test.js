@@ -64,7 +64,7 @@ describe('handleVisitRequest — camino feliz', () => {
 
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.deepEqual(Object.keys(body).sort(), ['appointments', 'lodging', 'passes', 'visit']);
+    assert.deepEqual(Object.keys(body).sort(), ['appointments', 'lodging', 'passes', 'transfers', 'visit']);
     assert.equal(body.visit.patientFirstName, 'María');
   });
 
@@ -212,5 +212,62 @@ describe('handleVisitRequest — método y errores', () => {
     assert.equal(res.status, 500);
     const text = await res.text();
     assert.doesNotMatch(text, /BLOBS_TOKEN/, 'el mensaje interno salió al cliente');
+  });
+});
+
+// Etapa G — el hueco más fácil de no ver. Este 200 se arma campo por campo,
+// así que todo lo demás de la etapa puede estar bien —la mutación, la ruta
+// del panel, la caducidad, la pantalla— y el traslado no llegar nunca al
+// teléfono porque falta una línea aquí.
+describe('handleVisitRequest — traslados llegan al paciente', () => {
+  const TRASLADO = {
+    id: 't_1',
+    visitId: 'v_1',
+    kind: 'arrival',
+    scheduledAt: '2026-03-10T06:00-07:00',
+    meetingPointId: 'tij_terminal',
+    flightNumber: 'AM 654',
+    driver: { name: 'Juan Pérez', phone: '+526641234567' },
+    vehicle: { type: 'van', make: 'Toyota', model: 'Hiace', color: 'blanca', plate: 'ABC-123-D' },
+    notes: '',
+    status: 'scheduled',
+  };
+
+  test('el traslado, con chofer y vehículo, viaja entero al teléfono', async () => {
+    const { store, record, token } = await seeded();
+    record.transfers = [TRASLADO];
+    await store.saveVisit(record);
+
+    const body = await (await handleVisitRequest(get(token), store, NOW)).json();
+    assert.equal(body.transfers.length, 1);
+    assert.equal(body.transfers[0].driver.phone, '+526641234567', 'el teléfono del chofer es el dato entero de la etapa');
+    assert.equal(body.transfers[0].vehicle.plate, 'ABC-123-D');
+    assert.equal(body.transfers[0].meetingPointId, 'tij_terminal');
+  });
+
+  // Un traslado cancelado SÍ se manda, al revés que un pase revocado. No es
+  // una incoherencia: revocar un pase le quita al paciente un permiso que
+  // ya no debe tener, y por eso R3 lo filtra antes de que salga del
+  // servidor. Cancelar un traslado es información que el paciente necesita
+  // —tachada, para que no se plante a esperar un coche que no va a llegar.
+  test('un traslado cancelado también llega, tachado, no desaparecido', async () => {
+    const { store, record, token } = await seeded();
+    record.transfers = [{ ...TRASLADO, status: 'cancelled' }];
+    await store.saveVisit(record);
+
+    const body = await (await handleVisitRequest(get(token), store, NOW)).json();
+    assert.equal(body.transfers.length, 1);
+    assert.equal(body.transfers[0].status, 'cancelled');
+  });
+
+  // Compatibilidad con lo ya desplegado: los expedientes que hoy están en
+  // Blobs no traen la llave. La app tiene que recibir [] y no undefined, o
+  // el itinerario de un paciente con visita vieja reventaría al pintar.
+  test('un expediente guardado antes de esta etapa contesta transfers: []', async () => {
+    const { store, record, token } = await seeded();
+    assert.equal(record.transfers, undefined, 'la visita recién creada representa el caso viejo');
+
+    const body = await (await handleVisitRequest(get(token), store, NOW)).json();
+    assert.deepEqual(body.transfers, []);
   });
 });

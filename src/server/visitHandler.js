@@ -70,6 +70,17 @@ export async function handleVisitRequest(request, store, now) {
       // revocarlo, que es justo lo que revocar tiene que impedir.
       passes: visiblePasses(record.passes, now),
       lodging: record.lodging,
+      // Etapa G. `?? []` y no `record.transfers` a secas: los expedientes
+      // guardados antes de esta etapa no traen la llave, y mandar
+      // `undefined` haría reventar el itinerario de un paciente con visita
+      // vieja. Aquí se normaliza una vez y la app ya no se entera.
+      //
+      // Los cancelados SÍ se mandan, al revés que un pase revocado. No es
+      // incoherencia: revocar un pase le quita un permiso que ya no debe
+      // tener (R3 lo filtra arriba); un traslado cancelado es información
+      // que necesita —tachada, para que no se plante a esperar un coche
+      // que no va a llegar.
+      transfers: record.transfers ?? [],
     });
   } catch {
     // El detalle se queda del lado del servidor. Un mensaje de error

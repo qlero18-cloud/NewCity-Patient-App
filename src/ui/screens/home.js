@@ -4,15 +4,44 @@
 // así que vive como un enlace más discreto aparte (ver comentario en
 // app.js sobre "cuelgan de Inicio y Plaza").
 
-import { nextStep, formatTimeTijuana, formatDayLabel } from '../../domain/index.js';
+import { nextStep, nextTransfer, formatTimeTijuana, formatDayLabel } from '../../domain/index.js';
 import { locations } from '../../data/locations.js';
-import { escapeHtml, locationName } from '../util.js';
+import { transferPoints } from '../../data/transferPoints.js';
+import { escapeHtml, locationName, transferPointName } from '../util.js';
 import { renderCard } from '../components/card.js';
 
 export function renderHomeScreen(ctx) {
-  const { visit, appointments, now, lang, t } = ctx;
+  const { visit, appointments, transfers, now, lang, t } = ctx;
   const dayLabel = formatDayLabel(now, now, lang)[lang];
   const step = nextStep(appointments, now);
+
+  // Etapa G — tarjeta PROPIA, arriba de "Tu siguiente paso" (D71). R2 no se
+  // toca: nextStep sigue siendo solo de citas, con los ejemplos trabajados
+  // del PRD §8 intactos. Sin traslado por venir no se pinta nada — Inicio
+  // queda exactamente como estaba antes de esta etapa.
+  const traslado = nextTransfer(transfers, now);
+
+  // El regreso cae por definición el último día de la visita, así que esta
+  // tarjeta anuncia casi siempre algo que no es hoy. Con solo la hora,
+  // debajo de un encabezado que dice "Hoy · Martes 10", se lee como hoy.
+  // Cuando el traslado SÍ es hoy el día ya está en ese encabezado y
+  // repetirlo sobra: la tarjeta queda igual que la de R2.
+  const cuandoTraslado = () => {
+    const dia = formatDayLabel(traslado.scheduledAt, now, lang)[lang];
+    const hora = formatTimeTijuana(traslado.scheduledAt, lang);
+    return dia === dayLabel ? hora : `${dia} · ${hora}`;
+  };
+
+  const transferHtml = traslado
+    ? `
+      <h2 class="nc-section-title">${escapeHtml(t('home.transferLabel'))}</h2>
+      ${renderCard(`
+        <p class="nc-home-next-when">${escapeHtml(cuandoTraslado())} · ${escapeHtml(transferPointName(transferPoints, traslado.meetingPointId, lang))}</p>
+        <p class="nc-home-next-what">${escapeHtml(t(`transfer.kind.${traslado.kind}`))}</p>
+        <button type="button" class="nc-button" data-nav="transfer">${escapeHtml(t('home.transferCta'))}</button>
+      `)}
+    `
+    : '';
 
   const nextStepHtml = step
     ? `
@@ -38,7 +67,7 @@ export function renderHomeScreen(ctx) {
     <section class="nc-screen nc-home">
       <h1 class="nc-greeting">${escapeHtml(t('home.greeting')(visit.patientFirstName))}</h1>
       <p class="nc-home-date">${escapeHtml(dayLabel)}</p>
-
+      ${transferHtml}
       <h2 class="nc-section-title">${escapeHtml(t('home.nextStepLabel'))}</h2>
       ${renderCard(nextStepHtml, { variant: 'accent' })}
 

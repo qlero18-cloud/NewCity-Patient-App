@@ -46,6 +46,10 @@ export const STRINGS = {
       quickAccessStay: 'Mi estancia',
       quickAccessHelp: 'Ayuda',
       hoursLink: 'Horarios de Compass y Piso 27',
+      // Etapa G. Tarjeta propia, arriba de "Tu siguiente paso" (D71): el
+      // traslado no compite con R2, la acompaña.
+      transferLabel: 'Tu traslado',
+      transferCta: 'Ver detalles del traslado',
     },
     itinerary: {
       title: 'Mi itinerario',
@@ -110,6 +114,40 @@ export const STRINGS = {
       recoveryRoom: 'Habitación recovery',
       yes: 'Sí',
       no: 'No',
+    },
+    // Etapa G — traslados. `kind` y `vehicleType` viven aquí, en el bloque
+    // del paciente, aunque el panel también los use para sus <select>: son
+    // los MISMOS cinco valores del enum de src/data/transferPoints.js y
+    // duplicarlos en coordinator.* garantizaría que un día digan cosas
+    // distintas en las dos pantallas.
+    transfer: {
+      title: 'Mi traslado',
+      kind: {
+        arrival: 'Traslado de llegada',
+        departure: 'Traslado de regreso',
+        internal: 'Traslado interno',
+      },
+      vehicleType: {
+        sedan: 'Sedán',
+        suv: 'SUV',
+        van: 'Van',
+        ambulance: 'Ambulancia',
+        other: 'Otro',
+      },
+      meetingPoint: 'Punto de encuentro',
+      flightNumber: 'Vuelo',
+      driver: 'Chofer',
+      // El traslado se aparta días antes; al chofer se lo asignan la
+      // víspera. Un renglón en blanco parece un error de la app.
+      driverPending: 'Te confirmamos el chofer un día antes.',
+      vehicle: 'Vehículo',
+      plate: 'Placas',
+      copyPlate: 'Copiar placas',
+      copied: 'Copiado',
+      whatsappButton: 'Escribir al chofer',
+      callButton: 'Llamar al chofer',
+      cancelledBadge: 'Cancelado',
+      notes: 'Notas',
     },
     help: {
       title: 'Ayuda',
@@ -224,6 +262,36 @@ export const STRINGS = {
           order: 'El check-out debe ser posterior al check-in.',
         },
       },
+      // Etapa G. Solo etiquetas de formulario y botones: los nombres de los
+      // tipos de traslado y de vehículo salen de transfer.kind.* y
+      // transfer.vehicleType.*, compartidos con la pantalla del paciente.
+      transfers: {
+        title: 'Traslados',
+        empty: 'Esta visita todavía no tiene traslados.',
+        addTransfer: 'Agregar traslado',
+        kindLabel: 'Tipo de traslado',
+        scheduledAtLabel: 'Fecha y hora de recogida',
+        meetingPointLabel: 'Punto de encuentro',
+        flightNumberLabel: 'Vuelo (opcional)',
+        driverNameLabel: 'Nombre del chofer',
+        // El "+" no es un capricho de formato: la pantalla del paciente
+        // arma wa.me con este número (D73).
+        driverPhoneLabel: 'Teléfono del chofer (con clave de país, +52…)',
+        vehicleTypeLabel: 'Tipo de vehículo',
+        vehicleMakeLabel: 'Marca',
+        vehicleModelLabel: 'Modelo',
+        vehicleColorLabel: 'Color',
+        plateLabel: 'Placas',
+        notesLabel: 'Notas para el paciente',
+        edit: 'Editar',
+        cancel: 'Cancelar',
+        save: 'Guardar cambios',
+        saved: 'Traslado guardado.',
+        cancelledBadge: 'Cancelado',
+        // Se dice explícitamente porque el formulario los deja pasar
+        // vacíos y eso, sin aviso, se lee como un campo que se te olvidó.
+        driverOptionalHint: 'Puedes dejar los datos del chofer y del vehículo en blanco y completarlos después.',
+      },
       qpass: {
         title: 'Emitir QPASS',
         uploadLabel: 'Subir imagen del pase',
@@ -297,6 +365,8 @@ export const STRINGS = {
       quickAccessStay: 'My stay',
       quickAccessHelp: 'Help',
       hoursLink: 'Compass and Floor 27 hours',
+      transferLabel: 'Your transfer',
+      transferCta: 'View transfer details',
     },
     itinerary: {
       title: 'My itinerary',
@@ -361,6 +431,33 @@ export const STRINGS = {
       recoveryRoom: 'Recovery room',
       yes: 'Yes',
       no: 'No',
+    },
+    transfer: {
+      title: 'My transfer',
+      kind: {
+        arrival: 'Arrival transfer',
+        departure: 'Return transfer',
+        internal: 'Internal transfer',
+      },
+      vehicleType: {
+        sedan: 'Sedan',
+        suv: 'SUV',
+        van: 'Van',
+        ambulance: 'Ambulance',
+        other: 'Other',
+      },
+      meetingPoint: 'Meeting point',
+      flightNumber: 'Flight',
+      driver: 'Driver',
+      driverPending: 'We’ll confirm your driver a day in advance.',
+      vehicle: 'Vehicle',
+      plate: 'Plate',
+      copyPlate: 'Copy plate',
+      copied: 'Copied',
+      whatsappButton: 'Message the driver',
+      callButton: 'Call the driver',
+      cancelledBadge: 'Cancelled',
+      notes: 'Notes',
     },
     help: {
       title: 'Help',
@@ -451,6 +548,29 @@ export const STRINGS = {
           invalidDate: 'We couldn’t read that date. Use the format 2026-03-09T15:00-07:00.',
           order: 'Check-out must be after check-in.',
         },
+      },
+      transfers: {
+        title: 'Transfers',
+        empty: 'This visit has no transfers yet.',
+        addTransfer: 'Add transfer',
+        kindLabel: 'Transfer type',
+        scheduledAtLabel: 'Pickup date and time',
+        meetingPointLabel: 'Meeting point',
+        flightNumberLabel: 'Flight (optional)',
+        driverNameLabel: 'Driver name',
+        driverPhoneLabel: 'Driver phone (with country code, +52…)',
+        vehicleTypeLabel: 'Vehicle type',
+        vehicleMakeLabel: 'Make',
+        vehicleModelLabel: 'Model',
+        vehicleColorLabel: 'Color',
+        plateLabel: 'Plate',
+        notesLabel: 'Notes for the patient',
+        edit: 'Edit',
+        cancel: 'Cancel',
+        save: 'Save changes',
+        saved: 'Transfer saved.',
+        cancelledBadge: 'Cancelled',
+        driverOptionalHint: 'You can leave driver and vehicle details blank and fill them in later.',
       },
       qpass: {
         title: 'Issue QPASS',

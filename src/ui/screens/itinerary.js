@@ -8,9 +8,10 @@
 // aquí: esta pantalla no toca localStorage directamente, solo recibe el
 // valor ya resuelto.
 
-import { groupByDay, isUpdated, formatTimeTijuana } from '../../domain/index.js';
+import { groupByDay, isUpdated, formatTimeTijuana, timelineItems } from '../../domain/index.js';
 import { locations } from '../../data/locations.js';
-import { escapeHtml, classNames, locationName } from '../util.js';
+import { transferPoints } from '../../data/transferPoints.js';
+import { escapeHtml, classNames, locationName, transferPointName } from '../util.js';
 import { renderCard } from '../components/card.js';
 import { renderBadge } from '../components/badge.js';
 
@@ -32,9 +33,32 @@ function renderAppointmentCard(appointment, ctx) {
   `, { extraClass: cancelled ? 'nc-card--muted' : '' });
 }
 
+// Etapa G — el traslado en la misma columna que las citas, reusando las
+// clases de la cita (.nc-itin-when/.nc-itin-what) a propósito: para el
+// paciente son renglones de la misma línea de tiempo y verlos con dos
+// tipografías distintas sugeriría que uno es más importante que el otro.
+// Lo que sí cambia es que este renglón lleva a otra pantalla.
+function renderTransferRow(transfer, ctx) {
+  const { lang, t } = ctx;
+  const cancelled = transfer.status === 'cancelled';
+
+  return renderCard(`
+    <p class="nc-itin-when">${escapeHtml(formatTimeTijuana(transfer.scheduledAt, lang))} · ${escapeHtml(transferPointName(transferPoints, transfer.meetingPointId, lang))}</p>
+    <p class="${classNames(['nc-itin-what', cancelled && 'nc-itin-what--cancelled'])}">${escapeHtml(t(`transfer.kind.${transfer.kind}`))}</p>
+    <p class="nc-itin-status">
+      ${cancelled ? renderBadge(t('transfer.cancelledBadge'), 'cancelled') : ''}
+      <button type="button" class="nc-link-button" data-nav="transfer">${escapeHtml(t('home.transferCta'))}</button>
+    </p>
+  `, { extraClass: cancelled ? 'nc-card--muted' : '' });
+}
+
 export function renderItineraryScreen(ctx) {
-  const { appointments, now, lang, t } = ctx;
-  const groups = groupByDay(appointments, now);
+  const { appointments, transfers, now, lang, t } = ctx;
+  // groupByDay no se tocó: siempre fue genérico (solo lee `startsAt` y
+  // dayKeyTijuana), así que lo que cambia es lo que se le entrega. Un
+  // traslado la víspera abre un día que las citas no tienen, y eso sale
+  // solo de aquí.
+  const groups = groupByDay(timelineItems(appointments, transfers), now);
 
   if (groups.length === 0) {
     return `<section class="nc-screen"><h1 class="nc-screen-title">${escapeHtml(t('itinerary.title'))}</h1><p>${escapeHtml(t('itinerary.empty'))}</p></section>`;
@@ -44,7 +68,9 @@ export function renderItineraryScreen(ctx) {
     .map(
       (g) => `
       <h2 class="nc-day-header">${escapeHtml(g.label[lang])}</h2>
-      <div class="nc-day-items">${g.items.map((a) => renderAppointmentCard(a, ctx)).join('\n')}</div>
+      <div class="nc-day-items">${g.items.map((item) => (item.kind === 'transfer'
+        ? renderTransferRow(item.entity, ctx)
+        : renderAppointmentCard(item.entity, ctx))).join('\n')}</div>
     `
     )
     .join('\n');

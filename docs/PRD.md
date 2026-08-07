@@ -150,6 +150,33 @@ Lodging
   breakfastIncluded  boolean
   recoveryRoom       boolean
 
+Transfer                             traslado contratado (ida y/o vuelta)
+  id                 string
+  visitId            string
+  kind               "arrival" | "departure" | "internal"
+  scheduledAt        ISO             hora de RECOGIDA, no de llegada
+  meetingPointId     string          catálogo propio, ver TransferPoint
+  flightNumber       string          opcional
+  driver             { name, phone } opcional: al chofer lo asignan la
+                                     víspera. phone en E.164 con "+"
+  vehicle            { type, make, model, color, plate }   opcional
+  status             "scheduled" | "cancelled"     cancelado se muestra
+                                     tachado, nunca desaparece
+  notes              string          opcional
+  createdAt/createdBy/updatedAt/updatedBy
+
+TransferPoint                        punto de encuentro del traslado
+  id                 string
+  name               { es, en }
+  unconfirmed        boolean         true = por confirmar con el cliente
+```
+
+`TransferPoint` es un catálogo **aparte** de `Location`: las ubicaciones del
+complejo tienen `mapPointId` y alimentan el ruteo del mapa, y un aeropuerto o
+una garita no están en ese mapa ni pueden estarlo.
+
+```
+
 PlazaVenue
   id                 string
   name               string
@@ -210,12 +237,16 @@ Los dos pases son de estancia y **no caducan** (§6.5): el paciente los usa much
 ### R1 — Caducidad del enlace
 
 ```
-expiresAt = max( última cita no cancelada , checkout del hospedaje ) + 24 h
+expiresAt = max( última cita no cancelada ,
+                 checkout del hospedaje ,
+                 último traslado no cancelado ) + 24 h
 ```
 
-Se recalcula cada vez que se agrega, mueve o cancela una cita, y cada vez que cambia el hospedaje.
+Se recalcula cada vez que se agrega, mueve o cancela una cita, y cada vez que cambia el hospedaje o un traslado.
 
 **El checkout entra en el cálculo por el QPASS.** El pase no caduca (§6.5), pero vive dentro de esta app: si el enlace muriera antes de que el paciente se vaya del complejo, se quedaría sin la pantalla que le abre las puertas. El enlace tiene que sobrevivir a la estancia completa, no solo a la última cita.
+
+**El traslado de regreso entra por la misma razón, y es el caso más filoso de los tres.** Ocurre después de la última cita *y* después del checkout: sin él en el máximo, el enlace se apagaba justo mientras el paciente esperaba el coche en la banqueta, con el nombre del chofer y su teléfono adentro. Un traslado es un instante y no un intervalo —se captura la hora de recogida, no cuánto dura el trayecto—, así que cuenta su `scheduledAt` tal cual y las 24 h de gracia cubren el camino.
 
 **Cálculo con los datos de arriba**
 Última cita: A4 termina `2026-03-11T09:30-07:00`. Checkout: `2026-03-11T12:00-07:00`.
@@ -230,6 +261,10 @@ Se recalcula cada vez que se agrega, mueve o cancela una cita, y cada vez que ca
 | 1e | Todas las citas canceladas, sin hospedaje | `expiresAt = visit.startsAt + 24 h` | Caso degenerado: el enlace no queda vivo para siempre |
 | 1f | **El paciente extiende su estancia**: checkout pasa a `2026-03-13T12:00-07:00` | `expiresAt = 2026-03-14T12:00-07:00` | Sigue necesitando el pase para entrar. Este es el caso que motivó incluir el checkout |
 | 1g | Visita sin hospedaje, última cita A4 | `expiresAt = 2026-03-12T09:30-07:00` | Sin estancia, manda la última cita |
+| 1h | **Traslado de regreso** a `2026-03-11T15:00-07:00` (posterior a la última cita y al checkout) | `expiresAt = 2026-03-12T15:00-07:00` | Manda el traslado. Sin esta línea el enlace moría a las 12:00 del día 12 y el paciente perdía el teléfono del chofer tres horas antes de que pasara por él |
+| 1i | Ese mismo traslado se **cancela** | `expiresAt` vuelve a `2026-03-12T12:00-07:00` | Igual que las citas canceladas: no cuentan |
+
+El traslado de regreso del ejemplo de §8 se recoge en el hotel **a la hora del checkout**, así que el `max` sigue siendo el checkout y el cálculo de arriba no se mueve.
 
 ---
 
@@ -423,3 +458,5 @@ Navy `#1C2B53` · teal `#14BCC4` · blanco · tinte `#EEF3F8` · tipografía **B
 5. **Teléfonos** — cuál número es WhatsApp y cuál Google Voice. De los flyers solo tengo (619) 324.3116
 6. ~~**Farmacia** — nombre y ubicación exacta~~ Resuelto en fase 07: "Farmacia La + Barata" (`directorio-plaza-exterior.pdf`, punto H4)
 7. **Formato real del QPASS** — qué codifica el `payload` y qué lectora lo lee, para decidir entre QR y Code128
+8. **Puntos de encuentro de los traslados** — `src/data/transferPoints.js` arranca con tres marcados `unconfirmed: true`, y lo que falta es la instrucción exacta, no el lugar: **Aeropuerto de Tijuana (TIJ)** (¿en qué punto de Llegadas espera el chofer?), **Cross Border Xpress (CBX)** (¿del lado mexicano o del estadounidense?) y **Garita San Ysidro** (¿peatonal o vehicular, y en qué acceso?). Se corrigen editando solo ese archivo; el hotel y el lobby de la Torre ya están confirmados
+9. **Tratamiento de los datos del chofer** — el traslado guarda nombre y teléfono de un **tercero** (un proveedor del hospital, no el paciente) en un expediente que se sirve a cualquiera con el token. Contrasta con la decisión de no guardar el teléfono del paciente (D61). No es bloqueo técnico, pero es del hospital decidirlo, junto con el resto del tratamiento de datos de salud

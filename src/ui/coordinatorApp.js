@@ -53,6 +53,7 @@ import { renderVisitsScreen, attachVisitsScreen, VISITS_CSS } from './screens/co
 import { renderIntakeScreen, attachIntakeScreen, INTAKE_CSS } from './screens/coordinator/intake.js';
 import { renderItineraryScreen, attachItineraryScreen, ITINERARY_CSS } from './screens/coordinator/itinerary.js';
 import { renderLodgingScreen, attachLodgingScreen, LODGING_CSS } from './screens/coordinator/lodging.js';
+import { renderTransfersScreen, attachTransfersScreen, TRANSFERS_CSS } from './screens/coordinator/transfers.js';
 import { renderQpassScreen, attachQpassScreen, QPASS_CSS } from './screens/coordinator/qpass.js';
 import { renderHandoffScreen, attachHandoffScreen, HANDOFF_CSS } from './screens/coordinator/handoff.js';
 import { renderSignInScreen, attachSignInScreen, SIGNIN_CSS } from './screens/coordinator/signin.js';
@@ -76,7 +77,7 @@ const GATE_CSS = `
 .nc-gate-msg { margin: 0; font-size: 14px; opacity: 0.8; }
 `;
 
-const ALL_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, ITINERARY_CSS, LODGING_CSS, QPASS_CSS, HANDOFF_CSS, PASS_SCREEN_CSS, SUBNAV_CSS, SIGNIN_CSS, FORM_ERRORS_CSS, GATE_CSS].join('\n');
+const ALL_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, ITINERARY_CSS, LODGING_CSS, TRANSFERS_CSS, QPASS_CSS, HANDOFF_CSS, PASS_SCREEN_CSS, SUBNAV_CSS, SIGNIN_CSS, FORM_ERRORS_CSS, GATE_CSS].join('\n');
 
 function injectStylesOnce() {
   if (document.getElementById('nc-styles')) return;
@@ -105,6 +106,10 @@ const SCREENS = {
   intake: { render: renderIntakeScreen, attach: attachIntakeScreen, needsVisit: false },
   itinerary: { render: renderItineraryScreen, attach: attachItineraryScreen, needsVisit: true },
   lodging: { render: renderLodgingScreen, attach: attachLodgingScreen, needsVisit: true },
+  // Etapa G — junto a hospedaje porque es lo mismo de la visita que no pasa
+  // dentro del complejo: dónde duerme y cómo llega. El orden del subnav sale
+  // de este objeto, así que aquí es donde se decide.
+  transfers: { render: renderTransfersScreen, attach: attachTransfersScreen, needsVisit: true },
   qpass: { render: renderQpassScreen, attach: attachQpassScreen, needsVisit: true },
   // Etapa E — última del subnav a propósito: es el paso que cierra la
   // captura, no el que la abre. Va después de itinerario/hospedaje/QPASS
@@ -119,16 +124,18 @@ const ROUTES = new Set([...Object.keys(SCREENS), 'pass-preview']);
 // viceversa) para la misma visita, solo "volver a visitas" en el
 // encabezado. VISIT_SUBNAV_ROUTES se deriva de SCREENS (needsVisit: true)
 // en vez de un arreglo aparte, para que nunca puedan desincronizarse — hoy
-// coincide con ['itinerary', 'lodging', 'qpass', 'handoff'], pass-preview
-// queda fuera a propósito (no es una pantalla propia de coordinator/, ver
-// más abajo). La Etapa E agregó 'handoff' y esta lista se enteró sola: eso
-// es exactamente para lo que se derivaba de SCREENS.
+// coincide con ['itinerary', 'lodging', 'transfers', 'qpass', 'handoff'],
+// pass-preview queda fuera a propósito (no es una pantalla propia de
+// coordinator/, ver más abajo). La Etapa E agregó 'handoff' y la G
+// 'transfers', y esta lista se enteró sola las dos veces: eso es
+// exactamente para lo que se derivaba de SCREENS.
 const VISIT_SUBNAV_ROUTES = Object.keys(SCREENS).filter((id) => SCREENS[id].needsVisit);
 // Reusa la misma llave i18n que cada pantalla ya usa en su propio <h1> —
 // sin cadenas nuevas, mismo criterio que D33/D29 ya aplicaron en esta fase.
 const VISIT_SUBNAV_LABEL_KEY = {
   itinerary: 'coordinator.itinerary.title',
   lodging: 'coordinator.lodging.title',
+  transfers: 'coordinator.transfers.title',
   qpass: 'coordinator.qpass.title',
   handoff: 'coordinator.handoff.title',
 };

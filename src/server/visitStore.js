@@ -153,7 +153,7 @@ export function createVisitStore(kv, options = {}) {
       const record = await readRecord(index.visitId);
       if (!record) return null; // índice huérfano
 
-      if (isExpired(record.visit, record.appointments, record.lodging, now)) return null;
+      if (isExpired(record, now)) return null;
       return record;
     },
 

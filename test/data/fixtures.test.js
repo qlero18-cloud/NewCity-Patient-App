@@ -9,6 +9,7 @@ import { plazaVenues } from '../../src/data/plaza.js';
 import { supportChannel } from '../../src/data/support.js';
 import { fixtures } from '../../src/data/fixtures.js';
 import { routes, MAP_HIGHLIGHT_IDS } from '../../src/data/routes.js';
+import { TRANSFER_POINT_IDS, TRANSFER_KINDS, VEHICLE_TYPES } from '../../src/data/transferPoints.js';
 import { computeExpiresAt, isExpired } from '../../src/domain/expiry.js';
 import { nextStep } from '../../src/domain/nextStep.js';
 import { visiblePasses } from '../../src/domain/passes.js';
@@ -134,7 +135,7 @@ describe('fixtures.js — declaración de datos ficticios', () => {
 describe('v_demo1 reproduce exactamente el ejemplo trabajado del PRD §8', () => {
   test('computeExpiresAt(v_demo1) da 2026-03-12T12:00-07:00, igual que el PRD', () => {
     const f = fixtures.v_demo1;
-    const expiresAt = computeExpiresAt(f.visit, f.appointments, f.lodging);
+    const expiresAt = computeExpiresAt(f);
     assert.strictEqual(new Date(expiresAt).getTime(), new Date('2026-03-12T12:00-07:00').getTime());
   });
 
@@ -151,6 +152,71 @@ describe('v_demo1 reproduce exactamente el ejemplo trabajado del PRD §8', () =>
     assert.ok(f.passes.every((p) => p.validUntil === null));
     const visible = visiblePasses(f.passes, '2026-03-11T23:00-07:00');
     assert.strictEqual(visible.length, 2);
+  });
+});
+
+// Etapa G. El camino sin red (fixtures) es el que se enseña en el
+// prototipo y el que se usa para revisar en el navegador sin levantar el
+// backend: si v_demo1 no trae traslados, la pantalla nueva no se puede ver
+// sin capturar una visita entera a mano en el panel.
+describe('v_demo1 — traslados de llegada y de regreso (Etapa G)', () => {
+  test('trae exactamente un traslado de llegada y uno de regreso', () => {
+    const kinds = fixtures.v_demo1.transfers.map((tr) => tr.kind).sort();
+    assert.deepStrictEqual(kinds, ['arrival', 'departure']);
+  });
+
+  test('todo meetingPointId de una fixture existe en transferPoints.js', () => {
+    for (const [id, f] of Object.entries(fixtures)) {
+      for (const tr of f.transfers ?? []) {
+        assert.ok(TRANSFER_POINT_IDS.includes(tr.meetingPointId), `${id}/${tr.id}: meetingPointId "${tr.meetingPointId}" no existe en transferPoints.js`);
+      }
+    }
+  });
+
+  test('kind y vehicle.type salen de los enum, nunca texto libre', () => {
+    for (const [id, f] of Object.entries(fixtures)) {
+      for (const tr of f.transfers ?? []) {
+        assert.ok(TRANSFER_KINDS.includes(tr.kind), `${id}/${tr.id}: kind "${tr.kind}" fuera del enum`);
+        if (tr.vehicle?.type) {
+          assert.ok(VEHICLE_TYPES.includes(tr.vehicle.type), `${id}/${tr.id}: vehicle.type "${tr.vehicle.type}" fuera del enum`);
+        }
+      }
+    }
+  });
+
+  // El teléfono del chofer va a wa.me/<dígitos> en la pantalla del
+  // paciente (D73): sin clave de país, el mensaje sale a otro país.
+  test('el teléfono del chofer viene en E.164, con "+"', () => {
+    for (const [id, f] of Object.entries(fixtures)) {
+      for (const tr of f.transfers ?? []) {
+        if (!tr.driver?.phone) continue;
+        assert.match(tr.driver.phone, /^\+\d{8,15}$/, `${id}/${tr.id}: el teléfono del chofer debería ser E.164`);
+      }
+    }
+  });
+
+  // Esta es la prueba que de verdad importa de este bloque: el ejemplo
+  // trabajado del PRD §8 no se movió al agregarle traslados. El de regreso
+  // recoge en el hotel a la hora del checkout, así que R1 sigue mandada
+  // por el checkout y computeExpiresAt da lo mismo que antes de la etapa.
+  test('los traslados no mueven la caducidad del ejemplo del PRD §8', () => {
+    const f = fixtures.v_demo1;
+    const ultimoTraslado = Math.max(...f.transfers.map((tr) => new Date(tr.scheduledAt).getTime()));
+    assert.ok(
+      ultimoTraslado <= new Date(f.lodging.checkOut).getTime(),
+      'fixture mal construida: un traslado posterior al checkout cambiaría el ejemplo del PRD',
+    );
+    assert.strictEqual(new Date(computeExpiresAt(f)).getTime(), new Date('2026-03-12T12:00-07:00').getTime());
+  });
+
+  // Compatibilidad con lo ya desplegado, con datos reales y no con un
+  // objeto de prueba: las otras cuatro fixtures NO tienen la llave, igual
+  // que los expedientes guardados en Blobs antes de esta etapa.
+  test('las fixtures sin la llave transfers siguen funcionando', () => {
+    for (const id of ['v_demo2', 'v_longstay', 'v_expired', 'v_revoked']) {
+      assert.strictEqual(fixtures[id].transfers, undefined, `${id} no debería declarar transfers`);
+      assert.doesNotThrow(() => computeExpiresAt(fixtures[id]), `${id}: computeExpiresAt no debe depender de la llave`);
+    }
   });
 });
 
@@ -180,7 +246,7 @@ describe('v_demo2 — sin hospedaje, una cancelada, una movida', () => {
     const f = fixtures.v_demo2;
     const lastNonCancelled = f.appointments.filter((a) => a.status !== 'cancelled').sort((a, b) => new Date(b.startsAt) - new Date(a.startsAt))[0];
     const expectedEnd = new Date(lastNonCancelled.startsAt).getTime() + lastNonCancelled.durationMin * 60000 + 24 * 3600000;
-    const expiresAt = computeExpiresAt(f.visit, f.appointments, f.lodging);
+    const expiresAt = computeExpiresAt(f);
     assert.strictEqual(new Date(expiresAt).getTime(), expectedEnd);
   });
 });
@@ -188,7 +254,7 @@ describe('v_demo2 — sin hospedaje, una cancelada, una movida', () => {
 describe('v_longstay — estancia extendida (caso 1f) con pase sin caducidad', () => {
   test('expiresAt lo gobierna el checkout, muy posterior a la última cita', () => {
     const f = fixtures.v_longstay;
-    const expiresAt = computeExpiresAt(f.visit, f.appointments, f.lodging);
+    const expiresAt = computeExpiresAt(f);
     const checkoutMs = new Date(f.lodging.checkOut).getTime();
     const lastApptEndMs = Math.max(...f.appointments.map((a) => new Date(a.startsAt).getTime() + a.durationMin * 60000));
     assert.ok(checkoutMs > lastApptEndMs, 'fixture mal construida: el checkout debe ser posterior a la última cita');
@@ -208,9 +274,9 @@ describe('v_expired — el enlace ya venció', () => {
   test('isExpired da true con un now muy posterior a expiresAt', () => {
     const f = fixtures.v_expired;
     assert.strictEqual(f.lodging, null, 'v_expired no necesita hospedaje para este caso');
-    const expiresAt = computeExpiresAt(f.visit, f.appointments, f.lodging);
+    const expiresAt = computeExpiresAt(f);
     const wayAfter = new Date(new Date(expiresAt).getTime() + 30 * 24 * 3600000).toISOString();
-    assert.strictEqual(isExpired(f.visit, f.appointments, f.lodging, wayAfter), true);
+    assert.strictEqual(isExpired(f, wayAfter), true);
   });
 });
 

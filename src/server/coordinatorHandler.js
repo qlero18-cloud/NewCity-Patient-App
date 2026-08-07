@@ -28,6 +28,9 @@ import {
   setLodging,
   issueQpass,
   revokeQpass,
+  addTransfer,
+  editTransfer,
+  cancelTransfer,
 } from './visitMutations.js';
 
 export const COORDINATOR_PREFIX = '/api/coordinator';
@@ -163,6 +166,25 @@ async function patchPase(request, deps, visitId, passId) {
   return res instanceof Response ? res : mutado(200, res, 'qpass');
 }
 
+// Etapa G. Mismo trato que las citas y por lo mismo: editar y cancelar son
+// dos acciones sobre el mismo traslado, y cancelar no borra nada — un
+// DELETE prometería otra cosa.
+async function patchTraslado(request, deps, visitId, transferId) {
+  const leido = await leerJson(request);
+  if (!leido.ok) return leido.response;
+  const body = leido.body ?? {};
+
+  const acciones = {
+    edit: (r, ctx) => editTransfer(r, transferId, body, ctx),
+    cancel: (r, ctx) => cancelTransfer(r, transferId, ctx),
+  };
+  const accion = acciones[body.action];
+  if (!accion) return unprocessable({ action: 'unsupported' });
+
+  const res = await mutar(deps, visitId, accion);
+  return res instanceof Response ? res : mutado(200, res, 'transfer');
+}
+
 // Devuelve la respuesta ya hecha, o null si la ruta no es de este archivo.
 async function rutear(request, deps, segmentos) {
   const [raiz, visitId, seccion, itemId] = segmentos;
@@ -201,6 +223,10 @@ async function rutear(request, deps, segmentos) {
       if (method !== 'POST') return json(405, { error: 'method_not_allowed' });
       return conCuerpo(issueQpass, 201, 'qpass');
     }
+    if (seccion === 'transfers') {
+      if (method !== 'POST') return json(405, { error: 'method_not_allowed' });
+      return conCuerpo(addTransfer, 201, 'transfer');
+    }
     return null;
   }
 
@@ -208,6 +234,7 @@ async function rutear(request, deps, segmentos) {
     if (method !== 'PATCH') return json(405, { error: 'method_not_allowed' });
     if (seccion === 'appointments') return patchCita(request, deps, visitId, itemId);
     if (seccion === 'passes') return patchPase(request, deps, visitId, itemId);
+    if (seccion === 'transfers') return patchTraslado(request, deps, visitId, itemId);
     return null;
   }
 

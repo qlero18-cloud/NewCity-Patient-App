@@ -47,10 +47,11 @@ import { renderMapScreen, attachMapScreen, MAP_SCREEN_CSS } from './screens/map.
 import { renderPlazaScreen, attachPlazaScreen, PLAZA_CSS } from './screens/plaza.js';
 import { renderHoursScreen } from './screens/hours.js';
 import { renderStayScreen, attachStayScreen, STAY_CSS } from './screens/stay.js';
+import { renderTransferScreen, attachTransferScreen, TRANSFER_CSS } from './screens/transfer.js';
 import { renderHelpScreen, HELP_CSS } from './screens/help.js';
 import { renderPassScreen, attachPassScreen, PASS_SCREEN_CSS } from './screens/pass.js';
 
-const ALL_CSS = [THEME_CSS, TABS_CSS, CARD_CSS, BADGE_CSS, FICHA_CSS, HOME_CSS, ITINERARY_CSS, MAP_SCREEN_CSS, PLAZA_CSS, STAY_CSS, HELP_CSS, PASS_SCREEN_CSS].join('\n');
+const ALL_CSS = [THEME_CSS, TABS_CSS, CARD_CSS, BADGE_CSS, FICHA_CSS, HOME_CSS, ITINERARY_CSS, MAP_SCREEN_CSS, PLAZA_CSS, STAY_CSS, TRANSFER_CSS, HELP_CSS, PASS_SCREEN_CSS].join('\n');
 
 function injectStylesOnce() {
   if (document.getElementById('nc-styles')) return;
@@ -71,6 +72,9 @@ const SCREENS = {
   plaza: { render: renderPlazaScreen, attach: attachPlazaScreen, tab: 'plaza' },
   hours: { render: renderHoursScreen, tab: null },
   stay: { render: renderStayScreen, attach: attachStayScreen, tab: null },
+  // Etapa G — sin pestaña, como stay y hours: la barra de 5 la fija el PRD
+  // §8. Se llega desde la tarjeta de Inicio o desde el itinerario.
+  transfer: { render: renderTransferScreen, attach: attachTransferScreen, tab: null },
   help: { render: renderHelpScreen, tab: 'help' },
   pass: { render: renderPassScreen, attach: attachPassScreen, tab: null },
 };
@@ -126,13 +130,17 @@ export async function boot(root, {
   // INV-3: un SOLO camino de código para "no existe" y para "venció", y la
   // pantalla ni siquiera recibe cuál de los dos fue (ver screens/
   // neutral.js) — no pueden divergir ni por accidente.
-  if (!resuelto || isExpired(resuelto.record.visit, resuelto.record.appointments, resuelto.record.lodging, now)) {
+  if (!resuelto || isExpired(resuelto.record, now)) {
     document.title = STRINGS[lang].common.appName; // INV-6, igual que en render()
     root.innerHTML = renderNeutralScreen(lang);
     return;
   }
 
+  // `transfers` con `?? []`: un teléfono con la caché anterior a la Etapa G
+  // entrega un expediente sin esa llave, y ninguna pantalla debe enterarse
+  // de la diferencia entre "no tiene traslados" y "esta caché es vieja".
   const { visit, appointments, passes, lodging } = resuelto.record;
+  const transfers = resuelto.record.transfers ?? [];
   const lastViewedKey = LAST_VIEWED_ITINERARY_KEY_PREFIX + visit.id;
   let itineraryStamped = false;
 
@@ -146,9 +154,16 @@ export async function boot(root, {
       location.hash = '#/home';
       return;
     }
+    // Mismo guard que stay, por lo mismo: un enlace viejo a #/transfer en
+    // una visita sin traslados pintaría una pantalla en blanco con la barra
+    // de pestañas abajo, que parece la app rota y no "esto no aplica".
+    if (route === 'transfer' && transfers.length === 0) {
+      location.hash = '#/home';
+      return;
+    }
     const screen = SCREENS[route];
     const lastViewedItineraryAt = localStorage.getItem(lastViewedKey);
-    const ctx = { visit, appointments, passes, lodging, now, lang, t, lastViewedItineraryAt };
+    const ctx = { visit, appointments, passes, lodging, transfers, now, lang, t, lastViewedItineraryAt };
 
     document.title = STRINGS[lang].common.appName; // constante a propósito: INV-6, nunca nombre de paciente ni de estudio
 

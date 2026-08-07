@@ -187,33 +187,61 @@ function formatDayLabel(iso, now, _lang) {
 // --- src/domain/expiry.js ---
 // R1 — Caducidad del enlace (PRD §8).
 //
-//   expiresAt = max( última cita no cancelada , checkout del hospedaje ) + 24h
+//   expiresAt = max( última cita no cancelada ,
+//                    checkout del hospedaje ,
+//                    último traslado no cancelado ) + 24h
 //
-// `lodging` puede ser null (visita sin hospedaje, caso 1g). Si además no
+// `lodging` puede ser null (visita sin hospedaje, caso 1g) y `transfers`
+// puede faltar (expedientes guardados antes de la Etapa G). Si además no
 // hay ninguna cita no cancelada, no hay de dónde tomar el máximo: cae al
 // caso degenerado 1e (visit.startsAt + 24h) para que el enlace no quede
 // vivo para siempre.
+//
+// Etapa G — el traslado de REGRESO ocurre después de la última cita y
+// después del checkout: sin él en el máximo, el enlace caducaba mientras el
+// paciente esperaba el coche, con el teléfono del chofer adentro.
+//
+// D69 — ambas funciones reciben el EXPEDIENTE, no argumentos posicionales.
+// Con un cuarto posicional antes de `now`, un punto de llamada olvidado le
+// habría pasado `now` a `transfers` dejando `now` en undefined;
+// `instantMs(undefined)` es NaN y `NaN > x` es false, así que el enlace
+// habría dejado de caducar en silencio — justo lo que R1 existe para
+// impedir. Con el expediente, ese mismo olvido revienta al leer `.visit` de
+// undefined.
 
 
 function lastNonCancelledAppointmentEndMs(appointments) {
-  const ends = appointments
+  const ends = (appointments ?? [])
     .filter((a) => a.status !== 'cancelled')
     .map((a) => instantMs(a.startsAt) + a.durationMin * 60 * 1000);
   return ends.length > 0 ? Math.max(...ends) : null;
 }
 
-function computeExpiresAt(visit, appointments, lodging) {
+// Un traslado es un instante, no un intervalo: la coordinadora captura la
+// hora de recogida y no cuánto dura el trayecto. Cuenta su `scheduledAt`
+// tal cual, y las 24 horas de gracia de R1 cubren de sobra el camino.
+function lastNonCancelledTransferMs(transfers) {
+  const times = (transfers ?? [])
+    .filter((tr) => tr.status !== 'cancelled')
+    .map((tr) => instantMs(tr.scheduledAt));
+  return times.length > 0 ? Math.max(...times) : null;
+}
+
+function computeExpiresAt(record) {
+  const { visit, appointments, lodging, transfers } = record;
+
   const lastAppointmentEndMs = lastNonCancelledAppointmentEndMs(appointments);
   const checkoutMs = lodging ? instantMs(lodging.checkOut) : null;
+  const lastTransferMs = lastNonCancelledTransferMs(transfers);
 
-  const candidates = [lastAppointmentEndMs, checkoutMs].filter((v) => v !== null);
+  const candidates = [lastAppointmentEndMs, checkoutMs, lastTransferMs].filter((v) => v !== null);
   const baseMs = candidates.length > 0 ? Math.max(...candidates) : instantMs(visit.startsAt);
 
   return toTijuanaIso(baseMs + 24 * HOUR_MS);
 }
 
-function isExpired(visit, appointments, lodging, now) {
-  const expiresAt = computeExpiresAt(visit, appointments, lodging);
+function isExpired(record, now) {
+  const expiresAt = computeExpiresAt(record);
   return instantMs(now) > instantMs(expiresAt);
 }
 
@@ -330,6 +358,70 @@ function visiblePasses(passes, now) {
       if (byScope !== 0) return byScope;
       return a.id.localeCompare(b.id);
     });
+}
+
+// --- src/domain/timeline.js ---
+// Etapa G — línea de tiempo unificada del itinerario (citas + traslados).
+//
+// El día del paciente no está hecho solo de citas: si contrató el traslado,
+// el coche que lo recoge a las 06:00 es lo primero que le pasa, y tiene que
+// salir arriba de la cita de las 08:00 y no en otra pantalla.
+//
+// Este módulo NO agrupa ni formatea: solo etiqueta y ordena. El agrupado lo
+// sigue haciendo groupByDay, que ya era genérico (solo lee `startsAt` y
+// dayKeyTijuana) y por eso no se tocó — sus pruebas siguen significando
+// exactamente lo mismo que antes de esta etapa.
+//
+// Los cancelados NO se filtran aquí, igual que groupByDay nunca filtró las
+// citas canceladas (PRD §9): un traslado cancelado tachado es información;
+// que se esfume, no. Filtrar es decisión de quien pinta, no del dominio.
+
+
+function timelineItems(appointments, transfers) {
+  const items = [
+    ...(appointments ?? []).map((a) => ({ kind: 'appointment', startsAt: a.startsAt, entity: a })),
+    ...(transfers ?? []).map((tr) => ({ kind: 'transfer', startsAt: tr.scheduledAt, entity: tr })),
+  ];
+
+  // Empate exacto de hora: primero la cita. Es a lo que el paciente tiene
+  // que llegar; el traslado de esa misma hora es cómo llega o cómo se va.
+  return items.sort((a, b) => {
+    const diff = instantMs(a.startsAt) - instantMs(b.startsAt);
+    if (diff !== 0) return diff;
+    return a.kind === b.kind ? 0 : a.kind === 'appointment' ? -1 : 1;
+  });
+}
+
+// El traslado que se anuncia en la tarjeta de Inicio (D71). Vive aquí y no
+// en la pantalla por la misma razón que nextStep vive en el dominio: "cuál
+// es el siguiente" es una regla, y una pantalla no puede probarse sin DOM.
+//
+// R2 no se toca: nextStep sigue siendo SOLO de citas, con sus ejemplos
+// trabajados del PRD §8 intactos. Esto es su hermano para traslados, en su
+// propia tarjeta.
+//
+// `now` entra como parámetro, nunca se lee el reloj (INV-1).
+function nextTransfer(transfers, now) {
+  const nowMs = instantMs(now);
+
+  // Cancelados fuera, al revés que en timelineItems. No es incoherencia: el
+  // itinerario tiene que mostrar el traslado cancelado —tachado— para que
+  // el paciente no se plante a esperarlo; anunciarlo en Inicio como "tu
+  // próximo traslado" sería justo lo contrario.
+  const candidatos = (transfers ?? []).filter(
+    (tr) => tr.status !== 'cancelled' && instantMs(tr.scheduledAt) >= nowMs,
+  );
+  if (candidatos.length === 0) return null;
+
+  // Desempate por id, como nextStep: dos repintados del mismo minuto tienen
+  // que anunciar el mismo traslado, no uno u otro según el orden en que
+  // vinieron del servidor.
+  return candidatos.reduce((mejor, tr) => {
+    const diff = instantMs(tr.scheduledAt) - instantMs(mejor.scheduledAt);
+    if (diff < 0) return tr;
+    if (diff > 0) return mejor;
+    return tr.id < mejor.id ? tr : mejor;
+  });
 }
 
 // --- src/domain/index.js ---
@@ -566,6 +658,33 @@ function locationOptionsHtml(locations, lang, selectedId = null) {
     .join('\n');
 }
 
+// Etapa G — los puntos de encuentro de un traslado comparten la forma
+// {id, name:{es,en}} con las ubicaciones, pero NO son ubicaciones (D70): no
+// tienen mapPointId ni salen en el plano. Esta función existe para que las
+// pantallas de traslado no llamen algo llamado "location" sobre un catálogo
+// que se separó a propósito; el cuerpo se parece porque la forma se parece.
+function transferPointName(points, pointId, lang) {
+  const punto = points.find((p) => p.id === pointId) ?? null;
+  if (!punto) return pointId;
+  return punto.name[lang] ?? punto.name.es;
+}
+
+// Aquí sí hay una diferencia real con locationOptionsHtml, y es la razón de
+// que no se reuse: tres de los cinco puntos están sin confirmar (§15.8) y
+// la coordinadora tiene que verlo MIENTRAS elige, no después. Un <option>
+// no admite un elemento de distintivo adentro, así que la marca va como
+// sufijo del texto.
+function transferPointOptionsHtml(points, lang, selectedId = null, unconfirmedLabel = '') {
+  return points
+    .map((punto) => {
+      const selected = punto.id === selectedId ? ' selected' : '';
+      const nombre = punto.name[lang] ?? punto.name.es;
+      const sufijo = punto.unconfirmed && unconfirmedLabel ? ` [${unconfirmedLabel}]` : '';
+      return `<option value="${escapeHtml(punto.id)}"${selected}>${escapeHtml(nombre + sufijo)}</option>`;
+    })
+    .join('\n');
+}
+
 // --- src/ui/components/badge.js ---
 // Distintivo reusable: [POR CONFIRMAR] (unconfirmed: true en cualquier
 // dato de src/data/) y "actualizado" (R5, cita movida). Mismo componente,
@@ -732,6 +851,10 @@ const STRINGS = {
       quickAccessStay: 'Mi estancia',
       quickAccessHelp: 'Ayuda',
       hoursLink: 'Horarios de Compass y Piso 27',
+      // Etapa G. Tarjeta propia, arriba de "Tu siguiente paso" (D71): el
+      // traslado no compite con R2, la acompaña.
+      transferLabel: 'Tu traslado',
+      transferCta: 'Ver detalles del traslado',
     },
     itinerary: {
       title: 'Mi itinerario',
@@ -796,6 +919,40 @@ const STRINGS = {
       recoveryRoom: 'Habitación recovery',
       yes: 'Sí',
       no: 'No',
+    },
+    // Etapa G — traslados. `kind` y `vehicleType` viven aquí, en el bloque
+    // del paciente, aunque el panel también los use para sus <select>: son
+    // los MISMOS cinco valores del enum de src/data/transferPoints.js y
+    // duplicarlos en coordinator.* garantizaría que un día digan cosas
+    // distintas en las dos pantallas.
+    transfer: {
+      title: 'Mi traslado',
+      kind: {
+        arrival: 'Traslado de llegada',
+        departure: 'Traslado de regreso',
+        internal: 'Traslado interno',
+      },
+      vehicleType: {
+        sedan: 'Sedán',
+        suv: 'SUV',
+        van: 'Van',
+        ambulance: 'Ambulancia',
+        other: 'Otro',
+      },
+      meetingPoint: 'Punto de encuentro',
+      flightNumber: 'Vuelo',
+      driver: 'Chofer',
+      // El traslado se aparta días antes; al chofer se lo asignan la
+      // víspera. Un renglón en blanco parece un error de la app.
+      driverPending: 'Te confirmamos el chofer un día antes.',
+      vehicle: 'Vehículo',
+      plate: 'Placas',
+      copyPlate: 'Copiar placas',
+      copied: 'Copiado',
+      whatsappButton: 'Escribir al chofer',
+      callButton: 'Llamar al chofer',
+      cancelledBadge: 'Cancelado',
+      notes: 'Notas',
     },
     help: {
       title: 'Ayuda',
@@ -910,6 +1067,36 @@ const STRINGS = {
           order: 'El check-out debe ser posterior al check-in.',
         },
       },
+      // Etapa G. Solo etiquetas de formulario y botones: los nombres de los
+      // tipos de traslado y de vehículo salen de transfer.kind.* y
+      // transfer.vehicleType.*, compartidos con la pantalla del paciente.
+      transfers: {
+        title: 'Traslados',
+        empty: 'Esta visita todavía no tiene traslados.',
+        addTransfer: 'Agregar traslado',
+        kindLabel: 'Tipo de traslado',
+        scheduledAtLabel: 'Fecha y hora de recogida',
+        meetingPointLabel: 'Punto de encuentro',
+        flightNumberLabel: 'Vuelo (opcional)',
+        driverNameLabel: 'Nombre del chofer',
+        // El "+" no es un capricho de formato: la pantalla del paciente
+        // arma wa.me con este número (D73).
+        driverPhoneLabel: 'Teléfono del chofer (con clave de país, +52…)',
+        vehicleTypeLabel: 'Tipo de vehículo',
+        vehicleMakeLabel: 'Marca',
+        vehicleModelLabel: 'Modelo',
+        vehicleColorLabel: 'Color',
+        plateLabel: 'Placas',
+        notesLabel: 'Notas para el paciente',
+        edit: 'Editar',
+        cancel: 'Cancelar',
+        save: 'Guardar cambios',
+        saved: 'Traslado guardado.',
+        cancelledBadge: 'Cancelado',
+        // Se dice explícitamente porque el formulario los deja pasar
+        // vacíos y eso, sin aviso, se lee como un campo que se te olvidó.
+        driverOptionalHint: 'Puedes dejar los datos del chofer y del vehículo en blanco y completarlos después.',
+      },
       qpass: {
         title: 'Emitir QPASS',
         uploadLabel: 'Subir imagen del pase',
@@ -983,6 +1170,8 @@ const STRINGS = {
       quickAccessStay: 'My stay',
       quickAccessHelp: 'Help',
       hoursLink: 'Compass and Floor 27 hours',
+      transferLabel: 'Your transfer',
+      transferCta: 'View transfer details',
     },
     itinerary: {
       title: 'My itinerary',
@@ -1047,6 +1236,33 @@ const STRINGS = {
       recoveryRoom: 'Recovery room',
       yes: 'Yes',
       no: 'No',
+    },
+    transfer: {
+      title: 'My transfer',
+      kind: {
+        arrival: 'Arrival transfer',
+        departure: 'Return transfer',
+        internal: 'Internal transfer',
+      },
+      vehicleType: {
+        sedan: 'Sedan',
+        suv: 'SUV',
+        van: 'Van',
+        ambulance: 'Ambulance',
+        other: 'Other',
+      },
+      meetingPoint: 'Meeting point',
+      flightNumber: 'Flight',
+      driver: 'Driver',
+      driverPending: 'We’ll confirm your driver a day in advance.',
+      vehicle: 'Vehicle',
+      plate: 'Plate',
+      copyPlate: 'Copy plate',
+      copied: 'Copied',
+      whatsappButton: 'Message the driver',
+      callButton: 'Call the driver',
+      cancelledBadge: 'Cancelled',
+      notes: 'Notes',
     },
     help: {
       title: 'Help',
@@ -1137,6 +1353,29 @@ const STRINGS = {
           invalidDate: 'We couldn’t read that date. Use the format 2026-03-09T15:00-07:00.',
           order: 'Check-out must be after check-in.',
         },
+      },
+      transfers: {
+        title: 'Transfers',
+        empty: 'This visit has no transfers yet.',
+        addTransfer: 'Add transfer',
+        kindLabel: 'Transfer type',
+        scheduledAtLabel: 'Pickup date and time',
+        meetingPointLabel: 'Meeting point',
+        flightNumberLabel: 'Flight (optional)',
+        driverNameLabel: 'Driver name',
+        driverPhoneLabel: 'Driver phone (with country code, +52…)',
+        vehicleTypeLabel: 'Vehicle type',
+        vehicleMakeLabel: 'Make',
+        vehicleModelLabel: 'Model',
+        vehicleColorLabel: 'Color',
+        plateLabel: 'Plate',
+        notesLabel: 'Notes for the patient',
+        edit: 'Edit',
+        cancel: 'Cancel',
+        save: 'Save changes',
+        saved: 'Transfer saved.',
+        cancelledBadge: 'Cancelled',
+        driverOptionalHint: 'You can leave driver and vehicle details blank and fill them in later.',
       },
       qpass: {
         title: 'Issue QPASS',
@@ -1362,6 +1601,59 @@ const locations = [
 
 const LOCATION_IDS = locations.map((l) => l.id);
 
+// --- src/data/transferPoints.js ---
+// Etapa G — puntos de encuentro de los traslados (aeropuerto ↔ hospital).
+//
+// Catálogo APARTE de src/data/locations.js, y no por gusto (D70): las 7
+// ubicaciones de allá tienen `mapPointId` y participan en el ruteo del mapa
+// (fase 02/04). Estos puntos están fuera del complejo y no se dibujan en
+// ningún plano; meterlos en `locations` obligaría a inventarles un
+// mapPointId que no existe y rompería las tres listas cruzadas que
+// test/data/fixtures.test.js verifica.
+//
+// NINGUNO de los tres puntos de cruce está confirmado por el cliente: no
+// sabemos si el chofer recoge en Llegadas de la terminal, del lado
+// mexicano de CBX o en la garita. Van `unconfirmed: true` — misma
+// convención que la farmacia y que todos los horarios— y la UI los pinta
+// con el distintivo [POR CONFIRMAR], nunca como dato real. Se corrige
+// editando SOLO este archivo. Entra como punto 8 de docs/PRD.md §15.
+//
+// `quartz` y `lobby_torre` repiten a propósito el id de la ubicación
+// equivalente en locations.js: es el mismo lugar físico. No se comparte el
+// objeto porque lo que se necesita aquí (un nombre para un <select>) no es
+// lo que se necesita allá (piso, horario y punto de mapa).
+
+// `punto` y no `loc`: build.py aplana todos los módulos de una entrada a un
+// solo scope al empaquetar, y locations.js ya declara `loc` arriba — dos
+// declaraciones top-level con el mismo nombre son un error de compilación
+// del bundle aunque nunca choquen como módulos ES sueltos.
+function punto(id, nameEs, nameEn, options = {}) {
+  return { id, name: { es: nameEs, en: nameEn }, ...options };
+}
+
+const transferPoints = [
+  punto('tij_terminal', 'Aeropuerto de Tijuana (TIJ) · Llegadas', 'Tijuana Airport (TIJ) · Arrivals', { unconfirmed: true }),
+  punto('cbx', 'Cross Border Xpress (CBX)', 'Cross Border Xpress (CBX)', { unconfirmed: true }),
+  punto('san_ysidro', 'Garita San Ysidro', 'San Ysidro Port of Entry', { unconfirmed: true }),
+  punto('quartz', 'Quartz Hotel & Spa', 'Quartz Hotel & Spa'),
+  punto('lobby_torre', 'Lobby Torre Médica · Acceso general', 'Medical Tower Lobby · General Access'),
+];
+
+const TRANSFER_POINT_IDS = transferPoints.map((p) => p.id);
+
+// Los dos enum del traslado, aquí y no en src/server/: la pantalla del
+// panel los necesita para pintar sus <select> y el servidor para validar, y
+// D45 prohíbe que el servidor importe código de UI. src/data/ es el único
+// lugar que las dos mitades pueden leer sin que ninguna dependa de la otra.
+//
+// 'internal' es un traslado DENTRO del complejo (del hotel a la torre, por
+// ejemplo). Lo pidió el cliente como ida y vuelta al aeropuerto, pero el
+// enum lo admite desde ahora porque agregarlo después obligaría a migrar
+// los registros ya guardados.
+const TRANSFER_KINDS = ['arrival', 'departure', 'internal'];
+
+const VEHICLE_TYPES = ['sedan', 'suv', 'van', 'ambulance', 'other'];
+
 // --- src/ui/screens/home.js ---
 // Inicio — saludo, "tu siguiente paso" (R2) y accesos rápidos a mapa,
 // estancia y ayuda (fase 05, texto literal de "Detalles por pantalla").
@@ -1373,10 +1665,39 @@ const LOCATION_IDS = locations.map((l) => l.id);
 
 
 
+
 function renderHomeScreen(ctx) {
-  const { visit, appointments, now, lang, t } = ctx;
+  const { visit, appointments, transfers, now, lang, t } = ctx;
   const dayLabel = formatDayLabel(now, now, lang)[lang];
   const step = nextStep(appointments, now);
+
+  // Etapa G — tarjeta PROPIA, arriba de "Tu siguiente paso" (D71). R2 no se
+  // toca: nextStep sigue siendo solo de citas, con los ejemplos trabajados
+  // del PRD §8 intactos. Sin traslado por venir no se pinta nada — Inicio
+  // queda exactamente como estaba antes de esta etapa.
+  const traslado = nextTransfer(transfers, now);
+
+  // El regreso cae por definición el último día de la visita, así que esta
+  // tarjeta anuncia casi siempre algo que no es hoy. Con solo la hora,
+  // debajo de un encabezado que dice "Hoy · Martes 10", se lee como hoy.
+  // Cuando el traslado SÍ es hoy el día ya está en ese encabezado y
+  // repetirlo sobra: la tarjeta queda igual que la de R2.
+  const cuandoTraslado = () => {
+    const dia = formatDayLabel(traslado.scheduledAt, now, lang)[lang];
+    const hora = formatTimeTijuana(traslado.scheduledAt, lang);
+    return dia === dayLabel ? hora : `${dia} · ${hora}`;
+  };
+
+  const transferHtml = traslado
+    ? `
+      <h2 class="nc-section-title">${escapeHtml(t('home.transferLabel'))}</h2>
+      ${renderCard(`
+        <p class="nc-home-next-when">${escapeHtml(cuandoTraslado())} · ${escapeHtml(transferPointName(transferPoints, traslado.meetingPointId, lang))}</p>
+        <p class="nc-home-next-what">${escapeHtml(t(`transfer.kind.${traslado.kind}`))}</p>
+        <button type="button" class="nc-button" data-nav="transfer">${escapeHtml(t('home.transferCta'))}</button>
+      `)}
+    `
+    : '';
 
   const nextStepHtml = step
     ? `
@@ -1402,7 +1723,7 @@ function renderHomeScreen(ctx) {
     <section class="nc-screen nc-home">
       <h1 class="nc-greeting">${escapeHtml(t('home.greeting')(visit.patientFirstName))}</h1>
       <p class="nc-home-date">${escapeHtml(dayLabel)}</p>
-
+      ${transferHtml}
       <h2 class="nc-section-title">${escapeHtml(t('home.nextStepLabel'))}</h2>
       ${renderCard(nextStepHtml, { variant: 'accent' })}
 
@@ -1486,6 +1807,7 @@ function renderHoursScreen(ctx) {
 
 
 
+
 function renderAppointmentCard(appointment, ctx) {
   const { now, lang, t, lastViewedItineraryAt } = ctx;
   const cancelled = appointment.status === 'cancelled';
@@ -1504,9 +1826,32 @@ function renderAppointmentCard(appointment, ctx) {
   `, { extraClass: cancelled ? 'nc-card--muted' : '' });
 }
 
+// Etapa G — el traslado en la misma columna que las citas, reusando las
+// clases de la cita (.nc-itin-when/.nc-itin-what) a propósito: para el
+// paciente son renglones de la misma línea de tiempo y verlos con dos
+// tipografías distintas sugeriría que uno es más importante que el otro.
+// Lo que sí cambia es que este renglón lleva a otra pantalla.
+function renderTransferRow(transfer, ctx) {
+  const { lang, t } = ctx;
+  const cancelled = transfer.status === 'cancelled';
+
+  return renderCard(`
+    <p class="nc-itin-when">${escapeHtml(formatTimeTijuana(transfer.scheduledAt, lang))} · ${escapeHtml(transferPointName(transferPoints, transfer.meetingPointId, lang))}</p>
+    <p class="${classNames(['nc-itin-what', cancelled && 'nc-itin-what--cancelled'])}">${escapeHtml(t(`transfer.kind.${transfer.kind}`))}</p>
+    <p class="nc-itin-status">
+      ${cancelled ? renderBadge(t('transfer.cancelledBadge'), 'cancelled') : ''}
+      <button type="button" class="nc-link-button" data-nav="transfer">${escapeHtml(t('home.transferCta'))}</button>
+    </p>
+  `, { extraClass: cancelled ? 'nc-card--muted' : '' });
+}
+
 function renderItineraryScreen(ctx) {
-  const { appointments, now, lang, t } = ctx;
-  const groups = groupByDay(appointments, now);
+  const { appointments, transfers, now, lang, t } = ctx;
+  // groupByDay no se tocó: siempre fue genérico (solo lee `startsAt` y
+  // dayKeyTijuana), así que lo que cambia es lo que se le entrega. Un
+  // traslado la víspera abre un día que las citas no tienen, y eso sale
+  // solo de aquí.
+  const groups = groupByDay(timelineItems(appointments, transfers), now);
 
   if (groups.length === 0) {
     return `<section class="nc-screen"><h1 class="nc-screen-title">${escapeHtml(t('itinerary.title'))}</h1><p>${escapeHtml(t('itinerary.empty'))}</p></section>`;
@@ -1516,7 +1861,9 @@ function renderItineraryScreen(ctx) {
     .map(
       (g) => `
       <h2 class="nc-day-header">${escapeHtml(g.label[lang])}</h2>
-      <div class="nc-day-items">${g.items.map((a) => renderAppointmentCard(a, ctx)).join('\n')}</div>
+      <div class="nc-day-items">${g.items.map((item) => (item.kind === 'transfer'
+        ? renderTransferRow(item.entity, ctx)
+        : renderAppointmentCard(item.entity, ctx))).join('\n')}</div>
     `
     )
     .join('\n');
@@ -3590,6 +3937,151 @@ const STAY_CSS = `
 .nc-copy-feedback { margin: 8px 0 0; font-size: 12px; color: var(--nc-teal-ink); font-weight: 700; }
 `;
 
+// --- src/ui/screens/transfer.js ---
+// Etapa G — Mi traslado: lo que el paciente necesita saber cuando el
+// hospital le contrató el coche. A qué hora lo recogen, dónde, quién va por
+// él y en qué vehículo.
+//
+// Ruta sin pestaña, como `stay` y `hours`: no gana un lugar en la barra de
+// 5 pestañas (esa jerarquía la fija el PRD §8) — se llega desde la tarjeta
+// de Inicio o desde el itinerario. Y como `stay`, se niega a pintarse si la
+// llaman sin datos: app.js no debería enrutar aquí sin traslados, pero una
+// pantalla vacía es peor que ninguna.
+//
+// Pinta TODOS los traslados de la visita, no uno: las rutas de este proyecto
+// son hashes sin parámetros (#/transfer), así que no hay forma de pedir
+// "el traslado t_2". Tampoco hace falta — son dos o tres en toda la visita y
+// verlos juntos es más útil que navegar entre ellos.
+
+
+
+
+
+
+
+// wa.me exige solo dígitos; tel: conserva el "+". Dos formatos del mismo
+// número, exactamente como en help.js — el nombre cambia porque build.py
+// aplana todos los módulos de una entrada a un solo scope y `digitsOnly` ya
+// está declarado allá.
+function soloDigitos(e164) {
+  return e164.replace(/[^\d]/g, '');
+}
+
+function renglonTraslado(label, valor, extra = '') {
+  if (!valor) return '';
+  return `<p class="nc-transfer-row"><span>${escapeHtml(label)}</span> ${escapeHtml(valor)}${extra}</p>`;
+}
+
+// Los botones de contacto se omiten en un traslado cancelado, y esa es la
+// línea de código que más importa de esta pantalla: llamarle al chofer de un
+// traslado que ya no va a salir es la llamada que deja al paciente esperando
+// en la banqueta convencido de que alguien viene.
+function contactoTraslado(transfer, t) {
+  const tel = transfer.driver?.phone;
+  if (!tel || transfer.status === 'cancelled') return '';
+  return `
+    <a class="nc-button nc-button--primary nc-button--block" href="${escapeHtml(`https://wa.me/${soloDigitos(tel)}`)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t('transfer.whatsappButton'))}</a>
+    <a class="nc-button nc-button--block" href="${escapeHtml(`tel:${tel}`)}">${escapeHtml(t('transfer.callButton'))}</a>
+  `;
+}
+
+function renderTrasladoCard(transfer, now, lang, t) {
+  const cancelled = transfer.status === 'cancelled';
+  const punto = transferPoints.find((p) => p.id === transfer.meetingPointId) ?? null;
+  const cuando = `${formatDayLabel(transfer.scheduledAt, now, lang)[lang]} · ${formatTimeTijuana(transfer.scheduledAt, lang)}`;
+
+  // El vehículo se arma con lo que haya: la coordinadora captura el traslado
+  // días antes y el coche se asigna la víspera, así que "Van · Toyota" es un
+  // estado normal, no un dato a medias.
+  const vehiculo = [
+    transfer.vehicle?.type ? t(`transfer.vehicleType.${transfer.vehicle.type}`) : '',
+    transfer.vehicle?.make,
+    transfer.vehicle?.model,
+    transfer.vehicle?.color,
+  ].filter(Boolean).join(' · ');
+
+  const placa = transfer.vehicle?.plate;
+  const chofer = transfer.driver?.name;
+
+  return renderCard(`
+    <p class="${classNames(['nc-transfer-kind', cancelled && 'nc-transfer-kind--cancelled'])}">${escapeHtml(t(`transfer.kind.${transfer.kind}`))}</p>
+    ${cancelled ? `<p class="nc-transfer-status">${renderBadge(t('transfer.cancelledBadge'), 'cancelled')}</p>` : ''}
+    <p class="nc-transfer-when">${escapeHtml(cuando)}</p>
+    ${renglonTraslado(
+      t('transfer.meetingPoint'),
+      transferPointName(transferPoints, transfer.meetingPointId, lang),
+      // El punto sin confirmar se marca AQUÍ y no en el catálogo: es la
+      // diferencia entre "voy a Llegadas" y "voy a Llegadas si nadie me
+      // dice otra cosa" (§15.8).
+      punto?.unconfirmed ? ` ${renderUnconfirmedBadge(t)}` : '',
+    )}
+    ${renglonTraslado(t('transfer.flightNumber'), transfer.flightNumber)}
+    ${chofer
+      ? renglonTraslado(t('transfer.driver'), chofer)
+      : `<p class="nc-transfer-pending">${escapeHtml(t('transfer.driverPending'))}</p>`}
+    ${renglonTraslado(t('transfer.vehicle'), vehiculo)}
+    ${placa ? `
+      ${renglonTraslado(t('transfer.plate'), placa)}
+      <button type="button" class="nc-button" data-role="copy-plate" data-plate="${escapeHtml(placa)}" data-transfer-id="${escapeHtml(transfer.id)}">${escapeHtml(t('transfer.copyPlate'))}</button>
+      <p class="nc-copy-feedback" data-role="copy-feedback" data-transfer-id="${escapeHtml(transfer.id)}" hidden>${escapeHtml(t('transfer.copied'))}</p>
+    ` : ''}
+    ${renglonTraslado(t('transfer.notes'), transfer.notes)}
+    ${contactoTraslado(transfer, t)}
+  `, { extraClass: cancelled ? 'nc-card--muted' : '' });
+}
+
+function renderTransferScreen(ctx) {
+  const { transfers, now, lang, t } = ctx;
+  if (!transfers || transfers.length === 0) return '';
+
+  // Copia antes de ordenar: el arreglo viene del expediente y otras
+  // pantallas lo leen en el mismo repintado.
+  const ordenados = [...transfers].sort(
+    (a, b) => instantMs(a.scheduledAt) - instantMs(b.scheduledAt),
+  );
+
+  return `
+    <section class="nc-screen">
+      <h1 class="nc-screen-title">${escapeHtml(t('transfer.title'))}</h1>
+      ${ordenados.map((tr) => renderTrasladoCard(tr, now, lang, t)).join('\n')}
+    </section>
+  `;
+}
+
+// Copiar placas, patrón de stay.js. La diferencia es que aquí hay un botón
+// por traslado, así que la confirmación se busca por data-transfer-id y no
+// con un querySelector suelto: con dos traslados en pantalla, el genérico
+// encendería siempre la del primero.
+function attachTransferScreen(rootEl) {
+  rootEl.querySelectorAll('[data-role="copy-plate"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.plate);
+      } catch {
+        // La Clipboard API puede exigir permiso o gesto del usuario según
+        // el navegador. Si falla, no se rompe la pantalla: simplemente no
+        // se confirma nada.
+        return;
+      }
+      const feedback = rootEl.querySelector(`[data-role="copy-feedback"][data-transfer-id="${btn.dataset.transferId}"]`);
+      if (!feedback) return;
+      feedback.hidden = false;
+      setTimeout(() => { feedback.hidden = true; }, 2000);
+    });
+  });
+}
+
+const TRANSFER_CSS = `
+.nc-transfer-kind { margin: 0 0 6px; font-size: 17px; font-weight: 700; }
+.nc-transfer-kind--cancelled { text-decoration: line-through; opacity: 0.6; }
+.nc-transfer-status { margin: 0 0 8px; }
+.nc-transfer-when { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
+.nc-transfer-row { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; margin: 0 0 8px; }
+.nc-transfer-row span { opacity: 0.7; }
+/* No es un renglón etiqueta/valor: no hay valor todavía, es un aviso. */
+.nc-transfer-pending { margin: 0 0 8px; font-size: 13px; opacity: 0.75; }
+`;
+
 // --- src/ui/theme.js ---
 // Tokens de marca (mismos que la presentación: navy #1C2B53, teal #14BCC4,
 // blanco, tinte #EEF3F8, Barlow) más el armazón de layout. `--nc-teal-ink`
@@ -3753,15 +4245,16 @@ function clearVisitCache(token) {
 // (María, Roberto, Consuelo, Fernando, Alejandra) son nombres de pila
 // genéricos elegidos sin ninguna relación con pacientes reales de
 // NewCity — igual que los tokens, que son cadenas de ejemplo, no valores
-// aleatorios de 128 bits como pide el PRD §6.1 para producción.
+// aleatorios de 128 bits como pide el PRD §6.1 para producción. El chofer
+// de los traslados (Etapa G) es ficticio por lo mismo, y su teléfono es un
+// número de ejemplo: nadie contesta ahí.
 //
 // `Visit.expiresAt` (PRD §7: "derivado, ver R1") se omite a propósito en
 // estos objetos: guardar un valor calculado a mano junto a las citas que
 // lo determinan es la fuente de bugs que R1 ya advierte ("se recalcula
 // cada vez que se agrega, mueve o cancela una cita"). Quien necesite
-// expiresAt lo pide con computeExpiresAt(visit, appointments, lodging)
-// (fase 01) — una sola fuente de verdad, nunca un valor que se puede
-// desincronizar.
+// expiresAt lo pide con computeExpiresAt(expediente) (fase 01) — una sola
+// fuente de verdad, nunca un valor que se puede desincronizar.
 
 function appointment(id, visitId, startsAt, durationMin, serviceName, locationId, status, updatedAt) {
   return { id, visitId, startsAt, durationMin, serviceName, locationId, status, updatedAt };
@@ -3779,6 +4272,25 @@ function pass(id, visitId, scope, format, validFrom, options = {}) {
     validUntil: options.validUntil ?? null,
     revokedAt: options.revokedAt ?? null,
     issuedAt: options.issuedAt ?? validFrom,
+  };
+}
+
+// Etapa G. `driver` y `vehicle` se pasan enteros y no campo por campo
+// porque son opcionales de verdad: la coordinadora captura el traslado
+// días antes y al chofer se lo asignan la víspera, así que { name: '',
+// phone: '' } es un estado normal del dato, no una fixture a medias.
+function transfer(id, visitId, kind, scheduledAt, meetingPointId, options = {}) {
+  return {
+    id,
+    visitId,
+    kind,
+    scheduledAt,
+    meetingPointId,
+    flightNumber: options.flightNumber ?? '',
+    driver: options.driver ?? { name: '', phone: '' },
+    vehicle: options.vehicle ?? { type: '', make: '', model: '', color: '', plate: '' },
+    status: options.status ?? 'scheduled',
+    notes: options.notes ?? '',
   };
 }
 
@@ -3817,6 +4329,31 @@ const v_demo1 = {
     breakfastIncluded: true,
     recoveryRoom: false,
   },
+  // Etapa G — la única fixture con traslados, a propósito: es la que
+  // enseña el prototipo y la que se abre en el navegador sin backend, así
+  // que es donde la pantalla nueva tiene que poder verse. Las otras cuatro
+  // no declaran la llave, y eso también se prueba: son el retrato de un
+  // expediente guardado antes de esta etapa.
+  //
+  // El de regreso recoge en el hotel A LA HORA DEL CHECKOUT. No es
+  // casualidad: un traslado posterior al checkout correría la caducidad
+  // (R1) y el ejemplo trabajado del PRD §8 —expiresAt 2026-03-12T12:00—
+  // dejaría de reproducirse dato por dato. Que R1 SÍ tenga que contar el
+  // traslado de regreso se prueba en test/domain/expiry.test.js, con datos
+  // hechos para eso; esta fixture tiene otro trabajo.
+  transfers: [
+    transfer('t_demo1_in', 'v_demo1', 'arrival', '2026-03-10T06:00-07:00', 'tij_terminal', {
+      flightNumber: 'AM654',
+      driver: { name: 'Juan Pérez', phone: '+526641234567' },
+      vehicle: { type: 'van', make: 'Toyota', model: 'Hiace', color: 'Blanca', plate: 'ABC-123-D' },
+      notes: 'El chofer te espera en Llegadas con un letrero con tu nombre.',
+    }),
+    // Sin chofer todavía: es lo normal dos días antes, y es lo que hace
+    // visible el aviso "Te confirmamos el chofer un día antes".
+    transfer('t_demo1_out', 'v_demo1', 'departure', '2026-03-11T12:00-07:00', 'quartz', {
+      flightNumber: 'AM655',
+    }),
+  ],
 };
 
 // ---------------------------------------------------------------------
@@ -4034,7 +4571,8 @@ async function resolveVisitContext(token, { api, cache, now, catalog = fixtures 
 
 
 
-const ALL_CSS = [THEME_CSS, TABS_CSS, CARD_CSS, BADGE_CSS, FICHA_CSS, HOME_CSS, ITINERARY_CSS, MAP_SCREEN_CSS, PLAZA_CSS, STAY_CSS, HELP_CSS, PASS_SCREEN_CSS].join('\n');
+
+const ALL_CSS = [THEME_CSS, TABS_CSS, CARD_CSS, BADGE_CSS, FICHA_CSS, HOME_CSS, ITINERARY_CSS, MAP_SCREEN_CSS, PLAZA_CSS, STAY_CSS, TRANSFER_CSS, HELP_CSS, PASS_SCREEN_CSS].join('\n');
 
 function injectStylesOnce() {
   if (document.getElementById('nc-styles')) return;
@@ -4055,6 +4593,9 @@ const SCREENS = {
   plaza: { render: renderPlazaScreen, attach: attachPlazaScreen, tab: 'plaza' },
   hours: { render: renderHoursScreen, tab: null },
   stay: { render: renderStayScreen, attach: attachStayScreen, tab: null },
+  // Etapa G — sin pestaña, como stay y hours: la barra de 5 la fija el PRD
+  // §8. Se llega desde la tarjeta de Inicio o desde el itinerario.
+  transfer: { render: renderTransferScreen, attach: attachTransferScreen, tab: null },
   help: { render: renderHelpScreen, tab: 'help' },
   pass: { render: renderPassScreen, attach: attachPassScreen, tab: null },
 };
@@ -4110,13 +4651,17 @@ async function boot(root, {
   // INV-3: un SOLO camino de código para "no existe" y para "venció", y la
   // pantalla ni siquiera recibe cuál de los dos fue (ver screens/
   // neutral.js) — no pueden divergir ni por accidente.
-  if (!resuelto || isExpired(resuelto.record.visit, resuelto.record.appointments, resuelto.record.lodging, now)) {
+  if (!resuelto || isExpired(resuelto.record, now)) {
     document.title = STRINGS[lang].common.appName; // INV-6, igual que en render()
     root.innerHTML = renderNeutralScreen(lang);
     return;
   }
 
+  // `transfers` con `?? []`: un teléfono con la caché anterior a la Etapa G
+  // entrega un expediente sin esa llave, y ninguna pantalla debe enterarse
+  // de la diferencia entre "no tiene traslados" y "esta caché es vieja".
   const { visit, appointments, passes, lodging } = resuelto.record;
+  const transfers = resuelto.record.transfers ?? [];
   const lastViewedKey = LAST_VIEWED_ITINERARY_KEY_PREFIX + visit.id;
   let itineraryStamped = false;
 
@@ -4130,9 +4675,16 @@ async function boot(root, {
       location.hash = '#/home';
       return;
     }
+    // Mismo guard que stay, por lo mismo: un enlace viejo a #/transfer en
+    // una visita sin traslados pintaría una pantalla en blanco con la barra
+    // de pestañas abajo, que parece la app rota y no "esto no aplica".
+    if (route === 'transfer' && transfers.length === 0) {
+      location.hash = '#/home';
+      return;
+    }
     const screen = SCREENS[route];
     const lastViewedItineraryAt = localStorage.getItem(lastViewedKey);
-    const ctx = { visit, appointments, passes, lodging, now, lang, t, lastViewedItineraryAt };
+    const ctx = { visit, appointments, passes, lodging, transfers, now, lang, t, lastViewedItineraryAt };
 
     document.title = STRINGS[lang].common.appName; // constante a propósito: INV-6, nunca nombre de paciente ni de estudio
 

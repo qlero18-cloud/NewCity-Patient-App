@@ -28,7 +28,11 @@ import assert from 'node:assert/strict';
 import { renderVisitSubnav } from '../../../src/ui/coordinatorApp.js';
 import { translate } from '../../../src/ui/i18n.js';
 
-const ROUTES = ['itinerary', 'lodging', 'qpass', 'handoff'];
+// Escrita a mano y NO derivada de SCREENS a propósito: derivarla de la
+// misma fuente que la implementación haría que la prueba pasara sola al
+// agregar una pantalla y no verificaría nada. Se actualiza a mano cada vez
+// que se agrega una ruta de visita — la Etapa G agregó 'transfers'.
+const ROUTES = ['itinerary', 'lodging', 'transfers', 'qpass', 'handoff'];
 
 describe('renderVisitSubnav — todas las rutas siempre presentes, en los dos idiomas', () => {
   test('trae un data-nav por cada ruta de visita sin importar cuál esté activa', () => {

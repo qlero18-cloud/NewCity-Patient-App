@@ -6,14 +6,15 @@ El circuito está cerrado: lo que captura coordinación es lo que ve el paciente
 
 ## Qué SÍ hace
 
-Las siete pantallas del paciente (Inicio, Mi itinerario, Mapa y accesos, Plaza, Horarios, Mi estancia, Ayuda), el panel de coordinación y lo que une a los dos:
+Las ocho pantallas del paciente (Inicio, Mi itinerario, Mapa y accesos, Plaza, Horarios, Mi estancia, Mi traslado, Ayuda), el panel de coordinación y lo que une a los dos:
 
 - Caducidad del enlace, "tu siguiente paso", múltiples QPASS visibles y ruteo por defecto (R1–R7 del PRD), como funciones puras y probadas en `src/domain/` — ver `docs/phases/phase-01-domain-model.md` y `phase-02-routing-engine.md`.
 - Contenido real del complejo (`src/data/`) y datos de ejemplo ficticios que ejercitan cada caso límite del PRD §9 — `phase-03-fixtures.md`.
 - Mapa esquemático interactivo con resaltado sincronizado a la ruta — `phase-04-map-svg.md`.
 - Bilingüe ES/EN con paridad de cadenas probada, tema claro/oscuro, `index.html` autocontenido (cero peticiones a terceros) — `phase-05-patient-ui.md`.
 - QPASS con símbolo QR o Code128 generado sin dependencias externas, con caché para seguir viéndose sin conexión — `phase-06-qpass-render.md`.
-- Panel de coordinadores (`coordinator.html`) — alta de visita, itinerario (agregar, editar, mover, cancelar), hospedaje y emisión de QPASS (subiendo una imagen ya existente), con cuenta propia por persona y todo guardado del lado del servidor. **Ya no es una demo en memoria**: desde la Etapa D lo que se captura sobrevive a recargar la página y a abrirla en otra máquina, y cada cambio queda firmado con quién lo hizo — `phase-09-coordinator-demo.md` describe el flujo de pantallas, que no cambió; lo que cambió está en `docs/DECISIONS.md` D37–D38 y D45–D58.
+- Panel de coordinadores (`coordinator.html`) — alta de visita, itinerario (agregar, editar, mover, cancelar), hospedaje, traslados (alta, edición y cancelación, con chofer y vehículo) y emisión de QPASS (subiendo una imagen ya existente), con cuenta propia por persona y todo guardado del lado del servidor. **Ya no es una demo en memoria**: desde la Etapa D lo que se captura sobrevive a recargar la página y a abrirla en otra máquina, y cada cambio queda firmado con quién lo hizo — `phase-09-coordinator-demo.md` describe el flujo de pantallas, que no cambió; lo que cambió está en `docs/DECISIONS.md` D37–D38 y D45–D58.
+- **El traslado contratado** (Etapa G): si el paciente pagó la recogida de ida y vuelta, la app le dice a qué hora pasan por él, en qué punto de encuentro, con qué vuelo, quién es el chofer y en qué coche —con el teléfono como `tel:` y `wa.me`, y las placas con botón de copiar—. Sale intercalado por hora en el itinerario, junto a las citas, y anunciado en Inicio en su propia tarjeta. El traslado de regreso **cuenta para la caducidad del enlace** (R1): sin eso, la app se apagaba mientras el paciente esperaba el coche, con el teléfono del chofer adentro (D68–D73).
 - **La entrega al paciente**, que es lo que cierra el circuito: una pestaña de la visita con el enlace `https://<sitio>/v/<token>`, su QR en pantalla, copiar al portapapeles y mandar por WhatsApp (D61). El paciente abre ese enlace y `src/ui/app.js` resuelve el token en orden **fixture → red → caché local** (D62): una visita real se busca en el servidor, y una vez cargada sobrevive a quedarse sin señal en el acceso.
 
 ## Qué NO hace (a propósito)
@@ -34,6 +35,8 @@ Todo lo que depende de esto sigue marcado `[POR CONFIRMAR]` / `unconfirmed: true
 5. Cuál número es WhatsApp y cuál Google Voice (hoy se usa el mismo número real de los flyers en los dos campos).
 6. ~~Nombre y ubicación exacta de la farmacia~~ Resuelto: "Farmacia La + Barata" (D26).
 7. Formato real del payload del QPASS y qué lectora lo lee — el generador se acotó a propósito a las versiones 3 y 4, nivel M, modo byte (`docs/DECISIONS.md` D21 y D60) hasta saber qué hace falta de verdad.
+8. Puntos de encuentro de los traslados — falta la **instrucción exacta**, no el lugar: en qué punto de Llegadas del aeropuerto de Tijuana espera el chofer, de qué lado de CBX, y si en San Ysidro es el cruce peatonal o el vehicular. Los tres salen marcados `[POR CONFIRMAR]` en la pantalla del paciente y se corrigen editando solo `src/data/transferPoints.js` (D70). El hotel y el lobby de la Torre ya están confirmados.
+9. **Tratamiento de los datos del chofer** — el traslado guarda nombre y teléfono de un tercero en un expediente que se sirve a cualquiera con el token (D72). No es un bloqueo técnico y la app ya funciona; es una decisión del hospital, del mismo paquete que el tratamiento de datos de salud (LFPDPPP, y lo que aplique del lado de EE.UU. por los pacientes que cruzan).
 
 Ya resuelto (antes listado aquí como hueco entre fases): "tienda de conveniencia" es 7-Eleven (D27) — `docs/DECISIONS.md` D17 queda marcada como resuelta.
 
@@ -172,9 +175,9 @@ Cada fase tiene su propio comando exacto en la sección "Verificación" de `docs
 
 ```bash
 cd "newcity-patient-app"
-npm test                              # los 881 casos automatizados de todas las fases y etapas
+npm test                              # los 1020 casos automatizados de todas las fases y etapas
 python3 build.py --check              # confirma que index.html y coordinator.html están al día
-node test/e2e/patient-journey.mjs     # los 16 pasos del recorrido (10 del paciente + 6 de coordinación)
+node test/e2e/patient-journey.mjs     # los 19 pasos del recorrido (10 del paciente + 6 de coordinación + 3 de traslados)
 ```
 
 Lo que ningún comando automatizado cubre, y que sigue pendiente:

@@ -27,8 +27,14 @@ import {
   setLodging,
   issueQpass,
   revokeQpass,
+  validateTransferInput,
+  addTransfer,
+  editTransfer,
+  cancelTransfer,
   MAX_DURATION_MIN,
   MAX_SERVICE_NAME,
+  MAX_DRIVER_NAME,
+  MAX_PLATE,
 } from '../../src/server/visitMutations.js';
 
 const AHORA = '2026-03-10T09:00:00.000-07:00';
@@ -407,5 +413,303 @@ describe('lo que ninguna mutación debe tocar', () => {
 
     assert.equal(r.visit.token, 'tok');
     assert.equal(r.visit.id, 'v_1');
+  });
+});
+
+// =====================================================================
+// Etapa G — traslados.
+//
+// Dos cosas que estas pruebas fijan y no son obvias:
+//
+//   1. `driver` y `vehicle` son OPCIONALES. La coordinadora aparta el
+//      traslado días antes; al chofer lo asignan la víspera. Exigir el
+//      nombre del chofer para poder guardar la hora de recogida empuja a
+//      inventar uno — el mismo razonamiento que dejó `reservationCode`
+//      opcional en el hospedaje (Etapa A).
+//   2. El teléfono, si viene, tiene que ser E.164 con `+` y clave de país.
+//      La pantalla del paciente lo pinta como `tel:` y como `wa.me/...`:
+//      un "664 123 4567" sin clave manda el WhatsApp a un número de otro
+//      país, y el paciente se entera parado en la banqueta del aeropuerto.
+// =====================================================================
+
+const trasladoValido = () => ({
+  kind: 'arrival',
+  scheduledAt: LUEGO,
+  meetingPointId: 'tij_terminal',
+});
+
+describe('validateTransferInput', () => {
+  test('acepta el mínimo indispensable: qué, cuándo y dónde', () => {
+    assert.deepEqual(validateTransferInput(trasladoValido()), { ok: true, errors: {} });
+  });
+
+  test('acepta el traslado completo, con chofer y vehículo', () => {
+    const r = validateTransferInput({
+      ...trasladoValido(),
+      flightNumber: 'AM 654',
+      driver: { name: 'Juan Pérez', phone: '+526641234567' },
+      vehicle: { type: 'van', make: 'Toyota', model: 'Hiace', color: 'blanca', plate: 'ABC-123-D' },
+      notes: 'Espera en la salida de la banda 3',
+    });
+    assert.deepEqual(r, { ok: true, errors: {} });
+  });
+
+  test('reporta todos los campos malos de una vez, no de uno en uno', () => {
+    const r = validateTransferInput({ kind: 'taxi', scheduledAt: 'mañana', meetingPointId: 'la esquina' });
+    assert.equal(r.ok, false);
+    assert.deepEqual(r.errors, { kind: 'unknown', scheduledAt: 'invalidDate', meetingPointId: 'unknown' });
+  });
+
+  test('sin hora, sin tipo y sin punto: los tres salen como required', () => {
+    const r = validateTransferInput({});
+    assert.deepEqual(r.errors, { kind: 'required', scheduledAt: 'required', meetingPointId: 'required' });
+  });
+
+  test('una hora sin desplazamiento se rechaza — es la que se lee distinta en cada zona', () => {
+    const r = validateTransferInput({ ...trasladoValido(), scheduledAt: '2026-03-10T11:30' });
+    assert.equal(r.errors.scheduledAt, 'noOffset');
+  });
+
+  test('un punto de encuentro con un espacio pegado NO se recorta: es un id de <select>, no texto tecleado', () => {
+    const r = validateTransferInput({ ...trasladoValido(), meetingPointId: 'tij_terminal ' });
+    assert.equal(r.errors.meetingPointId, 'unknown');
+  });
+
+  test('los tres kind del catálogo pasan, cualquier otro no', () => {
+    for (const kind of ['arrival', 'departure', 'internal']) {
+      assert.equal(validateTransferInput({ ...trasladoValido(), kind }).ok, true, kind);
+    }
+    assert.equal(validateTransferInput({ ...trasladoValido(), kind: 'ARRIVAL' }).errors.kind, 'unknown');
+  });
+
+  test('input que no es objeto se rechaza entero', () => {
+    for (const basura of [null, undefined, 'x', 42, ['a']]) {
+      assert.deepEqual(validateTransferInput(basura), { ok: false, errors: { input: 'invalid' } });
+    }
+  });
+
+  describe('chofer', () => {
+    test('sin chofer es válido — todavía no se lo asignan', () => {
+      assert.equal(validateTransferInput(trasladoValido()).ok, true);
+      assert.equal(validateTransferInput({ ...trasladoValido(), driver: {} }).ok, true);
+      assert.equal(validateTransferInput({ ...trasladoValido(), driver: null }).ok, true);
+    });
+
+    test('un teléfono sin clave de país se rechaza: wa.me lo mandaría a otro país', () => {
+      const r = validateTransferInput({ ...trasladoValido(), driver: { name: 'Juan', phone: '664 123 4567' } });
+      assert.equal(r.errors['driver.phone'], 'invalid');
+    });
+
+    test('E.164 con espacios y guiones sí pasa — la gente los escribe así', () => {
+      for (const phone of ['+526641234567', '+52 664 123 4567', '+52-664-123-4567', '+1 619 555 0142']) {
+        assert.equal(validateTransferInput({ ...trasladoValido(), driver: { phone } }).ok, true, phone);
+      }
+    });
+
+    test('un nombre kilométrico se rechaza', () => {
+      const r = validateTransferInput({ ...trasladoValido(), driver: { name: 'x'.repeat(MAX_DRIVER_NAME + 1) } });
+      assert.equal(r.errors['driver.name'], 'tooLong');
+    });
+
+    test('driver que no es objeto se reporta, no se traga', () => {
+      assert.equal(validateTransferInput({ ...trasladoValido(), driver: 'Juan Pérez' }).errors.driver, 'invalid');
+    });
+  });
+
+  describe('vehículo', () => {
+    test('sin vehículo es válido', () => {
+      assert.equal(validateTransferInput({ ...trasladoValido(), vehicle: {} }).ok, true);
+      assert.equal(validateTransferInput({ ...trasladoValido(), vehicle: null }).ok, true);
+    });
+
+    test('un tipo fuera del catálogo se rechaza; los cinco del catálogo pasan', () => {
+      for (const type of ['sedan', 'suv', 'van', 'ambulance', 'other']) {
+        assert.equal(validateTransferInput({ ...trasladoValido(), vehicle: { type } }).ok, true, type);
+      }
+      assert.equal(validateTransferInput({ ...trasladoValido(), vehicle: { type: 'camioneta' } }).errors['vehicle.type'], 'unknown');
+    });
+
+    test('una placa kilométrica se rechaza', () => {
+      const r = validateTransferInput({ ...trasladoValido(), vehicle: { plate: 'A'.repeat(MAX_PLATE + 1) } });
+      assert.equal(r.errors['vehicle.plate'], 'tooLong');
+    });
+
+    test('vehicle que no es objeto se reporta', () => {
+      assert.equal(validateTransferInput({ ...trasladoValido(), vehicle: 'van blanca' }).errors.vehicle, 'invalid');
+    });
+  });
+});
+
+describe('addTransfer', () => {
+  test('agrega el traslado firmado y devuelve la entidad', () => {
+    const r = registro();
+    const res = addTransfer(r, trasladoValido(), ctx({ newId: () => 't_fijo' }));
+
+    assert.equal(res.ok, true);
+    assert.equal(r.transfers.length, 1);
+    assert.deepEqual(r.transfers[0], {
+      id: 't_fijo',
+      visitId: 'v_1',
+      kind: 'arrival',
+      scheduledAt: LUEGO,
+      meetingPointId: 'tij_terminal',
+      flightNumber: '',
+      driver: { name: '', phone: '' },
+      vehicle: { type: '', make: '', model: '', color: '', plate: '' },
+      notes: '',
+      status: 'scheduled',
+      createdAt: AHORA,
+      createdBy: POR,
+      updatedAt: AHORA,
+      updatedBy: POR,
+    });
+    assert.equal(res.transfer, r.transfers[0]);
+  });
+
+  // Lo que hace que desplegar la Etapa G no rompa nada: los expedientes
+  // que hoy están en Blobs se guardaron sin la llave `transfers`.
+  test('un expediente guardado antes de esta etapa no trae la llave y no revienta', () => {
+    const r = registro();
+    assert.equal(r.transfers, undefined, 'la fixture representa un expediente viejo, a propósito');
+    const res = addTransfer(r, trasladoValido(), ctx({ newId: () => 't_fijo' }));
+    assert.equal(res.ok, true);
+    assert.deepEqual(r.transfers.map((t) => t.id), ['t_fijo']);
+  });
+
+  test('no acepta id, status ni createdBy inyectados desde el POST', () => {
+    const r = registro();
+    addTransfer(r, {
+      ...trasladoValido(),
+      id: 't_del_atacante',
+      status: 'cancelled',
+      createdBy: 'alguien más',
+      visitId: 'v_de_otro',
+    }, ctx({ newId: () => 't_fijo' }));
+
+    const t = r.transfers[0];
+    assert.equal(t.id, 't_fijo');
+    assert.equal(t.status, 'scheduled');
+    assert.equal(t.createdBy, POR);
+    assert.equal(t.visitId, 'v_1');
+  });
+
+  test('un traslado inválido no se agrega y devuelve los errores', () => {
+    const r = registro();
+    const res = addTransfer(r, { kind: 'taxi', scheduledAt: LUEGO, meetingPointId: 'cbx' }, ctx());
+    assert.deepEqual(res, { ok: false, errors: { kind: 'unknown' } });
+    assert.equal(r.transfers, undefined, 'un rechazo no debe ni crear la llave');
+  });
+
+  test('recorta los textos libres y deja el número de vuelo en mayúsculas', () => {
+    const r = registro();
+    addTransfer(r, {
+      ...trasladoValido(),
+      flightNumber: '  am 654 ',
+      driver: { name: '  Juan Pérez  ', phone: ' +52 664 123 4567 ' },
+      vehicle: { type: 'van', make: ' Toyota ', model: ' Hiace ', color: ' blanca ', plate: ' abc-123-d ' },
+      notes: '  Banda 3  ',
+    }, ctx({ newId: () => 't_fijo' }));
+
+    const t = r.transfers[0];
+    assert.equal(t.flightNumber, 'AM 654');
+    assert.equal(t.driver.name, 'Juan Pérez');
+    assert.equal(t.driver.phone, '+52 664 123 4567');
+    assert.equal(t.vehicle.plate, 'ABC-123-D', 'las placas se guardan en mayúsculas, como se leen');
+    assert.equal(t.notes, 'Banda 3');
+  });
+});
+
+describe('editTransfer', () => {
+  function conTraslado() {
+    const r = registro();
+    addTransfer(r, trasladoValido(), ctx({ newId: () => 't_fijo' }));
+    return r;
+  }
+
+  test('actualiza los campos y firma quién y cuándo', () => {
+    const r = conTraslado();
+    const res = editTransfer(r, 't_fijo', {
+      kind: 'departure',
+      scheduledAt: '2026-03-11T16:00:00.000-07:00',
+      meetingPointId: 'quartz',
+      driver: { name: 'Beto Lara', phone: '+526649876543' },
+      vehicle: { type: 'suv', make: 'Honda', model: 'CR-V', color: 'gris', plate: 'XYZ-987-K' },
+    }, ctx({ now: LUEGO, by: 'beto.lara' }));
+
+    assert.equal(res.ok, true);
+    const t = r.transfers[0];
+    assert.equal(t.kind, 'departure');
+    assert.equal(t.meetingPointId, 'quartz');
+    assert.equal(t.driver.name, 'Beto Lara');
+    assert.equal(t.vehicle.type, 'suv');
+    assert.equal(t.updatedAt, LUEGO);
+    assert.equal(t.updatedBy, 'beto.lara');
+  });
+
+  test('no reescribe quién lo creó', () => {
+    const r = conTraslado();
+    editTransfer(r, 't_fijo', trasladoValido(), ctx({ now: LUEGO, by: 'beto.lara' }));
+    assert.equal(r.transfers[0].createdBy, POR);
+    assert.equal(r.transfers[0].createdAt, AHORA);
+  });
+
+  test('asignar al chofer después es el caso normal, no una excepción', () => {
+    const r = conTraslado();
+    assert.equal(r.transfers[0].driver.name, '', 'se apartó sin chofer');
+    const res = editTransfer(r, 't_fijo', {
+      ...trasladoValido(),
+      driver: { name: 'Juan Pérez', phone: '+526641234567' },
+    }, ctx({ now: LUEGO, by: POR }));
+    assert.equal(res.ok, true);
+    assert.equal(r.transfers[0].driver.name, 'Juan Pérez');
+  });
+
+  test('un id que no existe es notFound, no un error de validación', () => {
+    const r = conTraslado();
+    assert.deepEqual(editTransfer(r, 't_inventado', trasladoValido(), ctx()), { ok: false, notFound: true });
+  });
+
+  test('datos inválidos no dejan el traslado a medio escribir', () => {
+    const r = conTraslado();
+    const res = editTransfer(r, 't_fijo', { ...trasladoValido(), meetingPointId: 'la esquina' }, ctx({ now: LUEGO }));
+    assert.deepEqual(res, { ok: false, errors: { meetingPointId: 'unknown' } });
+    assert.equal(r.transfers[0].meetingPointId, 'tij_terminal', 'el valor viejo sigue intacto');
+    assert.equal(r.transfers[0].updatedAt, AHORA, 'un rechazo no corre la firma');
+  });
+
+  test('un expediente sin la llave transfers da notFound, no una excepción', () => {
+    const r = registro();
+    assert.deepEqual(editTransfer(r, 't_fijo', trasladoValido(), ctx()), { ok: false, notFound: true });
+  });
+});
+
+describe('cancelTransfer', () => {
+  function conTraslado() {
+    const r = registro();
+    addTransfer(r, trasladoValido(), ctx({ newId: () => 't_fijo' }));
+    return r;
+  }
+
+  // Mismo criterio que cancelAppointment: marca, no borra. Un traslado que
+  // desaparece se lee como un error de la app, y el paciente se planta a
+  // esperar un coche que no va a llegar.
+  test('marca cancelado sin borrar y firma quién', () => {
+    const r = conTraslado();
+    const res = cancelTransfer(r, 't_fijo', ctx({ now: LUEGO, by: 'beto.lara' }));
+
+    assert.equal(res.ok, true);
+    assert.equal(r.transfers.length, 1, 'sigue en el expediente');
+    assert.equal(r.transfers[0].status, 'cancelled');
+    assert.equal(r.transfers[0].updatedAt, LUEGO);
+    assert.equal(r.transfers[0].updatedBy, 'beto.lara');
+  });
+
+  test('un id que no existe es notFound', () => {
+    const r = conTraslado();
+    assert.deepEqual(cancelTransfer(r, 't_inventado', ctx()), { ok: false, notFound: true });
+  });
+
+  test('un expediente sin la llave transfers da notFound, no una excepción', () => {
+    assert.deepEqual(cancelTransfer(registro(), 't_fijo', ctx()), { ok: false, notFound: true });
   });
 });

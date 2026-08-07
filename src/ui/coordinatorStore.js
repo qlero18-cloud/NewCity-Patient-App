@@ -135,7 +135,7 @@ export function createCoordinatorStore({ api }) {
       summaries.set(visit.id, { visit });
       // El expediente recién creado se conoce entero: está vacío porque
       // acaba de nacer, no porque falte pedirlo.
-      records.set(visit.id, { visit, appointments: [], passes: [], lodging: null });
+      records.set(visit.id, { visit, appointments: [], passes: [], lodging: null, transfers: [] });
       // Con token: es lo único que hay para mandarle al paciente y hasta
       // hoy se tiraba a la basura.
       return { ok: true, visit };
@@ -195,6 +195,33 @@ export function createCoordinatorStore({ api }) {
         `/visits/${encodeURIComponent(visitId)}/passes/${encodeURIComponent(passId)}`,
         { action: 'revoke' },
         'qpass',
+      );
+    },
+
+    // ---- traslados (Etapa G) ----
+
+    addTransfer(visitId, input) {
+      return mutar('POST', `/visits/${encodeURIComponent(visitId)}/transfers`, input, 'transfer');
+    },
+
+    editTransfer(visitId, transferId, input) {
+      return mutar(
+        'PATCH',
+        `/visits/${encodeURIComponent(visitId)}/transfers/${encodeURIComponent(transferId)}`,
+        { action: 'edit', ...input },
+        'transfer',
+      );
+    },
+
+    // Cancelar, no borrar, por lo mismo que un pase revocado: el paciente
+    // apartó ese traslado y tiene que verlo tachado. Uno que se esfuma deja
+    // a alguien esperando un coche que nadie canceló "en su pantalla".
+    cancelTransfer(visitId, transferId) {
+      return mutar(
+        'PATCH',
+        `/visits/${encodeURIComponent(visitId)}/transfers/${encodeURIComponent(transferId)}`,
+        { action: 'cancel' },
+        'transfer',
       );
     },
   };

@@ -29,6 +29,7 @@
 // y quien llama no debería adivinar cuál a partir de un null.
 
 import { LOCATION_IDS } from '../data/locations.js';
+import { TRANSFER_POINT_IDS, TRANSFER_KINDS, VEHICLE_TYPES } from '../data/transferPoints.js';
 import { instantMs } from '../domain/time.js';
 
 // Tope alto a propósito: no es una regla clínica, es un cinturón contra un
@@ -36,6 +37,9 @@ import { instantMs } from '../domain/time.js';
 // contra un payload absurdo. 12 horas cubre cualquier estudio real.
 export const MAX_DURATION_MIN = 720;
 export const MAX_SERVICE_NAME = 120;
+export const MAX_DRIVER_NAME = 120;
+export const MAX_PLATE = 20;
+export const MAX_TRANSFER_NOTES = 280;
 
 // Formatos que sabe pintar src/ui/screens/pass.js. Coordinación solo emite
 // 'image' (D29), pero las fixtures traen los otros dos y el registro los
@@ -266,6 +270,160 @@ export function issueQpass(record, input, { now, by, newId }) {
 
   record.passes.push(qpass);
   return { ok: true, qpass };
+}
+
+// ---------------------------------------------------------------------
+// Etapa G — traslados (aeropuerto ↔ hospital).
+// ---------------------------------------------------------------------
+
+// E.164 con clave de país. Se permiten espacios y guiones porque la gente
+// los escribe así, pero el `+` NO es opcional: src/ui/screens/transfer.js
+// pinta este número como `tel:` y como `wa.me/<dígitos>`, y un "664 123
+// 4567" sin clave manda el WhatsApp a un número de otro país. El paciente
+// se enteraría parado en la banqueta del aeropuerto (D73).
+function telefonoValido(raw) {
+  if (!/^\+[\d\s-]+$/.test(raw)) return false;
+  const digitos = raw.replace(/\D/g, '').length;
+  return digitos >= 8 && digitos <= 15;
+}
+
+// `driver` y `vehicle` son OPCIONALES a propósito: la coordinadora aparta
+// el traslado días antes y al chofer se lo asignan la víspera. Exigir el
+// nombre del chofer para poder guardar la hora de recogida empuja a
+// inventar uno — mismo razonamiento que dejó `reservationCode` opcional en
+// el hospedaje. Lo obligatorio es qué, cuándo y dónde.
+function validarSubobjeto(valor, campo, errors, reglas) {
+  if (valor === undefined || valor === null) return;
+  if (!esObjeto(valor)) {
+    errors[campo] = 'invalid';
+    return;
+  }
+  for (const regla of reglas) regla(valor, errors);
+}
+
+export function validateTransferInput(input) {
+  if (!esObjeto(input)) return { ok: false, errors: { input: 'invalid' } };
+
+  const errors = {};
+
+  const fecha = checkFecha(trimmed(input.scheduledAt));
+  if (fecha) errors.scheduledAt = fecha;
+
+  // kind y meetingPointId salen de un <select>: no se recortan, por lo
+  // mismo que locationId en las citas. Un id con un espacio pegado
+  // significa que algo upstream está roto y tragárselo esconde el bug.
+  const kind = input.kind;
+  if (kind === undefined || kind === null || kind === '') errors.kind = 'required';
+  else if (!TRANSFER_KINDS.includes(kind)) errors.kind = 'unknown';
+
+  const punto = input.meetingPointId;
+  if (punto === undefined || punto === null || punto === '') errors.meetingPointId = 'required';
+  else if (!TRANSFER_POINT_IDS.includes(punto)) errors.meetingPointId = 'unknown';
+
+  validarSubobjeto(input.driver, 'driver', errors, [
+    (d, e) => {
+      const nombre = trimmed(d.name);
+      if (nombre.length > MAX_DRIVER_NAME) e['driver.name'] = 'tooLong';
+    },
+    (d, e) => {
+      const tel = trimmed(d.phone);
+      if (tel && !telefonoValido(tel)) e['driver.phone'] = 'invalid';
+    },
+  ]);
+
+  validarSubobjeto(input.vehicle, 'vehicle', errors, [
+    (v, e) => {
+      const tipo = v.type;
+      if (tipo !== undefined && tipo !== null && tipo !== '' && !VEHICLE_TYPES.includes(tipo)) {
+        e['vehicle.type'] = 'unknown';
+      }
+    },
+    (v, e) => {
+      if (trimmed(v.plate).length > MAX_PLATE) e['vehicle.plate'] = 'tooLong';
+    },
+  ]);
+
+  if (trimmed(input.notes).length > MAX_TRANSFER_NOTES) errors.notes = 'tooLong';
+
+  return { ok: Object.keys(errors).length === 0, errors };
+}
+
+// Los campos del traslado que vienen del formulario, ya normalizados. Se
+// arma campo por campo y nunca esparciendo `input`, igual que las citas: un
+// POST puede traer `status: 'cancelled'`, `createdBy: 'alguien más'` o un
+// `id` a modo, y esparcirlo los dejaría entrar.
+function camposTraslado(input) {
+  const driver = esObjeto(input.driver) ? input.driver : {};
+  const vehicle = esObjeto(input.vehicle) ? input.vehicle : {};
+  return {
+    kind: input.kind,
+    scheduledAt: trimmed(input.scheduledAt),
+    meetingPointId: input.meetingPointId,
+    // Vuelo y placas en mayúsculas porque así se leen en la pantalla del
+    // aeropuerto y en la defensa del coche; guardarlos como se tecleen
+    // dejaría "am654" al lado de "AM 654" para el mismo vuelo.
+    flightNumber: trimmed(input.flightNumber).toUpperCase(),
+    driver: { name: trimmed(driver.name), phone: trimmed(driver.phone) },
+    vehicle: {
+      type: trimmed(vehicle.type),
+      make: trimmed(vehicle.make),
+      model: trimmed(vehicle.model),
+      color: trimmed(vehicle.color),
+      plate: trimmed(vehicle.plate).toUpperCase(),
+    },
+    notes: trimmed(input.notes),
+  };
+}
+
+// Los expedientes guardados antes de esta etapa no traen la llave: se lee
+// con `?? []` en todas partes y solo se crea al agregar el primero. Así,
+// desplegar la Etapa G no reescribe ni un registro de Blobs.
+function buscarTraslado(record, transferId) {
+  return (record.transfers ?? []).find((t) => t.id === transferId) ?? null;
+}
+
+export function addTransfer(record, input, { now, by, newId }) {
+  const { ok, errors } = validateTransferInput(input);
+  if (!ok) return { ok: false, errors };
+
+  const transfer = {
+    id: newId('t'),
+    visitId: record.visit.id,
+    ...camposTraslado(input),
+    status: 'scheduled',
+    createdAt: now,
+    createdBy: by,
+    updatedAt: now,
+    updatedBy: by,
+  };
+
+  if (!record.transfers) record.transfers = [];
+  record.transfers.push(transfer);
+  return { ok: true, transfer };
+}
+
+export function editTransfer(record, transferId, input, { now, by }) {
+  const transfer = buscarTraslado(record, transferId);
+  if (!transfer) return { ok: false, notFound: true };
+
+  const { ok, errors } = validateTransferInput(input);
+  if (!ok) return { ok: false, errors };
+
+  Object.assign(transfer, camposTraslado(input), { updatedAt: now, updatedBy: by });
+  return { ok: true, transfer };
+}
+
+// Cancelar marca, no borra — mismo criterio que cancelAppointment. Un
+// traslado que desaparece del itinerario se lee como un error de la app, y
+// el paciente se planta a esperar un coche que ya no va a llegar.
+export function cancelTransfer(record, transferId, { now, by }) {
+  const transfer = buscarTraslado(record, transferId);
+  if (!transfer) return { ok: false, notFound: true };
+
+  transfer.status = 'cancelled';
+  transfer.updatedAt = now;
+  transfer.updatedBy = by;
+  return { ok: true, transfer };
 }
 
 // Revocar tampoco borra: un pase emitido es historia de la visita, y quién
