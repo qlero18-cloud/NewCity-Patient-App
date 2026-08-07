@@ -45,7 +45,7 @@ Los generadores se escriben sin dependencias: la página se publica con CSP estr
 - [ ] Un pase con `validUntil` en el pasado tampoco se muestra desde caché
 - [ ] Un pase con `validUntil: null` **sí** se muestra desde caché, sin importar cuántos días lleve guardado; prueba explícita con 7 días transcurridos
 - [ ] Con dos pases válidos se puede pasar de uno a otro
-- [ ] **Prueba física:** una lectora real lee el símbolo desde la pantalla de un teléfono, a brillo normal de interior
+- [ ] **Prueba física:** una lectora real lee el símbolo desde la pantalla de un teléfono, a brillo normal de interior — con un QPASS **real** (D31: la imagen que suba una coordinadora, fase 09), no el QR generado por `qr.js` a partir de un `payload` de fixture. Ese QR sigue verificado módulo a módulo (ver abajo), pero probarlo contra la lectora real no confirmaría nada: no está ligado a ningún acceso real del edificio
 
 ## Verificación
 
@@ -56,3 +56,5 @@ cd "newcity-patient-app" && node --test 'test/render/**/*.test.js' 'test/ui/pass
 > Mismo ajuste de tooling que las fases anteriores (ver nota en phase-01-domain-model.md): `test/render/` como ruta de directorio falla con `MODULE_NOT_FOUND` en este Node, así que se usa el patrón glob.
 
 La prueba de decodificación es automática — y va más allá del redondeo contra el propio decodificador (que no distingue un algoritmo bien hecho de un malentendido compartido entre encoder y decoder): el símbolo QR se verificó módulo a módulo contra `nayuki/QR-Code-generator` (librería de referencia externa, MIT) y decodificándolo con `cv2.QRCodeDetector` de OpenCV; el Code128 se generó con la tabla de patrones de `python-barcode` (también externa). La prueba física con lectora real la hace el cliente en sitio; sin ella la fase no se declara terminada, porque es la única forma de saber si el pase realmente abre la puerta.
+
+D31 (fase 09): el cliente probó `qr-demo.png` en su teléfono (URL, ícono al agregar a inicio) pero no intentó la prueba física de este criterio, porque el QR de esta fase sale de un `payload` de fixture (`payload-q1` etc., `src/data/fixtures.js`) — no un QPASS real emitido por NewCity, así que no hay ningún acceso real que debiera abrir. Confirma, desde el otro lado, la decisión de fase 09: el QPASS real es una imagen que sube la coordinadora (`QPass.format: 'image'`), no un `payload` que este generador codifique. La prueba física de este criterio queda bloqueada hasta que exista esa imagen real, no hasta que el cliente tenga tiempo de probar con la de fixture — son cosas distintas.
