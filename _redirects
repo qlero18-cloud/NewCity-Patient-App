@@ -1,1 +1,17 @@
+# Etapa E — el enlace que la coordinadora le manda al paciente.
+#
+# La pantalla de entrega (src/ui/screens/coordinator/handoff.js) arma
+# https://<sitio>/v/<token>: corta, legible en un mensaje de WhatsApp y lo
+# bastante chica para caber en un QR versión 4 (62 bytes). src/ui/app.js
+# lee el token de ?p=, así que esta regla es la que une las dos puntas.
+#
+# 302 y NO 200. Un rewrite (200) sirve la página pero deja la barra del
+# navegador en /v/<token>: params.get('p') devolvería null y el paciente
+# vería "este enlace no está disponible" con un enlace perfectamente
+# válido en la mano. Guardado en test/deploy/redirects.test.js, porque esto
+# no falla en local ni en las pruebas — solo en producción.
+/v/*   /?p=:splat  302
+
+# Atajo de demostración con hora congelada: abre la visita de fixture, no
+# una real. Sigue sirviendo para enseñar la app sin dar de alta a nadie.
 /demo  /?p=fixture-token-v-demo1&now=2026-03-10T10:00-07:00  302

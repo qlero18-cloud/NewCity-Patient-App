@@ -3,7 +3,9 @@
 // Itinerario a Hospedaje o QPASS (o viceversa) para una misma visita, solo
 // el botón "volver a visitas" del encabezado (ver docs/DECISIONS.md D36).
 // Este archivo prueba renderVisitSubnav(route, t) (src/ui/coordinatorApp.
-// js), la pieza pura que arma esos tres botones. Mismo criterio que el
+// js), la pieza pura que arma esos botones. La Etapa E agregó un cuarto,
+// 'handoff' (Enviar al paciente), sin tocar renderVisitSubnav: la lista
+// sale de SCREENS, así que basta con registrar la pantalla. Mismo criterio que el
 // resto de test/ui/coordinator/*.test.js (ver la nota en
 // test/ui/plaza.test.js): este proyecto no trae un DOM falso para
 // node:test, así que lo que se prueba aquí son aserciones de substring
@@ -26,17 +28,17 @@ import assert from 'node:assert/strict';
 import { renderVisitSubnav } from '../../../src/ui/coordinatorApp.js';
 import { translate } from '../../../src/ui/i18n.js';
 
-const ROUTES = ['itinerary', 'lodging', 'qpass'];
+const ROUTES = ['itinerary', 'lodging', 'qpass', 'handoff'];
 
-describe('renderVisitSubnav — las tres rutas siempre presentes, en los dos idiomas', () => {
-  test('trae data-nav="itinerary", data-nav="lodging" y data-nav="qpass" sin importar cuál esté activa', () => {
+describe('renderVisitSubnav — todas las rutas siempre presentes, en los dos idiomas', () => {
+  test('trae un data-nav por cada ruta de visita sin importar cuál esté activa', () => {
     for (const lang of ['es', 'en']) {
       const t = (path) => translate(lang, path);
       for (const active of ROUTES) {
         const html = renderVisitSubnav(active, t);
-        assert.ok(html.includes('data-nav="itinerary"'), `falta data-nav="itinerary" (activo: ${active}, ${lang})`);
-        assert.ok(html.includes('data-nav="lodging"'), `falta data-nav="lodging" (activo: ${active}, ${lang})`);
-        assert.ok(html.includes('data-nav="qpass"'), `falta data-nav="qpass" (activo: ${active}, ${lang})`);
+        for (const route of ROUTES) {
+          assert.ok(html.includes(`data-nav="${route}"`), `falta data-nav="${route}" (activo: ${active}, ${lang})`);
+        }
       }
     }
   });
@@ -45,23 +47,26 @@ describe('renderVisitSubnav — las tres rutas siempre presentes, en los dos idi
     for (const lang of ['es', 'en']) {
       const t = (path) => translate(lang, path);
       const html = renderVisitSubnav('itinerary', t);
-      assert.ok(html.includes(translate(lang, 'coordinator.itinerary.title')), `falta el título de itinerario en ${lang}`);
-      assert.ok(html.includes(translate(lang, 'coordinator.lodging.title')), `falta el título de hospedaje en ${lang}`);
-      assert.ok(html.includes(translate(lang, 'coordinator.qpass.title')), `falta el título de qpass en ${lang}`);
+      for (const route of ROUTES) {
+        // Cada botón reusa el <h1> de su propia pantalla; una llave nueva
+        // aquí significaría dos textos para lo mismo.
+        assert.ok(html.includes(translate(lang, `coordinator.${route}.title`)), `falta el título de ${route} en ${lang}`);
+      }
     }
   });
 });
 
 describe('renderVisitSubnav — estado activo', () => {
-  test('aria-selected="true" solo en la ruta activa, "false" en las otras dos', () => {
+  test('aria-selected="true" solo en la ruta activa, "false" en las demás', () => {
     const t = (path) => translate('es', path);
     const html = renderVisitSubnav('lodging', t);
     assert.match(html, /data-nav="lodging"[^>]*aria-selected="true"/);
-    assert.match(html, /data-nav="itinerary"[^>]*aria-selected="false"/);
-    assert.match(html, /data-nav="qpass"[^>]*aria-selected="false"/);
+    for (const route of ROUTES.filter((r) => r !== 'lodging')) {
+      assert.match(html, new RegExp(`data-nav="${route}"[^>]*aria-selected="false"`), `${route} no debería quedar activa`);
+    }
   });
 
-  test('cada una de las tres rutas puede quedar activa', () => {
+  test('cada una de las rutas puede quedar activa', () => {
     const t = (path) => translate('es', path);
     for (const active of ROUTES) {
       const html = renderVisitSubnav(active, t);
@@ -69,7 +74,7 @@ describe('renderVisitSubnav — estado activo', () => {
     }
   });
 
-  test('una ruta ajena (p.ej. "visits") no marca ninguna de las tres como activa', () => {
+  test('una ruta ajena (p.ej. "visits") no marca ninguna como activa', () => {
     const t = (path) => translate('es', path);
     const html = renderVisitSubnav('visits', t);
     for (const route of ROUTES) {

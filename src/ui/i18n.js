@@ -242,6 +242,30 @@ export const STRINGS = {
           read: 'No se pudo leer el archivo. Inténtalo otra vez.',
         },
       },
+      // Etapa E — la entrega al paciente. `waMessage` es una función
+      // porque interpola dos cosas (nombre y enlace) y el orden de esas
+      // dos piezas cambia entre idiomas; concatenar afuera obligaría a la
+      // pantalla a decidir ese orden, que es justo lo que este archivo
+      // existe para no hacer.
+      //
+      // Este mensaje es el ÚNICO texto de todo el archivo que se pinta en
+      // el idioma del paciente estando el panel en otro: la coordinadora
+      // puede tener la interfaz en español y estar atendiendo a alguien
+      // que solo lee inglés (ver src/ui/screens/coordinator/handoff.js).
+      handoff: {
+        title: 'Enviar al paciente',
+        intro: 'Manda este enlace al paciente. Al abrirlo en su teléfono ve su itinerario, el mapa del complejo y su pase de acceso.',
+        linkLabel: 'Enlace de la visita',
+        copy: 'Copiar enlace',
+        copied: 'Enlace copiado.',
+        whatsapp: 'Enviar por WhatsApp',
+        qrHint: 'O deja que lo escanee con la cámara de su teléfono.',
+        qrTooLong: 'Este enlace es demasiado largo para caber en un código QR. Cópialo y mándalo como texto.',
+        noToken: 'Esta visita no trae enlace. Recarga la página; si sigue igual, avisa a sistemas.',
+        noOrigin: 'Abre el panel desde su dirección web (https://…) para poder armar el enlace del paciente.',
+        waMessage: (nombre, enlace) =>
+          `Hola ${nombre}: aquí está tu guía de visita en NewCity Hospital — itinerario, mapa y pase de acceso. Ábrela en tu teléfono: ${enlace}`,
+      },
     },
   },
   en: {
@@ -445,6 +469,20 @@ export const STRINGS = {
           size: 'That image is too large. Use one under 2 MB.',
           read: 'We couldn’t read that file. Please try again.',
         },
+      },
+      handoff: {
+        title: 'Send to patient',
+        intro: 'Send this link to the patient. Opening it on their phone shows their itinerary, the campus map and their access pass.',
+        linkLabel: 'Visit link',
+        copy: 'Copy link',
+        copied: 'Link copied.',
+        whatsapp: 'Send on WhatsApp',
+        qrHint: 'Or let them scan it with their phone camera.',
+        qrTooLong: 'This link is too long to fit in a QR code. Copy it and send it as text.',
+        noToken: 'This visit has no link. Reload the page; if it stays this way, tell IT.',
+        noOrigin: 'Open the panel from its web address (https://…) so the patient link can be built.',
+        waMessage: (name, link) =>
+          `Hi ${name}, here's your NewCity Hospital visit guide — itinerary, map and access pass. Open it on your phone: ${link}`,
       },
     },
   },

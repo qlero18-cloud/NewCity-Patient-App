@@ -16,184 +16,6 @@
 <div id="app"></div>
 <script>
 (function () {
-// --- src/data/fixtures.js ---
-// Visitas ficticias para el prototipo y las pruebas (PRD §7 Visit /
-// Appointment / QPass / Lodging). En el MVP real esto lo sustituye el
-// panel de coordinadores (fase 08).
-//
-// TODOS los pacientes de este archivo son ficticios. Los nombres
-// (María, Roberto, Consuelo, Fernando, Alejandra) son nombres de pila
-// genéricos elegidos sin ninguna relación con pacientes reales de
-// NewCity — igual que los tokens, que son cadenas de ejemplo, no valores
-// aleatorios de 128 bits como pide el PRD §6.1 para producción.
-//
-// `Visit.expiresAt` (PRD §7: "derivado, ver R1") se omite a propósito en
-// estos objetos: guardar un valor calculado a mano junto a las citas que
-// lo determinan es la fuente de bugs que R1 ya advierte ("se recalcula
-// cada vez que se agrega, mueve o cancela una cita"). Quien necesite
-// expiresAt lo pide con computeExpiresAt(visit, appointments, lodging)
-// (fase 01) — una sola fuente de verdad, nunca un valor que se puede
-// desincronizar.
-
-function appointment(id, visitId, startsAt, durationMin, serviceName, locationId, status, updatedAt) {
-  return { id, visitId, startsAt, durationMin, serviceName, locationId, status, updatedAt };
-}
-
-function pass(id, visitId, scope, format, validFrom, options = {}) {
-  return {
-    id,
-    visitId,
-    appointmentId: null,
-    format,
-    payload: `payload-${id}`,
-    scope,
-    validFrom,
-    validUntil: options.validUntil ?? null,
-    revokedAt: options.revokedAt ?? null,
-    issuedAt: options.issuedAt ?? validFrom,
-  };
-}
-
-// ---------------------------------------------------------------------
-// v_demo1 — la visita del PRD §8, dato por dato. Es la que enseña el
-// prototipo, y las pruebas de fase 01 la reproducen inline: si algo aquí
-// se desalinea con el PRD, las pruebas de expiry/nextStep/passes de fase
-// 01 y las de esta fase dejan de coincidir.
-// ---------------------------------------------------------------------
-const v_demo1 = {
-  visit: {
-    id: 'v_demo1',
-    token: 'fixture-token-v-demo1',
-    patientFirstName: 'María',
-    lang: 'es',
-    startsAt: '2026-03-10T08:00-07:00',
-    endsAt: '2026-03-11T09:30-07:00',
-    status: 'active',
-  },
-  appointments: [
-    appointment('a1', 'v_demo1', '2026-03-10T08:00-07:00', 45, 'Laboratorio', 'compass', 'scheduled', '2026-03-01T00:00-08:00'),
-    appointment('a2', 'v_demo1', '2026-03-10T09:30-07:00', 60, 'Resonancia magnética', 'compass', 'scheduled', '2026-03-01T00:00-08:00'),
-    appointment('a3', 'v_demo1', '2026-03-10T12:00-07:00', 30, 'Consulta de Medicina Interna', 'piso27', 'scheduled', '2026-03-01T00:00-08:00'),
-    appointment('a4', 'v_demo1', '2026-03-11T09:00-07:00', 30, 'Consulta de Cardiología', 'piso27', 'scheduled', '2026-03-01T00:00-08:00'),
-  ],
-  passes: [
-    pass('q1', 'v_demo1', 'torre', 'qr', '2026-03-10T06:00-07:00'),
-    pass('q2', 'v_demo1', 'estacionamiento', 'code128', '2026-03-10T06:00-07:00'),
-  ],
-  lodging: {
-    visitId: 'v_demo1',
-    hotel: 'Quartz Hotel & Spa',
-    reservationCode: 'QZ-8841-MX',
-    checkIn: '2026-03-10T15:00-07:00',
-    checkOut: '2026-03-11T12:00-07:00',
-    breakfastIncluded: true,
-    recoveryRoom: false,
-  },
-};
-
-// ---------------------------------------------------------------------
-// v_demo2 — sin hospedaje, un solo día, una cancelada (b2) y una movida
-// (b3, con updatedAt reflejando el cambio). Ejercita "Mi estancia no
-// aparece", la cita tachada, el distintivo "actualizado" y R1 caso 1g.
-// ---------------------------------------------------------------------
-const v_demo2 = {
-  visit: {
-    id: 'v_demo2',
-    token: 'fixture-token-v-demo2',
-    patientFirstName: 'Roberto',
-    lang: 'es',
-    startsAt: '2026-04-06T09:00-07:00',
-    endsAt: '2026-04-06T13:30-07:00',
-    status: 'active',
-  },
-  appointments: [
-    appointment('b1', 'v_demo2', '2026-04-06T09:00-07:00', 30, 'Laboratorio', 'compass', 'scheduled', '2026-04-01T00:00-07:00'),
-    appointment('b2', 'v_demo2', '2026-04-06T10:00-07:00', 30, 'Estudios de imagen', 'compass', 'cancelled', '2026-04-05T18:00-07:00'),
-    // b3 se movió de 11:00 a 13:00 la mañana de la visita: updatedAt es
-    // posterior a cuando un paciente normalmente ya habría visto su
-    // itinerario, para que el distintivo "actualizado" tenga sentido.
-    appointment('b3', 'v_demo2', '2026-04-06T13:00-07:00', 30, 'Consulta con especialista', 'piso27', 'scheduled', '2026-04-06T08:30-07:00'),
-  ],
-  passes: [pass('qb1', 'v_demo2', 'torre', 'qr', '2026-04-06T07:00-07:00')],
-  lodging: null,
-};
-
-// ---------------------------------------------------------------------
-// v_longstay — última cita el día 2, checkout el día 5. Ejercita el caso
-// 1f de R1 (el checkout manda por mucho margen) y que el pase sin
-// caducidad siga visible el último día de una estancia larga.
-// ---------------------------------------------------------------------
-const v_longstay = {
-  visit: {
-    id: 'v_longstay',
-    token: 'fixture-token-v-longstay',
-    patientFirstName: 'Consuelo',
-    lang: 'es',
-    startsAt: '2026-05-04T10:00-07:00',
-    endsAt: '2026-05-05T09:30-07:00',
-    status: 'active',
-  },
-  appointments: [
-    appointment('c1', 'v_longstay', '2026-05-04T10:00-07:00', 45, 'Laboratorio', 'compass', 'scheduled', '2026-05-01T00:00-07:00'),
-    appointment('c2', 'v_longstay', '2026-05-05T09:00-07:00', 30, 'Consulta con especialista', 'piso27', 'scheduled', '2026-05-01T00:00-07:00'),
-  ],
-  passes: [pass('qc1', 'v_longstay', 'torre', 'qr', '2026-05-04T08:00-07:00')],
-  lodging: {
-    visitId: 'v_longstay',
-    hotel: 'Quartz Hotel & Spa',
-    reservationCode: 'QZ-9012-MX',
-    checkIn: '2026-05-04T15:00-07:00',
-    checkOut: '2026-05-08T12:00-07:00', // día 5 (día 1 = 4 de mayo)
-    breakfastIncluded: true,
-    recoveryRoom: true,
-  },
-};
-
-// ---------------------------------------------------------------------
-// v_expired — expiresAt ya pasó. Sirve para probar la pantalla neutra
-// (INV-3). Fecha en enero (horario estándar, -08:00) a propósito: da
-// cobertura real de horario estándar además de la de verano de v_demo1.
-// ---------------------------------------------------------------------
-const v_expired = {
-  visit: {
-    id: 'v_expired',
-    token: 'fixture-token-v-expired',
-    patientFirstName: 'Fernando',
-    lang: 'es',
-    startsAt: '2026-01-12T09:00-08:00',
-    endsAt: '2026-01-12T09:30-08:00',
-    status: 'active',
-  },
-  appointments: [appointment('e1', 'v_expired', '2026-01-12T09:00-08:00', 30, 'Laboratorio', 'compass', 'scheduled', '2026-01-01T00:00-08:00')],
-  passes: [pass('qe1', 'v_expired', 'torre', 'qr', '2026-01-12T07:00-08:00')],
-  lodging: null,
-};
-
-// ---------------------------------------------------------------------
-// v_revoked — un QPASS revocado (qf1) y uno activo (qf2). Ejercita INV-4
-// y el caso 3b: el revocado no debe verse ni desde caché.
-// ---------------------------------------------------------------------
-const v_revoked = {
-  visit: {
-    id: 'v_revoked',
-    token: 'fixture-token-v-revoked',
-    patientFirstName: 'Alejandra',
-    lang: 'en',
-    startsAt: '2026-06-09T10:00-07:00',
-    endsAt: '2026-06-09T10:30-07:00',
-    status: 'active',
-  },
-  appointments: [appointment('f1', 'v_revoked', '2026-06-09T10:00-07:00', 30, 'Laboratorio', 'compass', 'scheduled', '2026-06-01T00:00-07:00')],
-  passes: [
-    pass('qf1', 'v_revoked', 'torre', 'qr', '2026-06-09T06:00-07:00', { revokedAt: '2026-06-09T14:00-07:00' }),
-    pass('qf2', 'v_revoked', 'estacionamiento', 'code128', '2026-06-09T06:00-07:00'),
-  ],
-  lodging: null,
-};
-
-const fixtures = { v_demo1, v_demo2, v_longstay, v_expired, v_revoked };
-const FIXTURE_IDS = Object.keys(fixtures);
-
 // --- src/domain/time.js ---
 // Formato y aritmética de horas en America/Tijuana (PRD §7.1 INV-5, R6).
 //
@@ -514,6 +336,182 @@ function visiblePasses(passes, now) {
 // Superficie pública del dominio (Fase 01). Todo lo que vive fuera de
 // src/domain/ debe importar de aquí, no de los archivos internos, salvo
 // las propias pruebas de fase 01 (que verifican cada módulo por separado).
+
+// --- src/ui/visitRecord.js ---
+// Etapa E — "¿esto tiene forma de expediente?", preguntado en los dos
+// bordes por donde puede entrar uno que no lo sea:
+//
+//   - api.js, cuando el servidor contesta 200 con algo que no es lo que
+//     dice ser (proxy, portal cautivo del wifi del hospital).
+//   - visitCache.js, cuando lo guardado lo escribió una versión anterior
+//     de la app, quedó truncado, o alguien lo editó a mano.
+//
+// Está en un módulo propio y no copiado en los dos porque es exactamente
+// el tipo de predicado que se arregla en un lado y se olvida en el otro:
+// el día que las pantallas empiecen a dar por hecho un campo más, hay UN
+// lugar donde agregarlo.
+//
+// Valida solo lo que las pantallas dan por hecho sin preguntar. No valida
+// el contenido —eso ya lo hizo el servidor al guardarlo— sino que exista
+// la estructura sobre la que renderHomeScreen y compañía iteran a ciegas.
+
+function isVisitRecord(value) {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && value.visit
+    && typeof value.visit.id === 'string'
+    && Array.isArray(value.appointments)
+    && Array.isArray(value.passes)
+  );
+}
+
+// --- src/ui/api.js ---
+// Etapa D — el transporte HTTP del panel. Lo único de src/ui/ que toca la
+// red, y a propósito: coordinatorStore.js recibe esto inyectado, así que se
+// prueba entero sin fetch y sin fake DOM.
+//
+// createHttpApi devuelve `{ status, body }` crudo y NO interpreta nada.
+// Quién decide que un 422 es "corrige el formulario" y un 401 es "vuelve a
+// entrar" es el store; aquí solo se traduce de Response a objeto. Meter esa
+// decisión en las dos capas es garantizar que un día no coincidan.
+//
+// createVisitApi (Etapa E, al final del archivo) sí interpreta, y ahí se
+// explica por qué el lado paciente es distinto.
+
+
+const FALLA_LECTURA = 'respuesta ilegible del servidor';
+
+// Dos bases, porque son dos Functions distintas: coordinator.mjs atiende
+// /api/coordinator/* y auth.mjs atiende /api/auth/*. Están aquí como
+// constantes con nombre y no incrustadas en una cadena porque boot() ya se
+// equivocó una vez: reusó el api de coordinación para el cliente de acceso
+// y el panel entró a /api/coordinator/login, que no existe. La pantalla se
+// veía bien y ningún test lo veía (test/ui/api.test.js lo fija ahora,
+// contra las constantes que exporta el servidor).
+const COORDINATOR_BASE = '/api/coordinator';
+const AUTH_BASE = '/api/auth';
+
+function createHttpApi({ fetch: fetchImpl = globalThis.fetch, base = COORDINATOR_BASE } = {}) {
+  return {
+    async request(method, path, body) {
+      const init = {
+        method,
+        // La sesión es una cookie HttpOnly firmada (Etapa C): el navegador
+        // solo la manda si se le pide. Sin esta línea TODO contesta 401 y
+        // el síntoma que se ve —"el panel no guarda"— no apunta para acá.
+        credentials: 'same-origin',
+      };
+
+      // Sin cuerpo en GET: `new Request` lo prohíbe, y mandar content-type
+      // sin cuerpo convierte una petición simple en una con preflight sin
+      // ganar nada a cambio.
+      if (body !== undefined) {
+        init.headers = { 'content-type': 'application/json' };
+        init.body = JSON.stringify(body);
+      }
+
+      // Un fallo de red (fetch rechaza) sube tal cual: el store lo atrapa y
+      // lo reporta como falla. Envolverlo aquí en un `{status: 0}` inventado
+      // sería fabricar una respuesta que nunca existió.
+      const res = await fetchImpl(`${base}${path}`, init);
+
+      // 204 no tiene cuerpo y eso no es un error: es lo que contesta
+      // logout.
+      if (res.status === 204) return { status: 204, body: null };
+
+      let parsed = null;
+      let ilegible = false;
+      try {
+        parsed = await res.json();
+      } catch {
+        ilegible = true;
+      }
+
+      // Un 2xx cuyo cuerpo no se puede leer NO es un éxito con datos
+      // vacíos: es un servidor roto, un proxy metiéndose en medio, o una
+      // página de login de algún intermediario. Devolverlo como éxito haría
+      // que el store guarde un expediente vacío y lo pinte como cierto.
+      // En un error, en cambio, el status ya dice lo suficiente: un 401 con
+      // página HTML de Netlify sigue siendo un 401.
+      if (ilegible && res.status >= 200 && res.status < 300) {
+        throw new Error(`${FALLA_LECTURA} (${res.status})`);
+      }
+
+      return { status: res.status, body: ilegible ? null : parsed };
+    },
+  };
+}
+
+// El mismo transporte apuntando a la otra Function. Existe como función
+// propia y no como `createHttpApi({ base: AUTH_BASE })` en el llamador para
+// que armar el cliente de acceso no dependa de que quien lo arma se
+// acuerde de cambiar la base — que es exactamente lo que no pasó.
+function createAuthApi(opciones = {}) {
+  return createHttpApi({ ...opciones, base: AUTH_BASE });
+}
+
+// Etapa E — el lado del PACIENTE. Vive aquí porque este archivo es lo
+// único de src/ui/ con permiso de tocar la red, pero no comparte cuerpo con
+// createHttpApi y es a propósito:
+//
+//   - Se identifica con un encabezado, no con una cookie de sesión.
+//   - Manda credentials:'omit'. Si la coordinadora abre el enlace de un
+//     paciente desde el mismo navegador donde tiene el panel abierto, su
+//     cookie de sesión NO tiene por qué viajar a este endpoint público.
+//   - Interpreta el status y devuelve un resultado. En el panel esa
+//     decisión la toma el store; del lado paciente no hay store, y dejar
+//     `{status}` crudo solo movería el `if` a app.js.
+//
+// Los valores están duplicados a propósito respecto del servidor —
+// importar src/server/ desde src/ui/ metería el handler entero en el bundle
+// del paciente (build.py sigue los imports). La paridad la fija
+// test/ui/api.test.js contra visitHandler.js y contra el config de la
+// propia Function.
+const VISIT_PATH = '/api/visit';
+const VISIT_TOKEN_HEADER = 'X-Visit-Token';
+
+// getVisit(token) -> { ok: true, record } | { ok: false, notFound: true }
+//                                         | { ok: false, failed: true }
+//
+// `notFound` y `failed` son dos cosas distintas y la diferencia importa:
+// un 404 significa "esta visita ya no existe o venció" (el servidor
+// contesta lo mismo para los tres casos, INV-3) y obliga a tirar la caché
+// local; una falla significa "no se pudo preguntar" y es justo cuando la
+// caché tiene que servir. Confundirlas deja visitas vencidas abriéndose
+// para siempre en el teléfono, o pantallas en blanco por perder el wifi.
+function createVisitApi({ fetch: fetchImpl = globalThis.fetch } = {}) {
+  return {
+    async getVisit(token) {
+      let res;
+      try {
+        res = await fetchImpl(VISIT_PATH, {
+          method: 'GET',
+          headers: { [VISIT_TOKEN_HEADER]: token },
+          credentials: 'omit',
+          cache: 'no-store',
+        });
+      } catch {
+        return { ok: false, failed: true };
+      }
+
+      if (res.status === 404) return { ok: false, notFound: true };
+      if (res.status < 200 || res.status >= 300) return { ok: false, failed: true };
+
+      let body;
+      try {
+        body = await res.json();
+      } catch {
+        // 200 ilegible: portal cautivo del wifi del hospital, proxy, página
+        // de error. No es un expediente vacío, es no haber llegado.
+        return { ok: false, failed: true };
+      }
+
+      if (!isVisitRecord(body)) return { ok: false, failed: true };
+      return { ok: true, record: body };
+    },
+  };
+}
 
 // --- src/ui/util.js ---
 // Fase 05 — utilidades compartidas de presentación. Sin lógica de fechas ni
@@ -930,6 +928,30 @@ const STRINGS = {
           read: 'No se pudo leer el archivo. Inténtalo otra vez.',
         },
       },
+      // Etapa E — la entrega al paciente. `waMessage` es una función
+      // porque interpola dos cosas (nombre y enlace) y el orden de esas
+      // dos piezas cambia entre idiomas; concatenar afuera obligaría a la
+      // pantalla a decidir ese orden, que es justo lo que este archivo
+      // existe para no hacer.
+      //
+      // Este mensaje es el ÚNICO texto de todo el archivo que se pinta en
+      // el idioma del paciente estando el panel en otro: la coordinadora
+      // puede tener la interfaz en español y estar atendiendo a alguien
+      // que solo lee inglés (ver src/ui/screens/coordinator/handoff.js).
+      handoff: {
+        title: 'Enviar al paciente',
+        intro: 'Manda este enlace al paciente. Al abrirlo en su teléfono ve su itinerario, el mapa del complejo y su pase de acceso.',
+        linkLabel: 'Enlace de la visita',
+        copy: 'Copiar enlace',
+        copied: 'Enlace copiado.',
+        whatsapp: 'Enviar por WhatsApp',
+        qrHint: 'O deja que lo escanee con la cámara de su teléfono.',
+        qrTooLong: 'Este enlace es demasiado largo para caber en un código QR. Cópialo y mándalo como texto.',
+        noToken: 'Esta visita no trae enlace. Recarga la página; si sigue igual, avisa a sistemas.',
+        noOrigin: 'Abre el panel desde su dirección web (https://…) para poder armar el enlace del paciente.',
+        waMessage: (nombre, enlace) =>
+          `Hola ${nombre}: aquí está tu guía de visita en NewCity Hospital — itinerario, mapa y pase de acceso. Ábrela en tu teléfono: ${enlace}`,
+      },
     },
   },
   en: {
@@ -1133,6 +1155,20 @@ const STRINGS = {
           size: 'That image is too large. Use one under 2 MB.',
           read: 'We couldn’t read that file. Please try again.',
         },
+      },
+      handoff: {
+        title: 'Send to patient',
+        intro: 'Send this link to the patient. Opening it on their phone shows their itinerary, the campus map and their access pass.',
+        linkLabel: 'Visit link',
+        copy: 'Copy link',
+        copied: 'Link copied.',
+        whatsapp: 'Send on WhatsApp',
+        qrHint: 'Or let them scan it with their phone camera.',
+        qrTooLong: 'This link is too long to fit in a QR code. Copy it and send it as text.',
+        noToken: 'This visit has no link. Reload the page; if it stays this way, tell IT.',
+        noOrigin: 'Open the panel from its web address (https://…) so the patient link can be built.',
+        waMessage: (name, link) =>
+          `Hi ${name}, here's your NewCity Hospital visit guide — itinerary, map and access pass. Open it on your phone: ${link}`,
       },
     },
   },
@@ -3581,18 +3617,307 @@ body {
 .nc-neutral-body { font-size: 14px; opacity: 0.75; margin: 0; max-width: 320px; }
 `;
 
+// --- src/ui/visitCache.js ---
+// Etapa E — el expediente de la visita guardado en el dispositivo.
+//
+// Hermana de passCache.js, pero resuelven cosas distintas y por eso son dos
+// módulos: passCache mantiene vivo el SÍMBOLO del pase (y lo vuelve a
+// filtrar por R3 con el `now` de cada apertura, INV-4); esta mantiene viva
+// la APERTURA de la app. Sin ella, el paciente que llega al acceso con una
+// barra de señal ve la pantalla neutra —la misma que vería con un token
+// inventado— y no tiene forma de saber que su visita sigue ahí. El PRD
+// pide explícitamente que el pase siga en pantalla sin conexión.
+//
+// Se guarda por TOKEN, no por visitId: cuando hay que decidir si existe
+// caché todavía no se conoce el id, porque viene dentro del expediente que
+// se está intentando traer.
+//
+// Lo que este módulo NO hace: decidir si lo guardado sigue valiendo. Eso
+// es de quien lo lee — resolveVisitContext borra la caché ante un 404, y
+// app.js vuelve a evaluar isExpired con el `now` de AHORA. Guardar y
+// caducar en el mismo archivo es como se termina sirviendo una visita
+// vencida porque "la caché decía que estaba bien".
+
+
+// Prefijo propio y distinto del de passCache.js: build.py aplana todos los
+// módulos a un solo scope y dos constantes con el mismo nombre serían un
+// error de compilación (lo es hoy: el guard de nombres top-level).
+const VISIT_CACHE_KEY_PREFIX = 'nc_visit_cache:';
+
+function saveVisitCache(token, record, now) {
+  localStorage.setItem(VISIT_CACHE_KEY_PREFIX + token, JSON.stringify({ record, savedAt: now }));
+}
+
+// loadVisitCache(token) -> { record, savedAt } | null
+function loadVisitCache(token) {
+  const raw = localStorage.getItem(VISIT_CACHE_KEY_PREFIX + token);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.savedAt !== 'string' || !isVisitRecord(parsed.record)) return null;
+    return parsed;
+  } catch {
+    return null; // JSON corrupto: se trata como "sin caché", no rompe la apertura
+  }
+}
+
+function clearVisitCache(token) {
+  localStorage.removeItem(VISIT_CACHE_KEY_PREFIX + token);
+}
+
+// --- src/data/fixtures.js ---
+// Visitas ficticias para el prototipo y las pruebas (PRD §7 Visit /
+// Appointment / QPass / Lodging). En el MVP real esto lo sustituye el
+// panel de coordinadores (fase 08).
+//
+// TODOS los pacientes de este archivo son ficticios. Los nombres
+// (María, Roberto, Consuelo, Fernando, Alejandra) son nombres de pila
+// genéricos elegidos sin ninguna relación con pacientes reales de
+// NewCity — igual que los tokens, que son cadenas de ejemplo, no valores
+// aleatorios de 128 bits como pide el PRD §6.1 para producción.
+//
+// `Visit.expiresAt` (PRD §7: "derivado, ver R1") se omite a propósito en
+// estos objetos: guardar un valor calculado a mano junto a las citas que
+// lo determinan es la fuente de bugs que R1 ya advierte ("se recalcula
+// cada vez que se agrega, mueve o cancela una cita"). Quien necesite
+// expiresAt lo pide con computeExpiresAt(visit, appointments, lodging)
+// (fase 01) — una sola fuente de verdad, nunca un valor que se puede
+// desincronizar.
+
+function appointment(id, visitId, startsAt, durationMin, serviceName, locationId, status, updatedAt) {
+  return { id, visitId, startsAt, durationMin, serviceName, locationId, status, updatedAt };
+}
+
+function pass(id, visitId, scope, format, validFrom, options = {}) {
+  return {
+    id,
+    visitId,
+    appointmentId: null,
+    format,
+    payload: `payload-${id}`,
+    scope,
+    validFrom,
+    validUntil: options.validUntil ?? null,
+    revokedAt: options.revokedAt ?? null,
+    issuedAt: options.issuedAt ?? validFrom,
+  };
+}
+
+// ---------------------------------------------------------------------
+// v_demo1 — la visita del PRD §8, dato por dato. Es la que enseña el
+// prototipo, y las pruebas de fase 01 la reproducen inline: si algo aquí
+// se desalinea con el PRD, las pruebas de expiry/nextStep/passes de fase
+// 01 y las de esta fase dejan de coincidir.
+// ---------------------------------------------------------------------
+const v_demo1 = {
+  visit: {
+    id: 'v_demo1',
+    token: 'fixture-token-v-demo1',
+    patientFirstName: 'María',
+    lang: 'es',
+    startsAt: '2026-03-10T08:00-07:00',
+    endsAt: '2026-03-11T09:30-07:00',
+    status: 'active',
+  },
+  appointments: [
+    appointment('a1', 'v_demo1', '2026-03-10T08:00-07:00', 45, 'Laboratorio', 'compass', 'scheduled', '2026-03-01T00:00-08:00'),
+    appointment('a2', 'v_demo1', '2026-03-10T09:30-07:00', 60, 'Resonancia magnética', 'compass', 'scheduled', '2026-03-01T00:00-08:00'),
+    appointment('a3', 'v_demo1', '2026-03-10T12:00-07:00', 30, 'Consulta de Medicina Interna', 'piso27', 'scheduled', '2026-03-01T00:00-08:00'),
+    appointment('a4', 'v_demo1', '2026-03-11T09:00-07:00', 30, 'Consulta de Cardiología', 'piso27', 'scheduled', '2026-03-01T00:00-08:00'),
+  ],
+  passes: [
+    pass('q1', 'v_demo1', 'torre', 'qr', '2026-03-10T06:00-07:00'),
+    pass('q2', 'v_demo1', 'estacionamiento', 'code128', '2026-03-10T06:00-07:00'),
+  ],
+  lodging: {
+    visitId: 'v_demo1',
+    hotel: 'Quartz Hotel & Spa',
+    reservationCode: 'QZ-8841-MX',
+    checkIn: '2026-03-10T15:00-07:00',
+    checkOut: '2026-03-11T12:00-07:00',
+    breakfastIncluded: true,
+    recoveryRoom: false,
+  },
+};
+
+// ---------------------------------------------------------------------
+// v_demo2 — sin hospedaje, un solo día, una cancelada (b2) y una movida
+// (b3, con updatedAt reflejando el cambio). Ejercita "Mi estancia no
+// aparece", la cita tachada, el distintivo "actualizado" y R1 caso 1g.
+// ---------------------------------------------------------------------
+const v_demo2 = {
+  visit: {
+    id: 'v_demo2',
+    token: 'fixture-token-v-demo2',
+    patientFirstName: 'Roberto',
+    lang: 'es',
+    startsAt: '2026-04-06T09:00-07:00',
+    endsAt: '2026-04-06T13:30-07:00',
+    status: 'active',
+  },
+  appointments: [
+    appointment('b1', 'v_demo2', '2026-04-06T09:00-07:00', 30, 'Laboratorio', 'compass', 'scheduled', '2026-04-01T00:00-07:00'),
+    appointment('b2', 'v_demo2', '2026-04-06T10:00-07:00', 30, 'Estudios de imagen', 'compass', 'cancelled', '2026-04-05T18:00-07:00'),
+    // b3 se movió de 11:00 a 13:00 la mañana de la visita: updatedAt es
+    // posterior a cuando un paciente normalmente ya habría visto su
+    // itinerario, para que el distintivo "actualizado" tenga sentido.
+    appointment('b3', 'v_demo2', '2026-04-06T13:00-07:00', 30, 'Consulta con especialista', 'piso27', 'scheduled', '2026-04-06T08:30-07:00'),
+  ],
+  passes: [pass('qb1', 'v_demo2', 'torre', 'qr', '2026-04-06T07:00-07:00')],
+  lodging: null,
+};
+
+// ---------------------------------------------------------------------
+// v_longstay — última cita el día 2, checkout el día 5. Ejercita el caso
+// 1f de R1 (el checkout manda por mucho margen) y que el pase sin
+// caducidad siga visible el último día de una estancia larga.
+// ---------------------------------------------------------------------
+const v_longstay = {
+  visit: {
+    id: 'v_longstay',
+    token: 'fixture-token-v-longstay',
+    patientFirstName: 'Consuelo',
+    lang: 'es',
+    startsAt: '2026-05-04T10:00-07:00',
+    endsAt: '2026-05-05T09:30-07:00',
+    status: 'active',
+  },
+  appointments: [
+    appointment('c1', 'v_longstay', '2026-05-04T10:00-07:00', 45, 'Laboratorio', 'compass', 'scheduled', '2026-05-01T00:00-07:00'),
+    appointment('c2', 'v_longstay', '2026-05-05T09:00-07:00', 30, 'Consulta con especialista', 'piso27', 'scheduled', '2026-05-01T00:00-07:00'),
+  ],
+  passes: [pass('qc1', 'v_longstay', 'torre', 'qr', '2026-05-04T08:00-07:00')],
+  lodging: {
+    visitId: 'v_longstay',
+    hotel: 'Quartz Hotel & Spa',
+    reservationCode: 'QZ-9012-MX',
+    checkIn: '2026-05-04T15:00-07:00',
+    checkOut: '2026-05-08T12:00-07:00', // día 5 (día 1 = 4 de mayo)
+    breakfastIncluded: true,
+    recoveryRoom: true,
+  },
+};
+
+// ---------------------------------------------------------------------
+// v_expired — expiresAt ya pasó. Sirve para probar la pantalla neutra
+// (INV-3). Fecha en enero (horario estándar, -08:00) a propósito: da
+// cobertura real de horario estándar además de la de verano de v_demo1.
+// ---------------------------------------------------------------------
+const v_expired = {
+  visit: {
+    id: 'v_expired',
+    token: 'fixture-token-v-expired',
+    patientFirstName: 'Fernando',
+    lang: 'es',
+    startsAt: '2026-01-12T09:00-08:00',
+    endsAt: '2026-01-12T09:30-08:00',
+    status: 'active',
+  },
+  appointments: [appointment('e1', 'v_expired', '2026-01-12T09:00-08:00', 30, 'Laboratorio', 'compass', 'scheduled', '2026-01-01T00:00-08:00')],
+  passes: [pass('qe1', 'v_expired', 'torre', 'qr', '2026-01-12T07:00-08:00')],
+  lodging: null,
+};
+
+// ---------------------------------------------------------------------
+// v_revoked — un QPASS revocado (qf1) y uno activo (qf2). Ejercita INV-4
+// y el caso 3b: el revocado no debe verse ni desde caché.
+// ---------------------------------------------------------------------
+const v_revoked = {
+  visit: {
+    id: 'v_revoked',
+    token: 'fixture-token-v-revoked',
+    patientFirstName: 'Alejandra',
+    lang: 'en',
+    startsAt: '2026-06-09T10:00-07:00',
+    endsAt: '2026-06-09T10:30-07:00',
+    status: 'active',
+  },
+  appointments: [appointment('f1', 'v_revoked', '2026-06-09T10:00-07:00', 30, 'Laboratorio', 'compass', 'scheduled', '2026-06-01T00:00-07:00')],
+  passes: [
+    pass('qf1', 'v_revoked', 'torre', 'qr', '2026-06-09T06:00-07:00', { revokedAt: '2026-06-09T14:00-07:00' }),
+    pass('qf2', 'v_revoked', 'estacionamiento', 'code128', '2026-06-09T06:00-07:00'),
+  ],
+  lodging: null,
+};
+
+const fixtures = { v_demo1, v_demo2, v_longstay, v_expired, v_revoked };
+const FIXTURE_IDS = Object.keys(fixtures);
+
+// --- src/ui/visitSource.js ---
+// Etapa E — de dónde sale el expediente que ve el paciente.
+//
+// Hasta hoy app.js buscaba el token SOLO entre las fixtures compiladas en
+// el bundle. Esa era la mitad no dicha de la pregunta que abrió la etapa:
+// aunque el panel hubiera mostrado el QR, una visita creada por la
+// coordinadora nunca se habría podido abrir.
+//
+// El orden es fixture → red → caché, y cada escalón está donde está por
+// una razón:
+//
+//   1. Fixture primero, sin tocar la red. /demo y las cinco fixtures tienen
+//      que abrir en un teléfono en modo avión, que es lo que hoy funciona y
+//      no se puede romper. Un token real nunca colisiona: son 22 caracteres
+//      base64url, no `fixture-token-*`.
+//   2. Red. Es la única fuente que puede estar al día — la coordinadora
+//      mueve citas y revoca pases después de mandar el enlace.
+//   3. Caché, SOLO si la red falló. Es el caso del PRD: llegar al acceso
+//      sin señal con el pase en la mano.
+//
+// El 404 es el caso delicado y por eso vive aquí y no en app.js: el
+// servidor contesta un único 404 para "no existe", "malformado" y "ya
+// venció" (INV-3). Servir la caché ante un 404 sería deshacer la caducidad
+// desde el cliente. Se borra.
+//
+// Vive fuera de app.js para poder probarse: app.js necesita DOM y este
+// proyecto no monta fake DOM. Las tres dependencias entran inyectadas.
+
+
+// resolveVisitContext(token, { api, cache, now, catalog })
+//   -> { record, source: 'fixture'|'network'|'cache', savedAt? } | null
+//
+// `null` significa siempre lo mismo para quien llama: pantalla neutra. No
+// se distingue "no existe" de "venció" ni de "no hay nada guardado y no
+// hay señal" — INV-3 exige que el paciente no pueda inferir cuál es.
+async function resolveVisitContext(token, { api, cache, now, catalog = fixtures } = {}) {
+  if (!token) return null;
+
+  const fixture = Object.values(catalog).find((f) => f.visit.token === token);
+  if (fixture) return { record: fixture, source: 'fixture' };
+
+  const res = await api.getVisit(token);
+
+  if (res.ok) {
+    cache.save(token, res.record, now);
+    return { record: res.record, source: 'network' };
+  }
+
+  if (res.notFound) {
+    cache.clear(token);
+    return null;
+  }
+
+  // Falla de red o del servidor: exactamente para esto existe la caché.
+  // Nótese que NO se borra — perder la señal no puede ser lo que tire el
+  // respaldo.
+  const guardado = cache.load(token);
+  if (!guardado) return null;
+  return { record: guardado.record, source: 'cache', savedAt: guardado.savedAt };
+}
+
 // --- src/ui/app.js ---
 // Enrutador y estado de pantalla (fase 05). Único lugar de toda la UI que
 // puede leer el reloj real del sistema o `location`/`localStorage`
 // directamente — todo lo que cuelga de src/ui/screens/ recibe `now`, `lang`
 // y los datos de la visita ya resueltos, nunca los lee por su cuenta.
 //
-// Contrato de URL de este prototipo (no hay backend real — PRD: en el MVP
-// esto lo resuelve el panel de coordinadores, fase 08, fuera de alcance).
-// `p` (no `token`) porque así lo fija phase-07-e2e.md ("?p=<token de
-// v_demo1>") — fase 05 no dejó el nombre del parámetro por escrito en
-// ningún archivo aprobado, así que se alinea al primero que sí lo hace en
-// vez de mantener dos convenciones distintas dentro del mismo prototipo:
+// Contrato de URL. `p` (no `token`) porque así lo fija phase-07-e2e.md
+// ("?p=<token de v_demo1>") — fase 05 no dejó el nombre del parámetro por
+// escrito en ningún archivo aprobado, así que se alinea al primero que sí
+// lo hace en vez de mantener dos convenciones distintas:
+//
+// (Etapa E: el enlace que se le manda al paciente es /v/<token>, y
+// _redirects lo traduce a ?p=<token>. El token ya no se busca solo entre
+// las fixtures del bundle — ver src/ui/visitSource.js.)
 //   ?p=<Visit.token>       obligatorio en la práctica — sin token
 //                          coincidente se ve la misma pantalla neutra que
 //                          un token vencido (INV-3: no debe distinguirse)
@@ -3608,6 +3933,8 @@ body {
 //   ?lang=es|en            opcional, conveniencia para verificación manual
 //                          — la fuente de verdad real es localStorage +
 //                          navigator.language (resolveInitialLang).
+
+
 
 
 
@@ -3663,9 +3990,21 @@ function parseNowOverride(raw) {
   return Number.isNaN(d.getTime()) ? null : raw;
 }
 
-function resolveVisitContext(token) {
-  const match = Object.values(fixtures).find((f) => f.visit.token === token);
-  return match ?? null;
+// La caché es un módulo de funciones sueltas (habla con localStorage);
+// visitSource la recibe como objeto para poder probarse con un doble. Este
+// adaptador es el único lugar donde se juntan las dos formas.
+const CACHE_DE_VISITA = { save: saveVisitCache, load: loadVisitCache, clear: clearVisitCache };
+
+// Etapa E — traer el expediente por red toma tiempo, y sin esto la página
+// se queda en blanco mientras tanto: en un teléfono con mala señal eso son
+// varios segundos indistinguibles de "la app no sirve". Reusa las clases
+// de la pantalla neutra en vez de traer estilos nuevos.
+function renderLoadingScreen(root, lang) {
+  root.innerHTML = `
+    <div class="nc-neutral">
+      <p class="nc-neutral-body">${escapeHtml(translate(lang, 'common.loading'))}</p>
+    </div>
+  `;
 }
 
 function renderNeutralScreen(root, lang) {
@@ -3681,7 +4020,20 @@ function renderNeutralScreen(root, lang) {
   `;
 }
 
-function boot(root, { navigatorLanguage = navigator.language, search = location.search } = {}) {
+// Etapa E — boot pasa a ser async porque resolver el token puede implicar
+// una ida al servidor. Quienes la llaman (app.html y el bloque en línea que
+// genera build.py) no la esperan, y está bien: no hay nada que hacer
+// después de que la app se pinte sola. `api` entra por opciones para poder
+// probar y para el e2e, con el cliente real como valor por omisión.
+//
+// (Sin la etiqueta escrita entera a propósito: este archivo termina DENTRO
+// del bloque en línea de index.html, y test/deploy/csp.test.js usa esa
+// cadena como marca de que la extracción del script se salió de su lugar.)
+async function boot(root, {
+  navigatorLanguage = navigator.language,
+  search = location.search,
+  api = createVisitApi(),
+} = {}) {
   injectStylesOnce();
   const params = new URLSearchParams(search);
   const token = params.get('p');
@@ -3695,13 +4047,22 @@ function boot(root, { navigatorLanguage = navigator.language, search = location.
   document.title = STRINGS[lang].common.appName;
   document.documentElement.lang = lang;
 
-  const ctxData = resolveVisitContext(token);
-  if (!ctxData || isExpired(ctxData.visit, ctxData.appointments, ctxData.lodging, now)) {
+  renderLoadingScreen(root, lang);
+  const resuelto = await resolveVisitContext(token, { api, cache: CACHE_DE_VISITA, now });
+
+  // isExpired se vuelve a evaluar SIEMPRE, venga de donde venga el
+  // expediente. Para el camino de red es redundante (el servidor ya
+  // aplicó R1 y contestó 404), pero para la caché no lo es en absoluto:
+  // un expediente guardado ayer puede haber vencido durante la noche, y
+  // sin esta línea seguiría abriéndose sin señal para siempre. Mismo
+  // criterio que passCache con R3 (INV-4): se filtra con el `now` de
+  // ahora, nunca con el que tenía el dispositivo al guardar.
+  if (!resuelto || isExpired(resuelto.record.visit, resuelto.record.appointments, resuelto.record.lodging, now)) {
     renderNeutralScreen(root, lang);
     return;
   }
 
-  const { visit, appointments, passes, lodging } = ctxData;
+  const { visit, appointments, passes, lodging } = resuelto.record;
   const lastViewedKey = LAST_VIEWED_ITINERARY_KEY_PREFIX + visit.id;
   let itineraryStamped = false;
 

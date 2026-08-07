@@ -3,12 +3,14 @@
 // directamente — todo lo que cuelga de src/ui/screens/ recibe `now`, `lang`
 // y los datos de la visita ya resueltos, nunca los lee por su cuenta.
 //
-// Contrato de URL de este prototipo (no hay backend real — PRD: en el MVP
-// esto lo resuelve el panel de coordinadores, fase 08, fuera de alcance).
-// `p` (no `token`) porque así lo fija phase-07-e2e.md ("?p=<token de
-// v_demo1>") — fase 05 no dejó el nombre del parámetro por escrito en
-// ningún archivo aprobado, así que se alinea al primero que sí lo hace en
-// vez de mantener dos convenciones distintas dentro del mismo prototipo:
+// Contrato de URL. `p` (no `token`) porque así lo fija phase-07-e2e.md
+// ("?p=<token de v_demo1>") — fase 05 no dejó el nombre del parámetro por
+// escrito en ningún archivo aprobado, así que se alinea al primero que sí
+// lo hace en vez de mantener dos convenciones distintas:
+//
+// (Etapa E: el enlace que se le manda al paciente es /v/<token>, y
+// _redirects lo traduce a ?p=<token>. El token ya no se busca solo entre
+// las fixtures del bundle — ver src/ui/visitSource.js.)
 //   ?p=<Visit.token>       obligatorio en la práctica — sin token
 //                          coincidente se ve la misma pantalla neutra que
 //                          un token vencido (INV-3: no debe distinguirse)
@@ -26,7 +28,9 @@
 //                          navigator.language (resolveInitialLang).
 
 import { isExpired } from '../domain/index.js';
-import { fixtures } from '../data/fixtures.js';
+import { createVisitApi } from './api.js';
+import { resolveVisitContext } from './visitSource.js';
+import { saveVisitCache, loadVisitCache, clearVisitCache } from './visitCache.js';
 import { STRINGS, resolveInitialLang, translate } from './i18n.js';
 import { escapeHtml } from './util.js';
 import { attachNav } from './nav.js';
@@ -80,9 +84,21 @@ function parseNowOverride(raw) {
   return Number.isNaN(d.getTime()) ? null : raw;
 }
 
-function resolveVisitContext(token) {
-  const match = Object.values(fixtures).find((f) => f.visit.token === token);
-  return match ?? null;
+// La caché es un módulo de funciones sueltas (habla con localStorage);
+// visitSource la recibe como objeto para poder probarse con un doble. Este
+// adaptador es el único lugar donde se juntan las dos formas.
+const CACHE_DE_VISITA = { save: saveVisitCache, load: loadVisitCache, clear: clearVisitCache };
+
+// Etapa E — traer el expediente por red toma tiempo, y sin esto la página
+// se queda en blanco mientras tanto: en un teléfono con mala señal eso son
+// varios segundos indistinguibles de "la app no sirve". Reusa las clases
+// de la pantalla neutra en vez de traer estilos nuevos.
+function renderLoadingScreen(root, lang) {
+  root.innerHTML = `
+    <div class="nc-neutral">
+      <p class="nc-neutral-body">${escapeHtml(translate(lang, 'common.loading'))}</p>
+    </div>
+  `;
 }
 
 function renderNeutralScreen(root, lang) {
@@ -98,7 +114,20 @@ function renderNeutralScreen(root, lang) {
   `;
 }
 
-export function boot(root, { navigatorLanguage = navigator.language, search = location.search } = {}) {
+// Etapa E — boot pasa a ser async porque resolver el token puede implicar
+// una ida al servidor. Quienes la llaman (app.html y el bloque en línea que
+// genera build.py) no la esperan, y está bien: no hay nada que hacer
+// después de que la app se pinte sola. `api` entra por opciones para poder
+// probar y para el e2e, con el cliente real como valor por omisión.
+//
+// (Sin la etiqueta escrita entera a propósito: este archivo termina DENTRO
+// del bloque en línea de index.html, y test/deploy/csp.test.js usa esa
+// cadena como marca de que la extracción del script se salió de su lugar.)
+export async function boot(root, {
+  navigatorLanguage = navigator.language,
+  search = location.search,
+  api = createVisitApi(),
+} = {}) {
   injectStylesOnce();
   const params = new URLSearchParams(search);
   const token = params.get('p');
@@ -112,13 +141,22 @@ export function boot(root, { navigatorLanguage = navigator.language, search = lo
   document.title = STRINGS[lang].common.appName;
   document.documentElement.lang = lang;
 
-  const ctxData = resolveVisitContext(token);
-  if (!ctxData || isExpired(ctxData.visit, ctxData.appointments, ctxData.lodging, now)) {
+  renderLoadingScreen(root, lang);
+  const resuelto = await resolveVisitContext(token, { api, cache: CACHE_DE_VISITA, now });
+
+  // isExpired se vuelve a evaluar SIEMPRE, venga de donde venga el
+  // expediente. Para el camino de red es redundante (el servidor ya
+  // aplicó R1 y contestó 404), pero para la caché no lo es en absoluto:
+  // un expediente guardado ayer puede haber vencido durante la noche, y
+  // sin esta línea seguiría abriéndose sin señal para siempre. Mismo
+  // criterio que passCache con R3 (INV-4): se filtra con el `now` de
+  // ahora, nunca con el que tenía el dispositivo al guardar.
+  if (!resuelto || isExpired(resuelto.record.visit, resuelto.record.appointments, resuelto.record.lodging, now)) {
     renderNeutralScreen(root, lang);
     return;
   }
 
-  const { visit, appointments, passes, lodging } = ctxData;
+  const { visit, appointments, passes, lodging } = resuelto.record;
   const lastViewedKey = LAST_VIEWED_ITINERARY_KEY_PREFIX + visit.id;
   let itineraryStamped = false;
 

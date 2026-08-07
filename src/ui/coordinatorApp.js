@@ -44,6 +44,7 @@ import { renderIntakeScreen, attachIntakeScreen, INTAKE_CSS } from './screens/co
 import { renderItineraryScreen, attachItineraryScreen, ITINERARY_CSS } from './screens/coordinator/itinerary.js';
 import { renderLodgingScreen, attachLodgingScreen, LODGING_CSS } from './screens/coordinator/lodging.js';
 import { renderQpassScreen, attachQpassScreen, QPASS_CSS } from './screens/coordinator/qpass.js';
+import { renderHandoffScreen, attachHandoffScreen, HANDOFF_CSS } from './screens/coordinator/handoff.js';
 import { renderSignInScreen, attachSignInScreen, SIGNIN_CSS } from './screens/coordinator/signin.js';
 import { errorText, FORM_ERRORS_CSS } from './screens/coordinator/formErrors.js';
 import { renderPassScreen, attachPassScreen, PASS_SCREEN_CSS } from './screens/pass.js';
@@ -65,7 +66,7 @@ const GATE_CSS = `
 .nc-gate-msg { margin: 0; font-size: 14px; opacity: 0.8; }
 `;
 
-const ALL_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, ITINERARY_CSS, LODGING_CSS, QPASS_CSS, PASS_SCREEN_CSS, SUBNAV_CSS, SIGNIN_CSS, FORM_ERRORS_CSS, GATE_CSS].join('\n');
+const ALL_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, ITINERARY_CSS, LODGING_CSS, QPASS_CSS, HANDOFF_CSS, PASS_SCREEN_CSS, SUBNAV_CSS, SIGNIN_CSS, FORM_ERRORS_CSS, GATE_CSS].join('\n');
 
 function injectStylesOnce() {
   if (document.getElementById('nc-styles')) return;
@@ -95,6 +96,11 @@ const SCREENS = {
   itinerary: { render: renderItineraryScreen, attach: attachItineraryScreen, needsVisit: true },
   lodging: { render: renderLodgingScreen, attach: attachLodgingScreen, needsVisit: true },
   qpass: { render: renderQpassScreen, attach: attachQpassScreen, needsVisit: true },
+  // Etapa E — última del subnav a propósito: es el paso que cierra la
+  // captura, no el que la abre. Va después de itinerario/hospedaje/QPASS
+  // porque mandarle al paciente un enlace a una visita todavía vacía es
+  // peor que no mandarle nada (por eso el alta tampoco aterriza aquí).
+  handoff: { render: renderHandoffScreen, attach: attachHandoffScreen, needsVisit: true },
 };
 const ROUTES = new Set([...Object.keys(SCREENS), 'pass-preview']);
 
@@ -103,8 +109,10 @@ const ROUTES = new Set([...Object.keys(SCREENS), 'pass-preview']);
 // viceversa) para la misma visita, solo "volver a visitas" en el
 // encabezado. VISIT_SUBNAV_ROUTES se deriva de SCREENS (needsVisit: true)
 // en vez de un arreglo aparte, para que nunca puedan desincronizarse — hoy
-// coincide con ['itinerary', 'lodging', 'qpass'], pass-preview queda fuera
-// a propósito (no es una pantalla propia de coordinator/, ver más abajo).
+// coincide con ['itinerary', 'lodging', 'qpass', 'handoff'], pass-preview
+// queda fuera a propósito (no es una pantalla propia de coordinator/, ver
+// más abajo). La Etapa E agregó 'handoff' y esta lista se enteró sola: eso
+// es exactamente para lo que se derivaba de SCREENS.
 const VISIT_SUBNAV_ROUTES = Object.keys(SCREENS).filter((id) => SCREENS[id].needsVisit);
 // Reusa la misma llave i18n que cada pantalla ya usa en su propio <h1> —
 // sin cadenas nuevas, mismo criterio que D33/D29 ya aplicaron en esta fase.
@@ -112,6 +120,7 @@ const VISIT_SUBNAV_LABEL_KEY = {
   itinerary: 'coordinator.itinerary.title',
   lodging: 'coordinator.lodging.title',
   qpass: 'coordinator.qpass.title',
+  handoff: 'coordinator.handoff.title',
 };
 
 // Pieza pura, exportada para prueba directa por substring (test/ui/
@@ -619,6 +628,12 @@ export function boot(root) {
         lang,
         t,
         flash,
+        // Etapa E — de dónde sale el enlace que se le manda al paciente.
+        // Entra por ctx y no lo lee handoff.js de `location` por su cuenta:
+        // las pantallas de este directorio son puras y se prueban sin DOM,
+        // y este archivo ya es el punto sancionado para tocar `location`
+        // (igual que con el reloj real, ver el encabezado).
+        origin: location.origin,
         // Etapa D — lo que el servidor rechazó del último intento. Antes
         // no existía nada de esto porque no había servidor que rechazara
         // nada: el store guardaba lo que le dieran. `errors` es por campo,

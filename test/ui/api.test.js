@@ -4,9 +4,20 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHttpApi, createAuthApi, AUTH_BASE, COORDINATOR_BASE } from '../../src/ui/api.js';
+import { createHttpApi, createAuthApi, createVisitApi, AUTH_BASE, COORDINATOR_BASE, VISIT_PATH, VISIT_TOKEN_HEADER } from '../../src/ui/api.js';
 import { LOGIN_PATH, LOGOUT_PATH, SESSION_PATH } from '../../src/server/authHandler.js';
 import { COORDINATOR_PREFIX } from '../../src/server/coordinatorHandler.js';
+import { TOKEN_HEADER } from '../../src/server/visitHandler.js';
+import { config as visitFunctionConfig } from '../../netlify/functions/visit.mjs';
+
+const TOKEN_DE_PRUEBA = 'tok1'.padEnd(22, 'x');
+
+const expedienteOk = () => ({
+  visit: { id: 'v_1', lang: 'es', patientFirstName: 'Ana', status: 'active' },
+  appointments: [],
+  passes: [],
+  lodging: null,
+});
 
 const JSON_OK = (body, status = 200) => ({
   status,
@@ -154,5 +165,96 @@ describe('bases de la API — el acceso NO cuelga del prefijo de coordinación',
     assert.notStrictEqual(AUTH_BASE, COORDINATOR_BASE);
     assert.strictEqual(COORDINATOR_BASE, COORDINATOR_PREFIX);
     assert.ok(SESSION_PATH.startsWith(AUTH_BASE), 'AUTH_BASE debe ser el prefijo real de las rutas de auth');
+  });
+});
+
+// Etapa E — el cliente del paciente. No comparte código con createHttpApi
+// a propósito: manda encabezado en vez de cookie, y traduce el status a un
+// resultado en vez de devolverlo crudo, porque del lado paciente no hay un
+// store que interprete. Son ocho líneas; compartirlas costaría más de lo
+// que ahorra.
+describe('createVisitApi', () => {
+  test('pide /api/visit con el token en el encabezado y NUNCA en la query string', async () => {
+    // Un token en la URL se va al historial del navegador, a los logs del
+    // CDN y al Referer. Es la credencial completa de la visita.
+    const f = fetchDoble(JSON_OK(expedienteOk()));
+    await createVisitApi({ fetch: f.fn }).getVisit(TOKEN_DE_PRUEBA);
+
+    const { url, init } = f.llamadas[0];
+    assert.strictEqual(url, VISIT_PATH);
+    assert.ok(!url.includes(TOKEN_DE_PRUEBA), 'el token no puede aparecer en la URL');
+    assert.strictEqual(init.headers[VISIT_TOKEN_HEADER], TOKEN_DE_PRUEBA);
+  });
+
+  test('la ruta y el encabezado son los que de verdad publica y lee el servidor', async () => {
+    // Las dos puntas de este contrato viven en archivos distintos y nada
+    // más que esto las mantiene juntas: si alguien renombra el encabezado
+    // en visitHandler.js, el paciente ve "enlace no disponible" y nada
+    // falla en local.
+    assert.strictEqual(VISIT_PATH, visitFunctionConfig.path);
+    assert.strictEqual(VISIT_TOKEN_HEADER, TOKEN_HEADER);
+  });
+
+  test('no manda cookies: la sesión de la coordinadora no tiene nada que hacer aquí', async () => {
+    const f = fetchDoble(JSON_OK(expedienteOk()));
+    await createVisitApi({ fetch: f.fn }).getVisit(TOKEN_DE_PRUEBA);
+    assert.strictEqual(f.llamadas[0].init.credentials, 'omit');
+  });
+
+  test('200 con expediente válido devuelve ok', async () => {
+    const f = fetchDoble(JSON_OK(expedienteOk()));
+    const r = await createVisitApi({ fetch: f.fn }).getVisit(TOKEN_DE_PRUEBA);
+
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.record.visit.id, 'v_1');
+  });
+
+  test('404 se distingue de una falla: es "esta visita ya no existe", no "no se pudo preguntar"', async () => {
+    // La diferencia decide si la caché local se borra o se usa.
+    const r = await createVisitApi({ fetch: fetchDoble(JSON_OK({ error: 'not_found' }, 404)).fn }).getVisit(TOKEN_DE_PRUEBA);
+
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.notFound, true);
+    assert.notStrictEqual(r.failed, true);
+  });
+
+  test('500 es falla, no "no existe"', async () => {
+    const r = await createVisitApi({ fetch: fetchDoble(JSON_OK({ error: 'internal' }, 500)).fn }).getVisit(TOKEN_DE_PRUEBA);
+
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.failed, true);
+    assert.notStrictEqual(r.notFound, true);
+  });
+
+  test('si fetch rechaza (sin señal) devuelve falla en vez de lanzar', async () => {
+    // Aquí sí se atrapa, al revés que en createHttpApi: del lado paciente
+    // no hay store que envuelva la llamada, y una excepción suelta deja la
+    // página en blanco sin pantalla neutra.
+    const api = createVisitApi({ fetch: async () => { throw new TypeError('Failed to fetch'); } });
+    const r = await api.getVisit(TOKEN_DE_PRUEBA);
+
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.failed, true);
+  });
+
+  test('un 200 ilegible no es un expediente vacío', async () => {
+    // Página de error de un proxy o de un portal cautivo de wifi de
+    // hospital: 200, HTML, y cero relación con la visita.
+    const r = await createVisitApi({
+      fetch: async () => ({ status: 200, json: async () => { throw new SyntaxError('Unexpected token <'); } }),
+    }).getVisit(TOKEN_DE_PRUEBA);
+
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.failed, true);
+  });
+
+  test('un 200 con JSON que no tiene forma de expediente se rechaza', async () => {
+    // Sin este guard, un `{}` se guarda en caché y revienta después dentro
+    // de renderHomeScreen, donde el error ya no dice de dónde salió.
+    const api = createVisitApi({ fetch: fetchDoble(JSON_OK({ ok: true })).fn });
+    assert.strictEqual((await api.getVisit(TOKEN_DE_PRUEBA)).ok, false);
+
+    const sinCitas = createVisitApi({ fetch: fetchDoble(JSON_OK({ visit: { id: 'v_1' }, passes: [] })).fn });
+    assert.strictEqual((await sinCitas.getVisit(TOKEN_DE_PRUEBA)).ok, false);
   });
 });
