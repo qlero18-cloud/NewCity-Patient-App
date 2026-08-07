@@ -1,1 +1,6 @@
 .DS_Store
+
+# Etapa B: el proyecto dejó de tener cero dependencias (@netlify/blobs).
+# package-lock.json SÍ se versiona —es lo que hace reproducible el deploy—
+# pero los paquetes instalados no.
+node_modules/

@@ -1,0 +1,23 @@
+# Etapa B (#26) — Encabezados de seguridad del sitio.
+#
+# README.md afirmaba "CSP estricta" desde la fase 08 y no había ninguna: ni
+# este archivo, ni netlify.toml, ni <meta http-equiv>. Con la Etapa B
+# entrando datos de salud por red, el hueco deja de ser cosmético.
+#
+# Los tres 'sha256-...' de script-src son los scripts en línea de
+# index.html, app.html y coordinator.html, en ese orden. NO se editan a
+# mano a ojo: `npm test` (test/deploy/csp.test.js) los recalcula desde los
+# HTML y falla imprimiendo el valor correcto si alguno cambió. Y `python3
+# build.py` imprime el de index.html al terminar, porque es el que se
+# regenera solo.
+#
+# Un hash que no coincide no rompe la suite ni el `python3 -m http.server`
+# local: rompe la página en PRODUCCIÓN, en blanco y sin aviso. Por eso el
+# guard.
+
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-A2oIb24aWWXje0ZnOOi14B89EaHDvTdSw5gF/OYSm9U=' 'sha256-jKX4Plg0E1hJuvFQPX8xhasTT9t4IcYct+S47kABh/4=' 'sha256-Zhp3hjxbZ1UQrCYfZZvfhrNYh5ano2mpujTGCRCwnHg='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains

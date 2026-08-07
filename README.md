@@ -38,7 +38,9 @@ Ya resuelto (antes listado aquí como hueco entre fases): "tienda de convenienci
 
 **https://nchpatient.netlify.app/**
 
-Página estática autocontenida (CSP estricta, sin peticiones a dominios externos — confirmado en el panel de red), publicada en Netlify a partir del mismo repositorio de GitHub. GitHub Pages fue la primera opción, pero su primer deploy se quedó atorado en la cola de Actions sin completarse ni fallar explícitamente; Netlify construye en su propia infraestructura y no depende de esa cola (`docs/DECISIONS.md` D23).
+Página estática autocontenida, sin peticiones a dominios externos, publicada en Netlify a partir del mismo repositorio de GitHub.
+
+> **Corregido en la Etapa B.** Esta línea decía "CSP estricta" desde la fase 08 y era falsa: no existía `_headers`, ni `netlify.toml`, ni ningún `<meta http-equiv>` en el repo. Lo que sí era cierto —y lo único que se había comprobado, en el panel de red— es que la página no pide nada a terceros. La CSP existe desde la Etapa B (`_headers`), y no es del todo estricta: `script-src` va por hash, sin `'unsafe-inline'`, pero `style-src` sí lo necesita porque el CSS se arma en tiempo de ejecución (`src/ui/app.js:51`). `test/deploy/csp.test.js` verifica las dos cosas, y que esa excepción no se extienda a ninguna otra directiva. GitHub Pages fue la primera opción, pero su primer deploy se quedó atorado en la cola de Actions sin completarse ni fallar explícitamente; Netlify construye en su propia infraestructura y no depende de esa cola (`docs/DECISIONS.md` D23).
 
 Enlace corto para demo — apunta a la fixture `v_demo1` con `now` fijado, vía una redirección propia del sitio (`_redirects`, mismo origen, no es un acortador de terceros):
 

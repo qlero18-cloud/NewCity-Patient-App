@@ -1,0 +1,23 @@
+# Etapa B — configuración de despliegue en el repositorio.
+#
+# Hasta ahora esto vivía solo en el panel de Netlify: nadie que clonara el
+# repo podía saber qué se publicaba ni desde dónde. Este archivo escribe lo
+# que YA estaba pasando; no cambia el sitio que hoy funciona.
+
+[build]
+  publish = "."
+  # A propósito SIN `command`. index.html se construye local con
+  # `python3 build.py` y se versiona. Poner el build aquí volvería
+  # irrelevante el archivo versionado y ataría el despliegue a que la
+  # imagen de Netlify traiga python3.
+
+[functions]
+  directory = "netlify/functions"
+  # Functions v2: cada archivo exporta `default` y su propio
+  # `config = { path }`, así que el ruteo no necesita redirecciones.
+  # netlify/functions/_kv.mjs empieza con `_` y por eso no se publica.
+  node_bundler = "esbuild"
+
+# Sin [[headers]] aquí: los encabezados viven en `_headers`, uno solo.
+# Netlify combina los dos si existen, y dos fuentes para la misma política
+# es exactamente como se termina desplegando una CSP que nadie entiende.

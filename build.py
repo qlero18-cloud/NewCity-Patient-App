@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Fase 05 — envuelve app.html en index.html autocontenido: cero peticiones
-a terceros NI a otros archivos del proyecto (CSP estricta — PRD, y el
-propio criterio de aceptación "Cero peticiones a terceros" de esta fase).
+a terceros NI a otros archivos del proyecto (criterio de aceptación "Cero
+peticiones a terceros" de esta fase).
+
+La CSP que hace cumplir eso vive en `_headers` desde la Etapa B; hasta
+entonces esta línea la daba por hecha y no existía en ningún archivo.
 
 Aplana el grafo de imports ESM de src/ui/app.js (y todo lo que importa de
 forma transitiva: src/domain, src/data, src/map, src/ui) en un solo
@@ -26,6 +29,7 @@ archivos en conflicto, en vez de producir un bundle roto en silencio.
 import re
 import sys
 import base64
+import hashlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -85,7 +89,7 @@ def strip_module_syntax(text):
     return text
 
 
-def build():
+def build(check_only=False):
     files = topo_sort(ENTRY)
 
     owner_of = {}
@@ -138,12 +142,54 @@ def build():
             f'(src/map/complexMap.js, MAP_BACKGROUND_SRC), se encontraron {n_map_bg}'
         )
 
+    # `--check` no escribe: compara y sale con código distinto de cero si
+    # index.html quedó atrás de src/. Existe porque ya pasó una vez: la
+    # Etapa A cambió 18 archivos de src/ui y nadie reconstruyó, así que el
+    # sitio publicado siguió sirviendo la versión anterior sin que nada
+    # fallara. Un artefacto versionado que se genera a mano necesita algo
+    # que grite cuando se desincroniza.
+    if check_only:
+        actual = OUT.read_text(encoding='utf-8') if OUT.exists() else ''
+        if actual == new_html:
+            print(f'build.py --check: {OUT.relative_to(ROOT)} está al día con src/.')
+            return
+        raise SystemExit(
+            f'build.py --check: {OUT.relative_to(ROOT)} NO corresponde a src/ '
+            f'({len(actual)} chars versionados vs {len(new_html)} reconstruidos).\n'
+            f'  Corre `python3 build.py` y vuelve a commitear index.html.'
+        )
+
     OUT.write_text(new_html, encoding='utf-8')
     print(
         f'build.py: {OUT.relative_to(ROOT)} escrito — {len(files)} módulos aplanados, '
         f'ícono embebido ({len(icon_b64)} chars base64), fondo del mapa embebido ({len(map_bg_b64)} chars base64).'
     )
 
+    # Etapa B (#26) — el <script> que se acaba de escribir cambia en cada
+    # build, y la CSP de _headers lo autoriza por hash. Si no coinciden, la
+    # página queda EN BLANCO en producción y verde en local: `npm test` no
+    # sirve el sitio y `python3 -m http.server` no manda encabezados.
+    #
+    # test/deploy/csp.test.js lo detecta, pero quien corre este script
+    # merece enterarse aquí, con el valor listo para pegar.
+    # Los comentarios se quitan antes de buscar: una mención de
+    # `<script type="module">` DENTRO de un comentario engancha primero y se
+    # lleva prosa hasta el primer </script> real. Pasó de verdad con
+    # coordinator.html y el resultado fue un hash que ningún navegador iba a
+    # calcular — página en blanco en producción, verde en local.
+    sin_comentarios = re.sub(r'<!--.*?-->', '', new_html, flags=re.S)
+    inline = re.search(r'<script\b[^>]*>(.*?)</script>', sin_comentarios, flags=re.S).group(1)
+    digest = base64.b64encode(hashlib.sha256(inline.encode('utf-8')).digest()).decode('ascii')
+    expected = f"'sha256-{digest}'"
+    if expected in (ROOT / '_headers').read_text(encoding='utf-8'):
+        print(f'build.py: hash del script en línea ya presente en _headers — {expected}')
+    else:
+        print(
+            f'build.py: ATENCIÓN — _headers no trae el hash de este build.\n'
+            f'  Reemplaza el sha256 de index.html en script-src por: {expected}',
+            file=sys.stderr,
+        )
+
 
 if __name__ == '__main__':
-    build()
+    build(check_only='--check' in sys.argv[1:])

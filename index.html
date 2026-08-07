@@ -480,6 +480,11 @@ function nextStep(appointments, now) {
 
 const SCOPE_ORDER = { torre: 0, piso27: 1, estacionamiento: 2 };
 
+// Exportada (antes era local a este módulo): la pantalla de emisión del
+// panel necesita el MISMO criterio de "revocado" para no contar un pase
+// revocado como pase vigente (src/ui/screens/coordinator/qpass.js). Que
+// sean dos definiciones distintas de "revocado" es exactamente el bug
+// que INV-4 no perdona, así que hay una sola.
 function isRevoked(pass) {
   return pass.revokedAt !== null && pass.revokedAt !== undefined;
 }
@@ -515,12 +520,19 @@ function visiblePasses(passes, now) {
 // de negocio (eso vive en src/domain/): solo escapado de texto y armado de
 // atributos, que es responsabilidad legítima de la capa de UI.
 
+// La comilla simple también se escapa: este proyecto arma atributos por
+// concatenación de plantillas, y aunque hoy todas las comillas de atributo
+// son dobles, un nombre como "Farmer's Table" dentro de un atributo con
+// comillas simples se escaparía del valor. Escapar los cinco caracteres
+// cuesta lo mismo que escapar cuatro y quita la dependencia de que quien
+// escriba la siguiente plantilla se acuerde de usar comillas dobles.
 function escapeHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // classNames(['a', cond && 'b', 'c']) -> "a c"  (omite valores falsy)
@@ -532,9 +544,28 @@ function classNames(list) {
 // no existiera en el catálogo (no debería pasar — probado en fase 03/04 —
 // pero una pantalla nunca debe reventar por un locationId huérfano).
 function locationName(locations, locationId, lang) {
-  const loc = locations.find((l) => l.id === locationId);
+  const loc = getLocationById(locations, locationId);
   if (!loc) return locationId;
   return loc.name[lang] ?? loc.name.es;
+}
+
+// El mismo .find() estaba repetido inline en media docena de sitios. Vive
+// aquí para que "buscar una Location por id" tenga un solo nombre.
+function getLocationById(locations, locationId) {
+  return locations.find((l) => l.id === locationId) ?? null;
+}
+
+// Opciones de un <select> de ubicación, en el idioma activo. La comparten
+// el formulario de agregar cita y el de editar (src/ui/screens/coordinator/
+// itinerary.js), que necesitan la misma lista pero con distinto valor
+// preseleccionado.
+function locationOptionsHtml(locations, lang, selectedId = null) {
+  return locations
+    .map((loc) => {
+      const selected = loc.id === selectedId ? ' selected' : '';
+      return `<option value="${escapeHtml(loc.id)}"${selected}>${escapeHtml(loc.name[lang] ?? loc.name.es)}</option>`;
+    })
+    .join('\n');
 }
 
 // --- src/ui/components/badge.js ---
@@ -674,6 +705,12 @@ const STRINGS = {
     common: {
       appName: 'NewCity',
       langToggle: 'English',
+      // Endónimo: el nombre de cada idioma EN ese idioma, por eso es
+      // idéntico en el bloque es y en el bloque en. Es lo que espera quien
+      // usa un selector de idioma — "Español" se reconoce aunque la
+      // interfaz esté en inglés — y evita que la coordinadora tenga que
+      // traducir mentalmente para elegir el idioma del paciente.
+      langName: { es: 'Español', en: 'English' },
       unconfirmedBadge: 'POR CONFIRMAR',
       backButton: 'Atrás',
       loading: 'Cargando…',
@@ -786,6 +823,12 @@ const STRINGS = {
     coordinator: {
       appName: 'NewCity — Coordinación',
       backToVisits: 'Volver a visitas',
+      subnavLabel: 'Navegación de la visita',
+      // Un solo mensaje para las tres pantallas que necesitan una visita
+      // seleccionada (itinerario/hospedaje/QPASS). Antes cada una lo
+      // resolvía por su cuenta con un `lang === 'en' ? … : …` escrito a
+      // mano, y hospedaje ni siquiera mostraba nada.
+      visitNotFound: 'No encontramos esa visita.',
       visits: {
         title: 'Visitas',
         empty: 'No hay visitas todavía.',
@@ -822,6 +865,12 @@ const STRINGS = {
         breakfastLabel: 'Desayuno incluido',
         recoveryLabel: 'Habitación recovery',
         save: 'Guardar hospedaje',
+        saved: 'Hospedaje guardado.',
+        error: {
+          required: 'Este dato es obligatorio.',
+          invalidDate: 'Fecha no reconocida. Usa el formato 2026-03-09T15:00-07:00.',
+          order: 'El check-out debe ser posterior al check-in.',
+        },
       },
       qpass: {
         title: 'Emitir QPASS',
@@ -833,6 +882,13 @@ const STRINGS = {
         pendingBadge: 'QPASS pendiente',
         issuedBadge: 'QPASS emitido',
         viewAsPatient: 'Ver como paciente',
+        reissue: 'Emitir otro QPASS',
+        revoke: 'Revocar QPASS',
+        error: {
+          type: 'Ese archivo no es una imagen. Sube una foto o captura del pase.',
+          size: 'La imagen pesa demasiado. Usa uno de menos de 2 MB.',
+          read: 'No se pudo leer el archivo. Inténtalo otra vez.',
+        },
       },
     },
   },
@@ -840,6 +896,8 @@ const STRINGS = {
     common: {
       appName: 'NewCity',
       langToggle: 'Español',
+      // Igual que en el bloque es, a propósito: ver el comentario de allá.
+      langName: { es: 'Español', en: 'English' },
       unconfirmedBadge: 'TO CONFIRM',
       backButton: 'Back',
       loading: 'Loading…',
@@ -947,6 +1005,8 @@ const STRINGS = {
     coordinator: {
       appName: 'NewCity — Coordination',
       backToVisits: 'Back to visits',
+      subnavLabel: 'Visit navigation',
+      visitNotFound: 'We couldn’t find that visit.',
       visits: {
         title: 'Visits',
         empty: 'No visits yet.',
@@ -983,6 +1043,12 @@ const STRINGS = {
         breakfastLabel: 'Breakfast included',
         recoveryLabel: 'Recovery room',
         save: 'Save lodging',
+        saved: 'Lodging saved.',
+        error: {
+          required: 'This field is required.',
+          invalidDate: 'We couldn’t read that date. Use the format 2026-03-09T15:00-07:00.',
+          order: 'Check-out must be after check-in.',
+        },
       },
       qpass: {
         title: 'Issue QPASS',
@@ -994,6 +1060,13 @@ const STRINGS = {
         pendingBadge: 'QPASS pending',
         issuedBadge: 'QPASS issued',
         viewAsPatient: 'View as patient',
+        reissue: 'Issue another QPASS',
+        revoke: 'Revoke QPASS',
+        error: {
+          type: 'That file isn’t an image. Upload a photo or screenshot of the pass.',
+          size: 'That image is too large. Use one under 2 MB.',
+          read: 'We couldn’t read that file. Please try again.',
+        },
       },
     },
   },
@@ -1440,6 +1513,46 @@ const routes = [
   route('r_lobby_torre_quartz', 'lobby_torre', 'quartz', 4, [
     step(1, 'Desde el lobby, dirígete al Quartz Hotel & Spa.', 'From the lobby, head to Quartz Hotel & Spa.', 'mp_quartz'),
   ]),
+
+  // --- Tramos contra el lobby (D41) ---
+  // Los 10 de arriba son los pares mínimos que redactó la fase 02. Estos 7
+  // completan la estrella alrededor de lobby_torre, de forma que TODA
+  // ubicación tenga ruta directa de ida y de vuelta al lobby. Eso es lo que
+  // le permite a resolveRoute() componer cualquiera de los 42 pares
+  // ordenados sin que haya que inventar 32 rutas más a mano.
+  //
+  // Faltaba, entre otros, estacionamiento → piso27: el origen por defecto de
+  // la primera cita del día (R7) contra el destino más común (consultorios),
+  // que hasta ahora dejaba el mapa sin nada que dibujar.
+
+  route('r_lobby_torre_estacionamiento', 'lobby_torre', 'estacionamiento', 4, [
+    step(1, 'Sal del lobby por la entrada principal de la Torre Médica.', 'Exit the lobby through the Medical Tower main entrance.', 'mp_lobby'),
+    step(2, 'Cruza hacia el estacionamiento.', 'Cross over to the parking area.', 'mp_parking'),
+  ]),
+
+  route('r_compass_lobby_torre', 'compass', 'lobby_torre', 3, [
+    step(1, 'Sal de Compass y regresa al lobby de acceso general.', 'Exit Compass and return to the general-access lobby.', 'mp_lobby'),
+  ]),
+
+  route('r_piso27_lobby_torre', 'piso27', 'lobby_torre', 3, [
+    step(1, 'Desde el piso 27, baja en el elevador de la Torre Médica hasta el lobby.', 'From floor 27, take the Medical Tower elevator down to the lobby.', 'mp_lobby'),
+  ]),
+
+  route('r_nivel1_lobby_torre', 'nivel1', 'lobby_torre', 4, [
+    step(1, 'Desde Nivel 1, regresa al lobby de acceso general.', 'From Level 1, head back to the general-access lobby.', 'mp_lobby'),
+  ]),
+
+  route('r_lobby_torre_nivel1', 'lobby_torre', 'nivel1', 4, [
+    step(1, 'Desde el lobby, sube a Nivel 1 (Farmer\'s Table y The Park Restaurante).', 'From the lobby, go up to Level 1 (Farmer\'s Table and The Park Restaurante).', 'mp_level1'),
+  ]),
+
+  route('r_farmacia_lobby_torre', 'farmacia', 'lobby_torre', 2, [
+    step(1, 'Desde la farmacia, regresa al lobby de acceso general.', 'From the pharmacy, head back to the general-access lobby.', 'mp_lobby'),
+  ]),
+
+  route('r_lobby_torre_farmacia', 'lobby_torre', 'farmacia', 2, [
+    step(1, 'La farmacia está cerca del lobby de acceso general.', 'The pharmacy is near the general-access lobby.', 'mp_pharmacy'),
+  ]),
 ];
 
 // --- src/domain/routing.js ---
@@ -1486,14 +1599,50 @@ function defaultOrigin(appointment, appointments, lodging) {
   return 'estacionamiento';
 }
 
+// Nodo por el que pasa todo el complejo: se entra por ahí desde el
+// estacionamiento y desde el hotel, y de ahí salen los elevadores a la torre
+// y los accesos a Nivel 1 y farmacia. Por eso es el punto de composición.
+const HUB_LOCATION_ID = 'lobby_torre';
+
 // resolveRoute(fromLocationId, toLocationId, routes) -> Route | SameLocation | null
+//
+// Primero busca una ruta directa redactada a mano. Si no existe, compone
+// origen → lobby → destino (D41). El catálogo directo cubre 17 de los 42
+// pares ordenados; escribir los otros 32 a mano habría sido inventar
+// contenido par por par, cuando todos siguen siendo provisionales hasta que
+// lleguen los planos oficiales (PRD §15.1). Componer por el lobby es
+// provisional igual, pero al menos es cierto: así se camina el edificio.
+//
+// La ruta compuesta tiene exactamente la misma forma que una directa (el
+// mapa la consume sin saber la diferencia) y se marca `composed: true` por
+// si alguna pantalla quiere distinguirla.
 function resolveRoute(fromLocationId, toLocationId, routes) {
   if (fromLocationId === toLocationId) {
     return { kind: 'same_location', locationId: fromLocationId };
   }
 
-  const match = routes.find((r) => r.fromLocationId === fromLocationId && r.toLocationId === toLocationId);
-  return match ?? null;
+  const direct = routes.find((r) => r.fromLocationId === fromLocationId && r.toLocationId === toLocationId);
+  if (direct) return direct;
+
+  // Si uno de los extremos ya es el lobby, no hay nada que componer: o había
+  // ruta directa o no la hay. (El catálogo garantiza las 12 contra el lobby
+  // — probado en test/domain/routing.test.js —, así que esto solo se alcanza
+  // con un locationId que no existe.)
+  if (fromLocationId === HUB_LOCATION_ID || toLocationId === HUB_LOCATION_ID) return null;
+
+  const toHub = routes.find((r) => r.fromLocationId === fromLocationId && r.toLocationId === HUB_LOCATION_ID);
+  const fromHub = routes.find((r) => r.fromLocationId === HUB_LOCATION_ID && r.toLocationId === toLocationId);
+  if (!toHub || !fromHub) return null;
+
+  return {
+    id: `${toHub.id}+${fromHub.id}`,
+    fromLocationId,
+    toLocationId,
+    estimatedMinutes: toHub.estimatedMinutes + fromHub.estimatedMinutes,
+    unconfirmed: true,
+    composed: true,
+    steps: [...toHub.steps, ...fromHub.steps].map((s, i) => ({ ...s, order: i + 1 })),
+  };
 }
 
 // --- src/map/complexMap.js ---
