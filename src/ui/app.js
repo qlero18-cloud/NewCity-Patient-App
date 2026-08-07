@@ -31,8 +31,10 @@ import { isExpired } from '../domain/index.js';
 import { createVisitApi } from './api.js';
 import { resolveVisitContext } from './visitSource.js';
 import { saveVisitCache, loadVisitCache, clearVisitCache } from './visitCache.js';
+import { parseNowOverride } from './urlParams.js';
 import { STRINGS, resolveInitialLang, translate } from './i18n.js';
 import { escapeHtml } from './util.js';
+import { renderNeutralScreen, renderLoadingScreen } from './screens/neutral.js';
 import { attachNav } from './nav.js';
 import { THEME_CSS } from './theme.js';
 import { renderTabBar, TABS_CSS } from './components/tabs.js';
@@ -78,41 +80,10 @@ function currentRoute() {
   return SCREENS[hash] ? hash : 'home';
 }
 
-function parseNowOverride(raw) {
-  if (!raw) return null;
-  const d = new Date(raw);
-  return Number.isNaN(d.getTime()) ? null : raw;
-}
-
 // La caché es un módulo de funciones sueltas (habla con localStorage);
 // visitSource la recibe como objeto para poder probarse con un doble. Este
 // adaptador es el único lugar donde se juntan las dos formas.
 const CACHE_DE_VISITA = { save: saveVisitCache, load: loadVisitCache, clear: clearVisitCache };
-
-// Etapa E — traer el expediente por red toma tiempo, y sin esto la página
-// se queda en blanco mientras tanto: en un teléfono con mala señal eso son
-// varios segundos indistinguibles de "la app no sirve". Reusa las clases
-// de la pantalla neutra en vez de traer estilos nuevos.
-function renderLoadingScreen(root, lang) {
-  root.innerHTML = `
-    <div class="nc-neutral">
-      <p class="nc-neutral-body">${escapeHtml(translate(lang, 'common.loading'))}</p>
-    </div>
-  `;
-}
-
-function renderNeutralScreen(root, lang) {
-  // INV-3: idéntica sin importar si el token nunca existió o ya venció —
-  // un solo camino de código para las dos situaciones, para que no puedan
-  // divergir por accidente en el futuro.
-  document.title = STRINGS[lang].common.appName;
-  root.innerHTML = `
-    <div class="nc-neutral">
-      <p class="nc-neutral-title">${escapeHtml(translate(lang, 'common.neutralTitle'))}</p>
-      <p class="nc-neutral-body">${escapeHtml(translate(lang, 'common.neutralBody'))}</p>
-    </div>
-  `;
-}
 
 // Etapa E — boot pasa a ser async porque resolver el token puede implicar
 // una ida al servidor. Quienes la llaman (app.html y el bloque en línea que
@@ -131,8 +102,8 @@ export async function boot(root, {
   injectStylesOnce();
   const params = new URLSearchParams(search);
   const token = params.get('p');
-  const nowOverride = parseNowOverride(params.get('now'));
-  const now = nowOverride ?? new Date().toISOString(); // ÚNICO lugar de todo el proyecto con permiso de leer el reloj real (INV-1 solo rige src/domain/)
+  const nowOverride = parseNowOverride(search);
+  const now = nowOverride ?? new Date().toISOString(); // uno de los dos únicos lugares con permiso de leer el reloj real (D20; el otro es coordinatorApp.js) — INV-1 solo rige src/domain/
 
   const storedLang = localStorage.getItem(LANG_STORAGE_KEY);
   const langParam = params.get('lang');
@@ -141,7 +112,7 @@ export async function boot(root, {
   document.title = STRINGS[lang].common.appName;
   document.documentElement.lang = lang;
 
-  renderLoadingScreen(root, lang);
+  root.innerHTML = renderLoadingScreen(lang);
   const resuelto = await resolveVisitContext(token, { api, cache: CACHE_DE_VISITA, now });
 
   // isExpired se vuelve a evaluar SIEMPRE, venga de donde venga el
@@ -151,8 +122,13 @@ export async function boot(root, {
   // sin esta línea seguiría abriéndose sin señal para siempre. Mismo
   // criterio que passCache con R3 (INV-4): se filtra con el `now` de
   // ahora, nunca con el que tenía el dispositivo al guardar.
+  //
+  // INV-3: un SOLO camino de código para "no existe" y para "venció", y la
+  // pantalla ni siquiera recibe cuál de los dos fue (ver screens/
+  // neutral.js) — no pueden divergir ni por accidente.
   if (!resuelto || isExpired(resuelto.record.visit, resuelto.record.appointments, resuelto.record.lodging, now)) {
-    renderNeutralScreen(root, lang);
+    document.title = STRINGS[lang].common.appName; // INV-6, igual que en render()
+    root.innerHTML = renderNeutralScreen(lang);
     return;
   }
 

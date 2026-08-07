@@ -20,7 +20,12 @@
 import { escapeHtml } from '../../util.js';
 import { renderFormErrors, renderRequestError } from './formErrors.js';
 
-const CAMPOS = {
+// El sufijo no es decorativo: intake, itinerary y lodging tenían los tres
+// un `const CAMPOS` privado de su módulo, y build.py aplana todo el grafo a
+// un solo scope, así que al empaquetar el panel (Etapa F, #10) los tres
+// chocaron. Como pasa con las clases .nc-coord-* de itinerary.js, era un
+// conflicto que solo estaba dormido porque nadie había construido esto.
+const CAMPOS_INTAKE = {
   patientFirstName: 'coordinator.intake.firstNameLabel',
   lang: 'coordinator.intake.langLabel',
   startsAt: 'coordinator.intake.startsAtLabel',
@@ -58,7 +63,7 @@ export function renderIntakeScreen(ctx) {
         </label>
 
         ${renderRequestError(requestError, t)}
-        ${renderFormErrors(errors, t, CAMPOS)}
+        ${renderFormErrors(errors, t, CAMPOS_INTAKE)}
 
         <button type="submit" class="nc-button nc-button--primary">${escapeHtml(t('coordinator.intake.save'))}</button>
       </form>

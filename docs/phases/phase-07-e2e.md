@@ -1,5 +1,7 @@
 # Fase 07 — Recorrido completo y publicación del prototipo
 
+> **Actualizado en la Etapa F.** El recorrido de `test/e2e/patient-journey.mjs` creció de 10 a **16 pasos**: los 10 originales del paciente sobre fixtures, y 6 nuevos del tramo coordinadora→paciente que no existía cuando se escribió esta fase — la coordinadora captura una visita real, se genera el enlace `/v/<token>`, ese enlace hace round-trip por `generateQrMatrix`/`decodeQrMatrix`, el paciente lo resuelve por red, sobrevive a quedarse sin señal, y al revocarse el pase deja de verse **también desde la caché** (INV-4). Donde este documento dice "diez pasos", léase dieciséis. El resto sigue vigente, incluida la prueba en hardware real, que sigue pendiente.
+
 **Depende de:** fases 01 a 06.
 **Entrega:** el prototipo probado de punta a punta y accesible desde un teléfono real por QR.
 

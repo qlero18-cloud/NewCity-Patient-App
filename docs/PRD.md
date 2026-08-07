@@ -32,17 +32,18 @@ Lo siguiente queda **explícitamente fuera** y no debe construirse ni insinuarse
 
 - Resultados de estudios y expediente clínico
 - Pagos, cotizaciones y venta de paquetes — eso sigue por WhatsApp con la coordinadora
-- Cuenta, contraseña e historial de visitas — el QR es el acceso y sirve solo para esa visita
+- Cuenta, contraseña e historial de visitas **del paciente** — el QR es el acceso y sirve solo para esa visita. (Las coordinadoras sí tienen cuenta desde la Etapa C; esto se refiere al lado del paciente, que sigue sin login.)
 - Posicionamiento en vivo dentro del edificio (dónde está parado el paciente ahora). Ver §6.3
 - Notificaciones push
-- Panel de coordinadores — se planea en `phases/phase-08`, se construye después del prototipo
 - Multi-hospital / multi-sede
+
+> **Construido después (Etapas A–F, 2026-08-07).** El panel de coordinadores estaba en esta lista como "se planea en `phases/phase-08`, se construye después del prototipo". Ya está construido y es lo que alimenta la app del paciente: `coordinator.html`, con cuentas propias, persistencia en Netlify Blobs y entrega del enlace por QR. Ver `README.md` y `docs/DECISIONS.md` D37 en adelante. El resto de esta lista sigue vigente sin cambios.
 
 ## 5. Usuarios
 
 **Paciente (usuario principal).** Adulto, con frecuencia mayor de 40, muchas veces angustiado por el motivo de su visita, a veces sin datos móviles en México. Usa el teléfono con una mano, de pie, en un lobby. Puede no hablar español. **No va a instalar nada.**
 
-**Coordinadora (usuario del panel, fase posterior).** Da de alta la visita, captura el itinerario, emite los QPASS y entrega el QR al paciente. Trabaja bajo presión y con varios pacientes a la vez.
+**Coordinadora (usuario del panel).** Da de alta la visita, captura el itinerario, emite los QPASS y entrega el QR al paciente. Trabaja bajo presión y con varios pacientes a la vez.
 
 ---
 

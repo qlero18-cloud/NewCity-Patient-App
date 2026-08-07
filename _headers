@@ -4,19 +4,20 @@
 # este archivo, ni netlify.toml, ni <meta http-equiv>. Con la Etapa B
 # entrando datos de salud por red, el hueco deja de ser cosmético.
 #
-# Los tres 'sha256-...' de script-src son los scripts en línea de
-# index.html, app.html y coordinator.html, en ese orden. NO se editan a
-# mano a ojo: `npm test` (test/deploy/csp.test.js) los recalcula desde los
-# HTML y falla imprimiendo el valor correcto si alguno cambió. Y `python3
-# build.py` imprime el de index.html al terminar, porque es el que se
-# regenera solo.
+# Los cuatro 'sha256-...' de script-src son los scripts en línea de
+# index.html, coordinator.html, app.html y coordinator-app.html, en ese
+# orden: primero los dos empaquetados que se publican, luego sus dos
+# fuentes. NO se editan a mano a ojo: `npm test` (test/deploy/csp.test.js)
+# los recalcula desde los HTML y falla imprimiendo el valor correcto si
+# alguno cambió. Y `python3 build.py` imprime los de index.html y
+# coordinator.html al terminar, porque son los que se regeneran solos.
 #
 # Un hash que no coincide no rompe la suite ni el `python3 -m http.server`
 # local: rompe la página en PRODUCCIÓN, en blanco y sin aviso. Por eso el
 # guard.
 
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-CBkR85A+PI/AYQo+FuoBV6C5V1FXwfhY2aLFPWWzJfM=' 'sha256-jKX4Plg0E1hJuvFQPX8xhasTT9t4IcYct+S47kABh/4=' 'sha256-Zhp3hjxbZ1UQrCYfZZvfhrNYh5ano2mpujTGCRCwnHg='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-UBbp3m9/Ql79YdvPigOkoMUWCxqHIG2ZyP516fEzBKI=' 'sha256-RlFXkI57nlTUYamjTkT9V1MVtc3XDh3OUXqzh0d33oU=' 'sha256-jKX4Plg0E1hJuvFQPX8xhasTT9t4IcYct+S47kABh/4=' 'sha256-Zhp3hjxbZ1UQrCYfZZvfhrNYh5ano2mpujTGCRCwnHg='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()

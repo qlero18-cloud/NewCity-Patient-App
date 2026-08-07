@@ -22,6 +22,15 @@
 // ese invariante nunca dependió de dónde vive el reloj real en la UI,
 // solo de que src/domain/ mismo nunca lo lea.
 //
+// Etapa F (#17) — y como es un punto de entrada real, también acepta
+// `?now=`, igual que app.html desde la fase 05. No es simetría por
+// simetría: #/pass-preview reusa renderPassScreen, que aplica R3, así que
+// con el reloj real el pase de cualquier visita de fixture (todas
+// fechadas en 2026) se veía revocado y no había forma de revisar cómo le
+// va a llegar al paciente. La lectura del parámetro es compartida
+// (src/ui/urlParams.js), no una segunda copia que se separe de la de
+// app.js.
+//
 // data-nav (D28): este archivo cablea TODOS los [data-nav] del árbol
 // completo con attachNav(root) (src/ui/nav.js) — el mismo helper
 // compartido que usa app.js, no una copia independiente — exactamente
@@ -33,6 +42,7 @@
 import { createCoordinatorStore } from './coordinatorStore.js';
 import { createHttpApi, createAuthApi } from './api.js';
 import { createAuthClient } from './authClient.js';
+import { parseNowOverride } from './urlParams.js';
 import { resolveInitialLang, translate } from './i18n.js';
 import { escapeHtml, classNames } from './util.js';
 import { attachNav } from './nav.js';
@@ -234,8 +244,16 @@ function currentRoute() {
   return ROUTES.has(hash) ? hash : 'visits';
 }
 
-export function boot(root) {
+// `search` entra por opciones con location.search por omisión, mismo
+// patrón que boot() del lado paciente: es lo que permite que exista
+// siquiera una prueba de esto sin montar DOM.
+export function boot(root, { search = location.search } = {}) {
   injectStylesOnce();
+
+  // Se resuelve UNA vez al arrancar, no en cada render(): la URL no cambia
+  // durante la sesión (la navegación del panel es por hash) y releerla en
+  // cada repintado solo daría más lugares donde equivocarse.
+  const nowOverride = parseNowOverride(search);
 
   // Etapa D — el panel deja de ser una copia en memoria de las fixtures.
   //
@@ -498,7 +516,12 @@ export function boot(root) {
     // encabezado del archivo). Desde la Etapa D solo lo usa #/pass-preview:
     // las mutaciones ya no lo llevan porque la hora que queda escrita en el
     // expediente la pone el servidor.
-    const now = new Date().toISOString();
+    //
+    // Etapa F — salvo que la URL traiga `?now=`, y entonces ese valor manda
+    // y no se mueve entre repintados. Es solo del navegador: el servidor
+    // se niega a honrar ningún `?now=` (visitHandler.js), así que esto no
+    // puede volver opcional la caducidad de nada, solo lo que se pinta.
+    const now = nowOverride ?? new Date().toISOString();
     const route = currentRoute();
 
     // --- puerta de sesión, antes que cualquier otra cosa ------------------

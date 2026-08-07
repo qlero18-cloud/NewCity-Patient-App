@@ -5,7 +5,7 @@
 import { isOpenNow } from '../../domain/index.js';
 import { locations } from '../../data/locations.js';
 import { supportChannel } from '../../data/support.js';
-import { escapeHtml } from '../util.js';
+import { escapeHtml, getLocationById } from '../util.js';
 import { renderFicha } from '../components/ficha.js';
 import { renderBadge } from '../components/badge.js';
 
@@ -27,8 +27,8 @@ function entryHtml(name, hours, now, t) {
 
 export function renderHoursScreen(ctx) {
   const { now, lang, t } = ctx;
-  const compass = locations.find((l) => l.id === 'compass');
-  const piso27 = locations.find((l) => l.id === 'piso27');
+  const compass = getLocationById(locations, 'compass');
+  const piso27 = getLocationById(locations, 'piso27');
 
   const entries = [
     entryHtml(compass.name[lang], compass.hours, now, t),

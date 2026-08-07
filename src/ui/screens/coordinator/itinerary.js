@@ -49,7 +49,8 @@ import { renderFormErrors, renderRequestError } from './formErrors.js';
 // Etapa D — el servidor devuelve motivos por campo y esto los nombra. Las
 // llaves son las mismas etiquetas que ya pinta cada <label> del formulario,
 // para que el error diga exactamente el nombre que se ve en pantalla.
-const CAMPOS = {
+// (Sufijo _CITA por la colisión de scope que documenta intake.js.)
+const CAMPOS_CITA = {
   serviceName: 'coordinator.itinerary.serviceNameLabel',
   startsAt: 'coordinator.itinerary.startsAtLabel',
   durationMin: 'coordinator.itinerary.durationLabel',
@@ -236,7 +237,7 @@ export function renderItineraryScreen(ctx) {
       <h1 class="nc-screen-title">${escapeHtml(title)}</h1>
       ${body}
       ${renderRequestError(requestError, t)}
-      ${renderFormErrors(errors, t, CAMPOS)}
+      ${renderFormErrors(errors, t, CAMPOS_CITA)}
       ${renderAddAppointmentForm(lang, t)}
     </section>
   `;

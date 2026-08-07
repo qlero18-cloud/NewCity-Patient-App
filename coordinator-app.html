@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<!--
+  Fuente del panel de coordinación. Simétrico con app.html: un único
+  módulo ES que llama boot(root), y build.py lo empaqueta en el archivo
+  que de verdad se publica — aquí coordinator.html, allá index.html.
+
+  Se llamaba coordinator.html hasta la Etapa F (#10), cuando este archivo
+  pasó a ser fuente y le cedió ese nombre al empaquetado: la URL del panel
+  no cambió, lo que cambió es que ahora se sirve construido.
+
+  Este archivo se abre sin construir para desarrollar (`netlify dev` o
+  `python3 -m http.server`, nunca `file://`: un import de módulo ES vía
+  file:// falla por CORS en la mayoría de navegadores). Editar aquí no
+  basta para que el panel publicado cambie — hay que correr `python3
+  build.py` y volver a commitear coordinator.html; `build.py --check` y
+  test/deploy/bundleUpToDate.test.js fallan si se olvida.
+
+  A diferencia de app.html no hay `?p=` ni token de paciente que resolver:
+  coordinatorApp.js aterriza en la pantalla de acceso y, con sesión, en la
+  lista de visitas.
+
+  Ojo al editar este comentario: no escribas un tag de script literal aquí
+  dentro. build.py busca el primer tag de módulo del documento y un
+  comentario que lo mencione engancha primero, llevándose la prosa hasta
+  el cierre del script real. Pasó, y el resultado fue una página en blanco
+  en producción con todo verde en local.
+-->
+<title>NewCity — Coordinación</title>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+  import { boot } from './src/ui/coordinatorApp.js';
+  boot(document.getElementById('app'));
+</script>
+</body>
+</html>

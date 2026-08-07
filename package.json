@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "NewCity Hospital Patient App — prototipo navegable",
+  "description": "NewCity Hospital Patient App — app del paciente y panel de coordinación",
   "scripts": {
     "test": "node --test 'test/**/*.test.js'",
     "test:domain": "node --test 'test/domain/**/*.test.js'",
@@ -11,7 +11,7 @@
     "test:tz": "for z in UTC America/New_York America/Tijuana; do echo \"--- TZ=$z ---\"; TZ=$z node --test 'test/domain/**/*.test.js'; done"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "@netlify/blobs": "^10.7.12"

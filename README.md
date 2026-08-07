@@ -1,10 +1,12 @@
-# NewCity Hospital Patient App — prototipo navegable
+# NewCity Hospital Patient App
 
-Prototipo del PRD en `docs/PRD.md`: el paciente escanea su QR y ve a dónde ir, a qué hora, con qué pase de acceso y cómo pedir ayuda, sin descargar nada. Construido fase por fase según `docs/phases/`, con núcleo de dominio puro y probado antes que cualquier pantalla (`docs/DECISIONS.md` D13).
+Implementación del PRD en `docs/PRD.md`: la coordinadora captura la visita en su panel, le manda al paciente un enlace con QR, y el paciente lo abre en su propio teléfono y ve a dónde ir, a qué hora, con qué pase de acceso y cómo pedir ayuda, sin descargar nada. Construido fase por fase según `docs/phases/`, con núcleo de dominio puro y probado antes que cualquier pantalla (`docs/DECISIONS.md` D13).
 
-## Qué SÍ hace este prototipo
+El circuito está cerrado: lo que captura coordinación es lo que ve el paciente. Lo que falta para producción son las dos pruebas en hardware real (lectora y teléfono) y las decisiones del hospital sobre datos de salud — ambas al final de este archivo, y ninguna la puede hacer quien escribe el código.
 
-Las siete pantallas del paciente (Inicio, Mi itinerario, Mapa y accesos, Plaza, Horarios, Mi estancia, Ayuda), con:
+## Qué SÍ hace
+
+Las siete pantallas del paciente (Inicio, Mi itinerario, Mapa y accesos, Plaza, Horarios, Mi estancia, Ayuda), el panel de coordinación y lo que une a los dos:
 
 - Caducidad del enlace, "tu siguiente paso", múltiples QPASS visibles y ruteo por defecto (R1–R7 del PRD), como funciones puras y probadas en `src/domain/` — ver `docs/phases/phase-01-domain-model.md` y `phase-02-routing-engine.md`.
 - Contenido real del complejo (`src/data/`) y datos de ejemplo ficticios que ejercitan cada caso límite del PRD §9 — `phase-03-fixtures.md`.
@@ -12,12 +14,13 @@ Las siete pantallas del paciente (Inicio, Mi itinerario, Mapa y accesos, Plaza, 
 - Bilingüe ES/EN con paridad de cadenas probada, tema claro/oscuro, `index.html` autocontenido (cero peticiones a terceros) — `phase-05-patient-ui.md`.
 - QPASS con símbolo QR o Code128 generado sin dependencias externas, con caché para seguir viéndose sin conexión — `phase-06-qpass-render.md`.
 - Panel de coordinadores (`coordinator.html`) — alta de visita, itinerario (agregar, editar, mover, cancelar), hospedaje y emisión de QPASS (subiendo una imagen ya existente), con cuenta propia por persona y todo guardado del lado del servidor. **Ya no es una demo en memoria**: desde la Etapa D lo que se captura sobrevive a recargar la página y a abrirla en otra máquina, y cada cambio queda firmado con quién lo hizo — `phase-09-coordinator-demo.md` describe el flujo de pantallas, que no cambió; lo que cambió está en `docs/DECISIONS.md` D37–D38 y D45–D58.
+- **La entrega al paciente**, que es lo que cierra el circuito: una pestaña de la visita con el enlace `https://<sitio>/v/<token>`, su QR en pantalla, copiar al portapapeles y mandar por WhatsApp (D61). El paciente abre ese enlace y `src/ui/app.js` resuelve el token en orden **fixture → red → caché local** (D62): una visita real se busca en el servidor, y una vez cargada sobrevive a quedarse sin señal en el acceso.
 
 ## Qué NO hace (a propósito)
 
-- **Que el paciente vea lo que capturó coordinación.** Es lo único que falta para cerrar el circuito, y es la Etapa E: hoy el panel guarda de verdad, pero `src/ui/app.js` todavía resuelve el token de la URL (`?p=`) contra las fixtures embebidas, así que una visita creada por una coordinadora no se puede abrir todavía. Tampoco existe aún la pantalla de entrega (enlace + QR + WhatsApp) que le pasa esa visita al paciente.
 - **Comprobado contra Blobs en producción.** Lo que queda sin cubrir es la escritura simultánea de dos personas sobre la MISMA visita (D54): Blobs no tiene comparar-y-fijar y la segunda escritura pisa a la primera. Con dos o tres personas coordinando la ventana es de milisegundos, y el arreglo de verdad pide un almacén que sepa versionar. Ver abajo cómo se cubre el resto.
-- **Resultados clínicos, expediente, pagos ni login** — fuera del v1 desde el PRD (D09).
+- **Servir solo lo construido.** `netlify.toml` publica la raíz del repositorio (`publish = "."`), así que `src/`, `docs/` y `test/` quedan accesibles en el sitio junto a las dos páginas. Nada de eso es secreto —es el mismo código del repositorio— pero tampoco hay razón para publicarlo: lo correcto es un directorio `dist/` armado por `build.py`. Se dejó fuera de la Etapa F a propósito, porque cambiar el directorio de publicación de un sitio que ya está en línea se comprueba desplegando, y eso no se puede hacer desde aquí.
+- **Resultados clínicos, expediente, pagos, ni cuenta del paciente** — fuera del v1 desde el PRD (D09). El paciente nunca escribe una contraseña: su enlace es su acceso, y sirve para esa visita y nada más. El login es solo del lado de coordinación.
 - **Posicionamiento en vivo dentro del edificio** — el ruteo es paso a paso pre-escrito (D06), no un "estás aquí" en tiempo real.
 
 ## Pendientes del cliente (PRD §15)
@@ -30,15 +33,16 @@ Todo lo que depende de esto sigue marcado `[POR CONFIRMAR]` / `unconfirmed: true
 4. Horarios reales de Compass, Piso 27 y coordinación (hoy: 07:00–20:00 todos los días, placeholder) — el directorio nuevo tampoco trae horarios de ningún local.
 5. Cuál número es WhatsApp y cuál Google Voice (hoy se usa el mismo número real de los flyers en los dos campos).
 6. ~~Nombre y ubicación exacta de la farmacia~~ Resuelto: "Farmacia La + Barata" (D26).
-7. Formato real del payload del QPASS y qué lectora lo lee — el generador de esta fase se acotó a versión 3/nivel M/modo byte (`docs/DECISIONS.md` D21) hasta saber qué hace falta de verdad.
+7. Formato real del payload del QPASS y qué lectora lo lee — el generador se acotó a propósito a las versiones 3 y 4, nivel M, modo byte (`docs/DECISIONS.md` D21 y D60) hasta saber qué hace falta de verdad.
 
 Ya resuelto (antes listado aquí como hueco entre fases): "tienda de conveniencia" es 7-Eleven (D27) — `docs/DECISIONS.md` D17 queda marcada como resuelta.
 
-## Prototipo publicado
+## Publicado
 
-**https://nchpatient.netlify.app/**
+**https://nchpatient.netlify.app/** — la app del paciente
+**https://nchpatient.netlify.app/coordinator.html** — el panel de coordinación
 
-Página estática autocontenida, sin peticiones a dominios externos, publicada en Netlify a partir del mismo repositorio de GitHub.
+Dos páginas estáticas autocontenidas y sus Functions, publicadas en Netlify a partir del mismo repositorio de GitHub. Ninguna de las dos pide nada a dominios externos: el paciente le habla a `/api/visit` y el panel a `/api/auth/*` y `/api/coordinator/*`, todo del mismo origen.
 
 > **Corregido en la Etapa B.** Esta línea decía "CSP estricta" desde la fase 08 y era falsa: no existía `_headers`, ni `netlify.toml`, ni ningún `<meta http-equiv>` en el repo. Lo que sí era cierto —y lo único que se había comprobado, en el panel de red— es que la página no pide nada a terceros. La CSP existe desde la Etapa B (`_headers`), y no es del todo estricta: `script-src` va por hash, sin `'unsafe-inline'`, pero `style-src` sí lo necesita porque el CSS se arma en tiempo de ejecución (`src/ui/app.js:51`). `test/deploy/csp.test.js` verifica las dos cosas, y que esa excepción no se extienda a ninguna otra directiva. GitHub Pages fue la primera opción, pero su primer deploy se quedó atorado en la cola de Actions sin completarse ni fallar explícitamente; Netlify construye en su propia infraestructura y no depende de esa cola (`docs/DECISIONS.md` D23).
 
@@ -48,7 +52,7 @@ Enlace corto para demo — apunta a la fixture `v_demo1` con `now` fijado, vía 
 https://nchpatient.netlify.app/demo
 ```
 
-`qr-demo.png` codifica ese enlace corto (el largo con `?p=` y `now=` no cabe en los 42 bytes del generador de QR de la fase 06 — D21 — que se acotó a propósito a un tamaño conservador).
+`qr-demo.png` codifica ese enlace corto: el largo, con `?p=` y `now=`, no cabe ni siquiera en los 62 bytes de la versión 4 (D60), que es la más grande que sabe emitir este generador. El enlace real que la coordinadora le manda al paciente sí cabe: `https://nchpatient.netlify.app/v/<token>` mide 55 bytes con el token de 128 bits y entra en la versión 4 con 7 de sobra — por eso el QR de la pantalla de entrega se genera en vivo y no hace falta acortarlo. (El largo mide 82: de ahí la regla `/v/*` de `_redirects`.)
 
 ## Cómo correrlo localmente
 
@@ -68,7 +72,20 @@ http://localhost:8743/app.html?p=fixture-token-v-demo1&now=2026-03-10T10:00-07:0
 
 `python3 -m http.server` no manda `Cache-Control` en sus respuestas, así que tras editar un archivo y recargar, el navegador puede seguir sirviendo una copia vieja de algún `.js` desde su propio caché (comprobado de primera mano verificando la fase 09: un `.click()` sobre una pestaña que llevaba rato abierta seguía corriendo `pass.js` de antes de un fix ya guardado en disco). Si un cambio no se refleja, recarga forzando caché vacío (Cmd+Shift+R en Mac) en vez de una recarga normal.
 
-`p` es el token de una de las fixtures de `src/data/fixtures.js` (`fixture-token-v-demo1`, `-v-demo2`, `-v-longstay`, `-v-expired`, `-v-revoked`). `now` es un escape hatch de este prototipo (D20): ancla la hora "actual" a la fecha de la fixture — sin él, la fecha real eventualmente deja cualquier fixture vencida (INV-3), porque no hay backend que las mantenga vigentes.
+`p` es el token de una de las fixtures de `src/data/fixtures.js` (`fixture-token-v-demo1`, `-v-demo2`, `-v-longstay`, `-v-expired`, `-v-revoked`). `now` ancla la hora "actual" a la fecha de la fixture (D20): sin él, la fecha real eventualmente deja cualquier fixture vencida (INV-3), porque nada del lado del servidor las mantiene vigentes. Funciona igual en `coordinator.html` desde la Etapa F — la pestaña del pase reusa la pantalla del paciente y sin `?now=` mostraba como revocado el pase de una visita de marzo de 2026.
+
+Con `?p=<token real>` no basta un servidor estático: un token emitido por coordinación se busca contra `/api/visit`, que aquí no existe. Ese es el caso de la siguiente sección. En producción el enlace que recibe el paciente es `/v/<token>`, y `_redirects` lo traduce a `/?p=<token>` con un 302 — un rewrite dejaría la barra en `/v/…` y `params.get('p')` daría `null`.
+
+### Cómo se construyen las dos páginas
+
+`index.html` y `coordinator.html` **no se editan a mano**: los genera `build.py` aplanando todo el grafo de módulos de cada punto de entrada en un solo script en línea, y embebiendo el ícono y el fondo del mapa como `data:` URI.
+
+| Se edita | Genera |
+|---|---|
+| `app.html` + `src/ui/app.js` | `index.html` (40 módulos) |
+| `coordinator-app.html` + `src/ui/coordinatorApp.js` | `coordinator.html` (31 módulos) |
+
+Las dos fuentes sí usan módulos ES normales y sirven para desarrollar con recarga; las dos salidas son lo que se publica. Al terminar, `build.py` imprime el hash sha256 de cada script en línea y avisa si no coincide con el de `_headers` — un hash desfasado no rompe nada en local, rompe la página en producción, en blanco y sin aviso. `python3 build.py --check` no escribe nada y falla si alguna salida quedó atrás de sus fuentes.
 
 ### El panel de coordinación necesita las Functions
 
@@ -155,13 +172,15 @@ Cada fase tiene su propio comando exacto en la sección "Verificación" de `docs
 
 ```bash
 cd "newcity-patient-app"
-npm test                              # los 660 casos automatizados de todas las fases y etapas
-python3 build.py                      # genera index.html autocontenido
-node test/e2e/patient-journey.mjs     # los 10 pasos del recorrido, fase 07
+npm test                              # los 881 casos automatizados de todas las fases y etapas
+python3 build.py --check              # confirma que index.html y coordinator.html están al día
+node test/e2e/patient-journey.mjs     # los 16 pasos del recorrido (10 del paciente + 6 de coordinación)
 ```
 
 Lo que ningún comando automatizado cubre, y que sigue pendiente:
 
 - **`node scripts/smoke-blobs.mjs`** contra el sitio desplegado — ver "Probar contra Netlify Blobs de verdad" arriba. Es lo único que comprueba el comportamiento de Blobs en producción, y necesita un sitio con `SESSION_SECRET` puesto y una cuenta ya creada.
 - **Prueba física con una lectora real** contra la pantalla del QPASS (fase 06) — sin ella esa fase no se considera terminada, es la única forma de saber si el pase realmente abre la puerta.
-- **Prueba en un teléfono real** (iPhone y Android): que la URL publicada cargue, que "Agregar a inicio" produzca ícono y nombre correctos, y que `qr-demo.png` abra el prototipo al escanearlo con la cámara del teléfono — fase 07. La publicación en sí ya está hecha y verificada en navegador (carga correcta, cero peticiones externas, símbolo del pase, cambio de idioma); lo que falta es específicamente la prueba en hardware real, que solo el cliente puede hacer.
+- **Prueba en un teléfono real** (iPhone y Android): que la URL publicada cargue, que "Agregar a inicio" produzca ícono y nombre correctos, y que la cámara del teléfono abra la app al escanear el QR — fase 07. La publicación en sí ya está hecha y verificada en navegador (carga correcta, cero peticiones externas, símbolo del pase, cambio de idioma); lo que falta es específicamente la prueba en hardware real, que solo el cliente puede hacer.
+
+  Desde la Etapa E la prueba que de verdad importa no es `qr-demo.png` sino la de extremo a extremo: dar de alta una visita en el panel, escanear con un teléfono el QR de la pestaña de entrega, y ver **el itinerario de esa visita**. El round-trip del símbolo está probado en software (`generateQrMatrix` → `decodeQrMatrix`, paso 12 del e2e), pero eso comprueba que la matriz es correcta, no que la cámara de un iPhone la lea a la distancia y con la luz de un mostrador.

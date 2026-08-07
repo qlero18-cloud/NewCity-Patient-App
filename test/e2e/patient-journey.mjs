@@ -4,6 +4,15 @@
 // src/domain, src/data, src/map y src/render en la misma secuencia que
 // src/ui/app.js, sin necesidad de un DOM real.
 //
+// La Etapa F le agrega los pasos 11–15: el tramo que EMPIEZA en la
+// coordinadora. Los diez primeros parten de una fixture ya compilada en el
+// bundle, así que por construcción nunca podían fallar por el motivo que
+// abrió todo esto: que una visita capturada en el panel no se pudiera
+// abrir. Ese tramo cruza los dos lados de verdad —panel → servidor →
+// teléfono— sobre un solo almacén en memoria, y es lo único aquí que
+// responde "¿de dónde sale el QR que la coordinadora le manda al
+// paciente?" con código que corre.
+//
 // Lo que este script SÍ prueba: que la lógica de cada paso da el
 // resultado correcto (siguiente paso, origen por defecto, ruta,
 // resaltado, símbolo del pase, caché sin conexión, paridad es/en,
@@ -29,18 +38,33 @@ import { createHighlighter } from '../../src/map/highlights.js';
 import { resolveInitialLang, translate } from '../../src/ui/i18n.js';
 import { generateQrMatrix, decodeQrMatrix } from '../../src/render/qr.js';
 import { savePassCache, getCachedVisiblePasses } from '../../src/ui/passCache.js';
+import { createCoordinatorStore } from '../../src/ui/coordinatorStore.js';
+import { createLoopbackApi } from '../helpers/loopback.js';
+import { handleVisitRequest, TOKEN_HEADER } from '../../src/server/visitHandler.js';
+import { resolveVisitContext } from '../../src/ui/visitSource.js';
+import { saveVisitCache, loadVisitCache, clearVisitCache } from '../../src/ui/visitCache.js';
+import { visitUrl } from '../../src/ui/screens/coordinator/handoff.js';
 
 function step(n, description, fn) {
   fn();
   console.log(`✔ paso ${n} — ${description}`);
 }
 
-// Doble mínimo de localStorage — passCache.js lo necesita y node no lo trae.
+// Los pasos 11–15 esperan al servidor. `step` se queda síncrono para no
+// tocar los diez primeros; este es su gemelo para el tramo nuevo.
+async function stepAsync(n, description, fn) {
+  await fn();
+  console.log(`✔ paso ${n} — ${description}`);
+}
+
+// Doble mínimo de localStorage — passCache.js y visitCache.js lo necesitan
+// y node no lo trae. removeItem lo usa clearVisitCache (paso 15).
 globalThis.localStorage = (() => {
   const store = new Map();
   return {
     getItem: (k) => (store.has(k) ? store.get(k) : null),
     setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
   };
 })();
 
@@ -137,5 +161,145 @@ step(10, 'un token inventado no se encuentra — INV-3 exige la MISMA pantalla q
   assert.strictEqual(invented, undefined);
 });
 
-console.log('\n10/10 pasos del recorrido pasaron.');
+// =====================================================================
+// Etapa F — el tramo que empieza en la coordinadora.
+//
+// Un solo almacén en memoria con los DOS handlers reales encima: el del
+// panel (coordinatorHandler, vía test/helpers/loopback.js) y el del
+// paciente (visitHandler). Nada se finge salvo el guardia de sesión, que
+// ya tiene sus pruebas en test/server/authHandler.test.js.
+// =====================================================================
+
+const panel = createLoopbackApi({ now: NOW });
+const store = createCoordinatorStore({ api: panel });
+
+// El cliente del paciente: la misma firma que createVisitApi (src/ui/api.js)
+// pero contra el store del servidor en vez de fetch. Traduce los códigos
+// igual que el de verdad — y esa traducción es lo que separa "venció" de
+// "no hay señal" en el paso 14.
+const apiDelPaciente = {
+  async getVisit(token) {
+    const res = await handleVisitRequest(
+      new Request('https://nch.test/api/visit', { headers: { [TOKEN_HEADER]: token } }),
+      panel.servidor,
+      NOW,
+    );
+    if (res.status === 404) return { ok: false, notFound: true };
+    if (!res.ok) return { ok: false, failed: true };
+    return { ok: true, record: await res.json() };
+  },
+};
+// Sin señal: ni 404 ni 200, que es exactamente lo que ve un teléfono en el
+// sótano del estacionamiento.
+const apiSinSenal = { async getVisit() { return { ok: false, failed: true }; } };
+const CACHE = { save: saveVisitCache, load: loadVisitCache, clear: clearVisitCache };
+
+let tokenReal;
+let visitId;
+let passId;
+
+await stepAsync(11, 'la coordinadora captura una visita y el token que devuelve el servidor NO es una fixture', async () => {
+  const creada = await store.createVisit({
+    patientFirstName: 'Bernardo',
+    lang: 'es',
+    startsAt: '2026-03-10T08:00-07:00',
+    endsAt: '2026-03-11T09:30-07:00',
+  });
+  assert.ok(creada.ok, `la visita no se creó: ${JSON.stringify(creada)}`);
+  visitId = creada.visit.id;
+  tokenReal = creada.visit.token;
+
+  // Lo que faltaba y abrió la etapa: createVisit acuñaba el token y el
+  // router lo tiraba. Si vuelve a perderse, aquí truena.
+  assert.ok(tokenReal, 'createVisit tiene que devolver el token: es lo único que se le manda al paciente');
+  assert.strictEqual(tokenReal.length, 22, 'token de 128 bits en base64url = 22 caracteres (PRD §6.1)');
+  assert.strictEqual(
+    Object.values(fixtures).find((f) => f.visit.token === tokenReal),
+    undefined,
+    'un token real jamás debe colisionar con una fixture: visitSource.js resuelve fixtures ANTES de ir a la red',
+  );
+
+  // La cita va a piso27, que es el destino que el plan señaló como el más
+  // probable y el que no tenía ninguna ruta desde el estacionamiento.
+  const cita = await store.addAppointment(visitId, {
+    serviceName: 'Consulta de Cardiología',
+    startsAt: '2026-03-10T12:00-07:00',
+    durationMin: 30,
+    locationId: 'piso27',
+  });
+  assert.ok(cita.ok, `la cita no se agregó: ${JSON.stringify(cita)}`);
+  assert.ok(
+    locations.some((l) => l.id === cita.appointment.locationId),
+    'el locationId guardado tiene que existir en el catálogo — es la razón de ser del <select> (D40)',
+  );
+
+  const emitido = await store.issueQpass(visitId, { scope: 'torre', format: 'qr', payload: 'payload-e2e-bernardo' });
+  assert.ok(emitido.ok, `el pase no se emitió: ${JSON.stringify(emitido)}`);
+  passId = emitido.qpass.id;
+});
+
+await stepAsync(12, 'el enlace que se manda por WhatsApp cabe en un QR y decodifica de vuelta al mismo enlace', async () => {
+  const url = visitUrl('https://nchpatient.netlify.app', tokenReal);
+  assert.strictEqual(url, `https://nchpatient.netlify.app/v/${tokenReal}`);
+  // El motivo entero de subir el QR a versión 4 (D39): con v3 este enlace
+  // no cabía y el handoff no existía. Round-trip real, no "se dibujó algo".
+  assert.strictEqual(decodeQrMatrix(generateQrMatrix(url)), url, 'el QR del panel tiene que devolver el enlace exacto');
+});
+
+await stepAsync(13, 'el paciente abre ese enlace y ve SU visita, servida por red, con ruta hasta piso27', async () => {
+  const resuelto = await resolveVisitContext(tokenReal, { api: apiDelPaciente, cache: CACHE, now: NOW });
+  assert.ok(resuelto, 'la visita creada por la coordinadora tiene que abrir — esto era imposible antes de la Etapa E');
+  assert.strictEqual(resuelto.source, 'network', 'no es fixture ni caché: viene del servidor');
+  assert.strictEqual(resuelto.record.visit.patientFirstName, 'Bernardo');
+  // El handler no devuelve el token: repetirlo solo le daría una segunda
+  // vida en cachés y registros (visitHandler.js).
+  assert.strictEqual(resuelto.record.visit.token, undefined, 'el expediente servido no debe traer el token de vuelta');
+
+  const siguiente = nextStep(resuelto.record.appointments, NOW);
+  assert.strictEqual(siguiente.locationId, 'piso27');
+
+  const origen = defaultOrigin(siguiente, resuelto.record.appointments, resuelto.record.lodging);
+  assert.strictEqual(origen, 'estacionamiento', 'sin cita previa ni hospedaje, R7 manda al estacionamiento');
+  const ruta = resolveRoute(origen, 'piso27', routes);
+  assert.ok(ruta && ruta.steps?.length, 'estacionamiento→piso27 tiene que tener ruta: era el par que faltaba (Etapa A)');
+});
+
+await stepAsync(14, 'sin señal, esa misma visita real sigue abriendo desde la caché', async () => {
+  const resuelto = await resolveVisitContext(tokenReal, { api: apiSinSenal, cache: CACHE, now: NOW });
+  assert.ok(resuelto, 'perder la señal no puede dejar al paciente sin su pase en el acceso (PRD)');
+  assert.strictEqual(resuelto.source, 'cache');
+  assert.strictEqual(resuelto.record.visit.patientFirstName, 'Bernardo');
+  assert.strictEqual(resuelto.record.passes.length, 1, 'el pase emitido en el paso 11 tiene que estar guardado');
+});
+
+await stepAsync(15, 'la coordinadora revoca el pase y deja de verse en el teléfono, también sin señal', async () => {
+  const revocado = await store.revokeQpass(visitId, passId);
+  assert.ok(revocado.ok, `el pase no se revocó: ${JSON.stringify(revocado)}`);
+
+  const conRed = await resolveVisitContext(tokenReal, { api: apiDelPaciente, cache: CACHE, now: NOW });
+  assert.strictEqual(conRed.record.passes.length, 0, 'R3: un pase revocado no debe llegar siquiera al dispositivo');
+
+  // Y lo que de verdad importa (INV-4): la caché se reescribió con la
+  // versión sin el pase, así que volver a modo avión tampoco lo resucita.
+  // Filtrar solo al pintar habría dejado la imagen del QPASS viva en el
+  // teléfono justo después de revocarlo.
+  const sinRed = await resolveVisitContext(tokenReal, { api: apiSinSenal, cache: CACHE, now: NOW });
+  assert.strictEqual(sinRed.source, 'cache');
+  assert.strictEqual(sinRed.record.passes.length, 0, 'revocar tiene que sobrevivir al modo avión');
+});
+
+await stepAsync(16, 'un token con forma real pero inventado da la pantalla neutra, y no toca la caché de nadie', async () => {
+  // Cierra el paso 10 del otro lado: allá el token inventado no estaba en
+  // las fixtures; aquí llega al servidor, que contesta el 404 único de
+  // INV-3 — el mismo que daría una visita vencida.
+  const inventado = 'zzzzzzzzzzzzzzzzzzzzzz';
+  assert.strictEqual(inventado.length, tokenReal.length, 'mismo largo: la forma no debe delatar nada');
+  const resuelto = await resolveVisitContext(inventado, { api: apiDelPaciente, cache: CACHE, now: NOW });
+  assert.strictEqual(resuelto, null, 'null = pantalla neutra, la misma para "no existe" y para "venció"');
+
+  const sigueViva = await resolveVisitContext(tokenReal, { api: apiSinSenal, cache: CACHE, now: NOW });
+  assert.ok(sigueViva, 'el 404 de OTRO token no puede borrar la caché de la visita buena');
+});
+
+console.log('\n16/16 pasos del recorrido pasaron (10 del paciente + 6 del tramo coordinadora→paciente).');
 console.log('Pendiente, fuera del alcance de este script: recorrido visual en navegador y prueba en teléfono real.');

@@ -1,5 +1,21 @@
 # Fase 09 — Demo del panel de coordinadores
 
+> ## ⚠️ La premisa de esta fase quedó atrás (Etapas C–F)
+>
+> Este documento se conserva como registro de por qué el panel quedó como quedó, y **su diseño de pantallas sigue siendo el vigente**: lista de visitas, alta, itinerario, hospedaje, emisión de QPASS subiendo una imagen, vista previa del pase. Eso no cambió.
+>
+> Lo que sí cambió es todo lo que este documento repite como restricción — "sin servidor", "sin autenticación", "nada sobrevive un refresh", "solo en memoria", "no entrega un sistema que una coordinadora real pueda operar". Nada de eso sigue siendo cierto:
+>
+> | Dice aquí | Hoy |
+> |---|---|
+> | Sin pantalla de login | Cuenta propia por persona, contraseña PBKDF2, cookie de sesión firmada (Etapa C, D46–D53) |
+> | Estado en memoria, se borra al recargar | Netlify Blobs del lado del servidor; cada cambio firmado con quién lo hizo (Etapa D, D45–D58) |
+> | La imagen del QPASS vive en una variable y se pierde | Se guarda con la visita; se puede revocar y reemitir |
+> | Nunca toca la sesión de ningún paciente | Es la única fuente de lo que ve el paciente; la pestaña de entrega le manda enlace y QR (Etapa E, D61–D62) |
+> | `build.py` empaqueta solo `app.html` | Empaqueta las dos: `coordinator-app.html` → `coordinator.html` (Etapa F) |
+>
+> Al leer lo que sigue, todo "demo" quiere decir "el flujo de pantallas que se diseñó aquí y se implementó de verdad después".
+
 > **Demo de clic, no el MVP.** Esta fase agrega, al mismo repositorio y al mismo sitio de Netlify que ya aloja el prototipo del paciente (D23), una interfaz navegable del flujo de trabajo de coordinación — dar de alta una visita, capturar el itinerario, emitir un QPASS, registrar el hospedaje — con el mismo enfoque técnico de las fases 01 a 07: JavaScript plano (ESM), sin framework, sin servidor, sin base de datos, sin autenticación, sitio estático.
 >
 > **No es** el MVP real de `docs/phases/phase-08-coordinator-panel.md`. Esa fase sigue exactamente como está escrita — diferida, sin construirse, condicionada a hosting y a sus 6 decisiones abiertas —; esta fase no la adelanta, no la reemplaza y no resuelve ninguna de esas decisiones. De hecho puede construirse *ahora*, sin esperar al cliente, precisamente porque no necesita ninguna de ellas: no hay hosting que decidir, ni base de datos, ni acceso de coordinadoras que administrar, porque nada de lo que aquí se captura persiste de verdad.

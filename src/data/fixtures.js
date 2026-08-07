@@ -173,4 +173,3 @@ const v_revoked = {
 };
 
 export const fixtures = { v_demo1, v_demo2, v_longstay, v_expired, v_revoked };
-export const FIXTURE_IDS = Object.keys(fixtures);

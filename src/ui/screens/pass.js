@@ -24,7 +24,7 @@
 
 import { visiblePasses } from '../../domain/index.js';
 import { generateQrMatrix, renderQrSvg } from '../../render/qr.js';
-import { generateCode128Bars, renderCode128Svg } from '../../render/code128.js';
+import { renderCode128Svg } from '../../render/code128.js';
 import { savePassCache, getCachedVisiblePasses } from '../passCache.js';
 import { escapeHtml } from '../util.js';
 

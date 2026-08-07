@@ -13,10 +13,10 @@ import { renderComplexMapSvg, renderFichaHtml, getMapPointMeta, MAP_POINT_IDS } 
 import { highlighterForSvgElement } from '../../map/highlights.js';
 import { routes } from '../../data/routes.js';
 import { locations } from '../../data/locations.js';
-import { escapeHtml } from '../util.js';
+import { escapeHtml, getLocationById } from '../util.js';
 
 function mapPointIdForLocation(locationId) {
-  return locations.find((l) => l.id === locationId)?.mapPointId ?? null;
+  return getLocationById(locations, locationId)?.mapPointId ?? null;
 }
 
 export function renderMapScreen(ctx) {

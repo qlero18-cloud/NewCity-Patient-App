@@ -1453,8 +1453,8 @@ function entryHtml(name, hours, now, t) {
 
 function renderHoursScreen(ctx) {
   const { now, lang, t } = ctx;
-  const compass = locations.find((l) => l.id === 'compass');
-  const piso27 = locations.find((l) => l.id === 'piso27');
+  const compass = getLocationById(locations, 'compass');
+  const piso27 = getLocationById(locations, 'piso27');
 
   const entries = [
     entryHtml(compass.name[lang], compass.hours, now, t),
@@ -2125,7 +2125,7 @@ function highlighterForSvgElement(svgElement) {
 
 
 function mapPointIdForLocation(locationId) {
-  return locations.find((l) => l.id === locationId)?.mapPointId ?? null;
+  return getLocationById(locations, locationId)?.mapPointId ?? null;
 }
 
 function renderMapScreen(ctx) {
@@ -2238,6 +2238,50 @@ const MAP_SCREEN_CSS = `
 .nc-route-empty { margin: 0; font-size: 13px; opacity: 0.75; }
 .nc-ficha-slot { margin-top: 12px; }
 `;
+
+// --- src/ui/screens/neutral.js ---
+// Etapa F — las dos pantallas sin datos de la app del paciente.
+//
+// Vivían dentro de boot() (src/ui/app.js) escribiendo innerHTML directo,
+// y por eso eran las únicas dos pantallas del proyecto sin una sola
+// prueba: mirarlas exigía DOM, y aquí no se monta DOM falso (D8). Ahora
+// son funciones puras que devuelven HTML, como las otras nueve.
+//
+// La neutra es la mitad visible de INV-3. El servidor contesta un único
+// 404 para "no existe", "malformado" y "ya venció" (visitHandler.js) y
+// resolveVisitContext devuelve null en los tres casos; esta pantalla
+// cierra la cadena. Recibe SOLO el idioma —ni la visita, ni el motivo—
+// porque es la forma más barata de garantizar que no pueda distinguirlos:
+// no hay nada que distinguir con lo que se le pasa.
+//
+// El CSS (.nc-neutral y sus dos hijos) no viaja aquí: vive en THEME_CSS
+// desde la fase 05 y lo inyecta app.js con el resto.
+
+
+
+function renderNeutralScreen(lang) {
+  return `
+    <div class="nc-neutral">
+      <p class="nc-neutral-title">${escapeHtml(translate(lang, 'common.neutralTitle'))}</p>
+      <p class="nc-neutral-body">${escapeHtml(translate(lang, 'common.neutralBody'))}</p>
+    </div>
+  `;
+}
+
+// Etapa E — traer el expediente por red toma tiempo, y sin esto la página
+// se queda en blanco mientras tanto: en un teléfono con mala señal eso son
+// varios segundos indistinguibles de "la app no sirve".
+//
+// Deliberadamente NO es la pantalla neutra: decirle "este enlace no está
+// disponible" a alguien mientras su itinerario todavía viene en camino es
+// peor que no decirle nada.
+function renderLoadingScreen(lang) {
+  return `
+    <div class="nc-neutral">
+      <p class="nc-neutral-body">${escapeHtml(translate(lang, 'common.loading'))}</p>
+    </div>
+  `;
+}
 
 // --- src/render/code128.js ---
 // Fase 06 — generador de Code128 (subset B) sin dependencias externas.
@@ -3617,6 +3661,41 @@ body {
 .nc-neutral-body { font-size: 14px; opacity: 0.75; margin: 0; max-width: 320px; }
 `;
 
+// --- src/ui/urlParams.js ---
+// Etapa F (#17) — lectura de la query string, compartida por los dos
+// puntos de entrada.
+//
+// `?now=` nació en la fase 05 dentro de src/ui/app.js: ancla el "ahora" a
+// la fecha de las fixtures (todas de 2026) para poder recorrer el
+// prototipo sin que cada cita se vea vencida. El panel de coordinación no
+// lo tenía, y #/pass-preview —que reusa la misma pantalla del pase del
+// paciente— aplicaba R3 contra el reloj real: el pase de una visita de
+// marzo de 2026 se veía revocado siempre.
+//
+// Copiar la función al otro archivo habría bastado hoy y se habría
+// separado mañana. Vive aquí por eso, y porque encerrada dentro de
+// app.js no había forma de probarla: app.js necesita DOM.
+//
+// Lo que este módulo NO hace: leer el reloj real. Eso sigue siendo
+// privilegio de los dos boot() (D20, y el encabezado de coordinatorApp.js
+// para el segundo). Aquí solo se decide si lo que trae la URL es una
+// fecha usable.
+
+// parseNowOverride(search) -> string ISO tal cual venía | null
+//
+// Devuelve el TEXTO ORIGINAL, no un Date. Todo src/domain/ compara ISO
+// contra ISO y el offset forma parte del dato: pasar por Date y volver a
+// serializar convertiría '2026-03-10T10:00-07:00' en UTC y movería siete
+// horas la hora que ve el paciente.
+function parseNowOverride(search) {
+  const raw = new URLSearchParams(search).get('now');
+  if (!raw) return null;
+  // Un `now` que no se entiende se DESCARTA, no rompe: un enlace mal
+  // pegado en WhatsApp no puede ser la diferencia entre ver el itinerario
+  // y ver una pantalla en blanco.
+  return Number.isNaN(new Date(raw).getTime()) ? null : raw;
+}
+
 // --- src/ui/visitCache.js ---
 // Etapa E — el expediente de la visita guardado en el dispositivo.
 //
@@ -3841,7 +3920,6 @@ const v_revoked = {
 };
 
 const fixtures = { v_demo1, v_demo2, v_longstay, v_expired, v_revoked };
-const FIXTURE_IDS = Object.keys(fixtures);
 
 // --- src/ui/visitSource.js ---
 // Etapa E — de dónde sale el expediente que ve el paciente.
@@ -3954,6 +4032,8 @@ async function resolveVisitContext(token, { api, cache, now, catalog = fixtures 
 
 
 
+
+
 const ALL_CSS = [THEME_CSS, TABS_CSS, CARD_CSS, BADGE_CSS, FICHA_CSS, HOME_CSS, ITINERARY_CSS, MAP_SCREEN_CSS, PLAZA_CSS, STAY_CSS, HELP_CSS, PASS_SCREEN_CSS].join('\n');
 
 function injectStylesOnce() {
@@ -3984,41 +4064,10 @@ function currentRoute() {
   return SCREENS[hash] ? hash : 'home';
 }
 
-function parseNowOverride(raw) {
-  if (!raw) return null;
-  const d = new Date(raw);
-  return Number.isNaN(d.getTime()) ? null : raw;
-}
-
 // La caché es un módulo de funciones sueltas (habla con localStorage);
 // visitSource la recibe como objeto para poder probarse con un doble. Este
 // adaptador es el único lugar donde se juntan las dos formas.
 const CACHE_DE_VISITA = { save: saveVisitCache, load: loadVisitCache, clear: clearVisitCache };
-
-// Etapa E — traer el expediente por red toma tiempo, y sin esto la página
-// se queda en blanco mientras tanto: en un teléfono con mala señal eso son
-// varios segundos indistinguibles de "la app no sirve". Reusa las clases
-// de la pantalla neutra en vez de traer estilos nuevos.
-function renderLoadingScreen(root, lang) {
-  root.innerHTML = `
-    <div class="nc-neutral">
-      <p class="nc-neutral-body">${escapeHtml(translate(lang, 'common.loading'))}</p>
-    </div>
-  `;
-}
-
-function renderNeutralScreen(root, lang) {
-  // INV-3: idéntica sin importar si el token nunca existió o ya venció —
-  // un solo camino de código para las dos situaciones, para que no puedan
-  // divergir por accidente en el futuro.
-  document.title = STRINGS[lang].common.appName;
-  root.innerHTML = `
-    <div class="nc-neutral">
-      <p class="nc-neutral-title">${escapeHtml(translate(lang, 'common.neutralTitle'))}</p>
-      <p class="nc-neutral-body">${escapeHtml(translate(lang, 'common.neutralBody'))}</p>
-    </div>
-  `;
-}
 
 // Etapa E — boot pasa a ser async porque resolver el token puede implicar
 // una ida al servidor. Quienes la llaman (app.html y el bloque en línea que
@@ -4037,8 +4086,8 @@ async function boot(root, {
   injectStylesOnce();
   const params = new URLSearchParams(search);
   const token = params.get('p');
-  const nowOverride = parseNowOverride(params.get('now'));
-  const now = nowOverride ?? new Date().toISOString(); // ÚNICO lugar de todo el proyecto con permiso de leer el reloj real (INV-1 solo rige src/domain/)
+  const nowOverride = parseNowOverride(search);
+  const now = nowOverride ?? new Date().toISOString(); // uno de los dos únicos lugares con permiso de leer el reloj real (D20; el otro es coordinatorApp.js) — INV-1 solo rige src/domain/
 
   const storedLang = localStorage.getItem(LANG_STORAGE_KEY);
   const langParam = params.get('lang');
@@ -4047,7 +4096,7 @@ async function boot(root, {
   document.title = STRINGS[lang].common.appName;
   document.documentElement.lang = lang;
 
-  renderLoadingScreen(root, lang);
+  root.innerHTML = renderLoadingScreen(lang);
   const resuelto = await resolveVisitContext(token, { api, cache: CACHE_DE_VISITA, now });
 
   // isExpired se vuelve a evaluar SIEMPRE, venga de donde venga el
@@ -4057,8 +4106,13 @@ async function boot(root, {
   // sin esta línea seguiría abriéndose sin señal para siempre. Mismo
   // criterio que passCache con R3 (INV-4): se filtra con el `now` de
   // ahora, nunca con el que tenía el dispositivo al guardar.
+  //
+  // INV-3: un SOLO camino de código para "no existe" y para "venció", y la
+  // pantalla ni siquiera recibe cuál de los dos fue (ver screens/
+  // neutral.js) — no pueden divergir ni por accidente.
   if (!resuelto || isExpired(resuelto.record.visit, resuelto.record.appointments, resuelto.record.lodging, now)) {
-    renderNeutralScreen(root, lang);
+    document.title = STRINGS[lang].common.appName; // INV-6, igual que en render()
+    root.innerHTML = renderNeutralScreen(lang);
     return;
   }
 

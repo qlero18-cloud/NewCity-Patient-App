@@ -24,9 +24,13 @@ import path from 'node:path';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
-// Los tres documentos que Netlify sirve: el empaquetado (build.py) y los dos
-// sin construir, que siguen siendo la forma de desarrollar (README).
-const HTML_FILES = ['index.html', 'app.html', 'coordinator.html'];
+// Los cuatro documentos que Netlify sirve: los dos empaquetados (build.py)
+// y sus dos fuentes, que siguen siendo la forma de desarrollar (README).
+// Desde la Etapa F (#10) los pares son app.html -> index.html y
+// coordinator-app.html -> coordinator.html; antes el panel se publicaba sin
+// construir y su <script> solo decía "importa esto", así que el hash de la
+// CSP no cubría una sola línea del código que de verdad corría.
+const HTML_FILES = ['index.html', 'app.html', 'coordinator.html', 'coordinator-app.html'];
 
 function read(rel) {
   return readFileSync(path.join(ROOT, rel), 'utf8');
@@ -36,7 +40,7 @@ function read(rel) {
 // puede autorizar por hash. Los que tienen `src=` los cubre 'self'.
 //
 // Los comentarios se quitan ANTES de buscar, y no por limpieza: el
-// encabezado de coordinator.html contiene el texto literal
+// encabezado de coordinator.html contenía el texto literal
 // `<script type="module">` explicando su propia estructura. Sin quitarlo,
 // la búsqueda enganchaba esa mención dentro del comentario y se llevaba de
 // corrido el resto del comentario, el <title> y el <body> hasta el primer
@@ -45,6 +49,12 @@ function read(rel) {
 // quedaba en blanco en producción. Lo encontró el navegador, no este
 // archivo; por eso abajo hay un test que verifica que lo extraído se
 // parezca a JavaScript y no a HTML.
+//
+// Ese encabezado hoy vive en coordinator-app.html y ya no escribe el tag
+// literal (lo dice explícitamente ahí), porque ahora build.py corre la
+// MISMA búsqueda para empaquetar y un enganche así no dejaría un hash malo:
+// dejaría un HTML mutilado. Aun así el filtro se queda — es una línea, y el
+// modo de fallo que evita solo se ve en producción.
 function inlineScripts(html) {
   const sinComentarios = html.replace(/<!--[\s\S]*?-->/g, '');
   return [...sinComentarios.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)]
@@ -105,10 +115,10 @@ describe('script-src — un hash por cada script en línea publicado', () => {
   const found = HTML_FILES.flatMap((f) => inlineScripts(read(f)).map((s) => ({ file: f, source: s })));
 
   test('el guard tiene algo que revisar (si no, pasaría en falso)', () => {
-    // index.html + app.html + coordinator.html = 3. Si build.py deja de
-    // emitir el suyo, o alguien externaliza uno, este número cambia y hay
-    // que mirar por qué — no ajustarlo a ciegas.
-    assert.equal(found.length, 3, `scripts en línea encontrados: ${found.map((s) => s.file).join(', ')}`);
+    // Dos empaquetados + dos fuentes = 4. Si build.py deja de emitir uno, o
+    // alguien externaliza otro, este número cambia y hay que mirar por qué
+    // — no ajustarlo a ciegas.
+    assert.equal(found.length, 4, `scripts en línea encontrados: ${found.map((s) => s.file).join(', ')}`);
   });
 
   test('lo extraído es JavaScript, no HTML que se coló', () => {

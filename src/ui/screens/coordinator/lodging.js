@@ -27,7 +27,8 @@ import { renderFormErrors, renderRequestError } from './formErrors.js';
 // pone la validación local; este mapa es para los que llegan del servidor,
 // que se resumen en bloque porque no siempre corresponden a un input
 // visible.
-const CAMPOS = {
+// (Sufijo _HOSPEDAJE por la colisión de scope que documenta intake.js.)
+const CAMPOS_HOSPEDAJE = {
   hotel: 'coordinator.lodging.hotelLabel',
   reservationCode: 'coordinator.lodging.reservationCodeLabel',
   checkIn: 'coordinator.lodging.checkInLabel',
@@ -137,7 +138,7 @@ export function renderLodgingScreen(ctx) {
           ${checkboxField('recoveryRoom', !!lodging?.recoveryRoom, t('coordinator.lodging.recoveryLabel'))}
         `)}
         ${renderRequestError(requestError, t)}
-        ${renderFormErrors(errors, t, CAMPOS)}
+        ${renderFormErrors(errors, t, CAMPOS_HOSPEDAJE)}
         ${flash === 'saved' ? `<p class="nc-lodging-saved" data-role="lodging-saved" role="status">${escapeHtml(t('coordinator.lodging.saved'))}</p>` : ''}
         <button type="submit" class="nc-button nc-button--primary nc-lodging-submit">${escapeHtml(t('coordinator.lodging.save'))}</button>
       </form>

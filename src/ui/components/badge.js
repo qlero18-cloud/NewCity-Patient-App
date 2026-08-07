@@ -3,7 +3,7 @@
 // variantes distintas de color — nunca texto libre inventado por cada
 // pantalla por separado.
 
-import { escapeHtml, classNames } from '../util.js';
+import { escapeHtml } from '../util.js';
 
 export function renderBadge(text, variant = 'neutral') {
   return `<span class="nc-badge nc-badge--${escapeHtml(variant)}">${escapeHtml(text)}</span>`;
