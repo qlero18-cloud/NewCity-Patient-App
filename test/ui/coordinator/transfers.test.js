@@ -23,6 +23,7 @@ import { panelConVisita } from '../../helpers/loopback.js';
 import { translate } from '../../../src/ui/i18n.js';
 import { transferPoints, TRANSFER_KINDS, VEHICLE_TYPES } from '../../../src/data/transferPoints.js';
 import { escapeHtml } from '../../../src/ui/util.js';
+import { toLocalInput } from '../../../src/domain/time.js';
 
 const LABEL_KEYS = [
   'coordinator.transfers.kindLabel',
@@ -228,7 +229,10 @@ describe('renderTransfersScreen — la lista de traslados ya capturados', () => 
     await agregar(store, visit.id, LLEGADA);
 
     const html = renderTransfersScreen(ctx(store, visit.id, 'es'));
-    assert.ok(html.includes('value="2026-03-10T06:00-07:00"'), 'la hora debería venir prellenada');
+    // Etapa H (D75) — antes se prellenaba con el ISO crudo. El control nativo
+    // no lo entiende: el value es la hora de pared, y el ISO se vuelve a
+    // armar al guardar derivando el desplazamiento de la fecha (D76).
+    assert.ok(html.includes('value="2026-03-10T06:00"'), 'la hora debería venir prellenada');
     assert.ok(html.includes('value="Juan Pérez"'), 'el chofer debería venir prellenado');
     assert.ok(html.includes('value="+526641234567"'), 'el teléfono debería venir prellenado');
     assert.match(html, /<option value="tij_terminal" selected|<option value="tij_terminal"[^>]*selected/, 'el punto guardado debería venir seleccionado');
@@ -418,5 +422,73 @@ describe('renderTransfersScreen — errores del servidor (patrón de la Etapa D)
     const html = renderTransfersScreen(ctx(store, visit.id, 'es'));
     assert.doesNotMatch(html, /data-role="form-errors"/);
     assert.doesNotMatch(html, /data-role="request-error"/);
+  });
+});
+
+// Etapa H (D75/D76) — la hora de recogida deja de teclearse. El mismo
+// camposTraslado() alimenta el alta y la edición, así que el control cambia
+// en los dos a la vez.
+describe('renderTransfersScreen — la hora del traslado se captura con el control nativo', () => {
+  function campoHtml(html, name) {
+    return html.match(new RegExp(`<input[^>]*name="${name}"[^>]*>`))?.[0] ?? '';
+  }
+
+  async function conTraslado(datos = {}) {
+    const { store, visit } = await panelConVisita();
+    const res = await store.addTransfer(visit.id, {
+      kind: 'departure',
+      scheduledAt: '2026-03-12T15:00-07:00',
+      meetingPointId: transferPoints[0].id,
+      ...datos,
+    });
+    if (!res.ok) throw new Error(`el traslado de prueba no se agregó: ${JSON.stringify(res)}`);
+    return { store, visit };
+  }
+
+  test('scheduledAt es datetime-local, no texto con placeholder de ISO', async () => {
+    const { store, visit } = await panelConVisita();
+    const campo = campoHtml(renderTransfersScreen(ctx(store, visit.id, 'es')), 'scheduledAt');
+    assert.match(campo, /type="datetime-local"/);
+    assert.doesNotMatch(campo, /type="text"/);
+    assert.doesNotMatch(campo, /placeholder="20\d\d-/);
+  });
+
+  test('el formulario de edición se prellena con la hora de pared', async () => {
+    const { store, visit } = await conTraslado();
+    const html = renderTransfersScreen(ctx(store, visit.id, 'es'));
+    assert.match(html, /name="scheduledAt"[^>]*value="2026-03-12T15:00"/);
+    assert.doesNotMatch(html, /value="[^"]*[+-]\d\d:\d\d"/, 'el ISO con desplazamiento no cabe en un datetime-local');
+    assert.strictEqual(toLocalInput('2026-03-12T15:00-07:00'), '2026-03-12T15:00');
+  });
+
+  // A diferencia de citas y hospedaje, el traslado NO se acota a la ventana
+  // de la visita, y a propósito: el regreso al aeropuerto cae por definición
+  // después del último evento de la visita. Un max="fin de la visita" haría
+  // imposible capturar justo el traslado que motivó la Etapa G.
+  test('el traslado NO lleva min/max de la ventana de la visita', async () => {
+    const { store, visit } = await conTraslado();
+    const html = renderTransfersScreen(ctx(store, visit.id, 'es'));
+    for (const campo of html.match(/<input[^>]*name="scheduledAt"[^>]*>/g) ?? []) {
+      assert.doesNotMatch(campo, /\bmin="/, 'el traslado de regreso es posterior al fin de la visita');
+      assert.doesNotMatch(campo, /\bmax="/, 'el traslado de regreso es posterior al fin de la visita');
+    }
+  });
+
+  // Punto 4c — el control es comodidad, no autoridad: mismo criterio que
+  // meetingPointId con su 422.
+  test('la validación sigue rechazando una fecha sin desplazamiento, en la pantalla y en el servidor', async () => {
+    assert.strictEqual(
+      validateTransfer({ kind: 'departure', meetingPointId: transferPoints[0].id, scheduledAt: '2026-03-12T15:00' }).errors.scheduledAt,
+      'noOffset',
+    );
+
+    const { store, visit } = await panelConVisita();
+    const res = await store.addTransfer(visit.id, {
+      kind: 'departure',
+      scheduledAt: '2026-03-12T15:00',
+      meetingPointId: transferPoints[0].id,
+    });
+    assert.strictEqual(res.ok, false);
+    assert.strictEqual(res.errors?.scheduledAt, 'noOffset');
   });
 });

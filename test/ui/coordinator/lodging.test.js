@@ -19,6 +19,7 @@ import { renderLodgingScreen, validateLodging } from '../../../src/ui/screens/co
 import { createCoordinatorStore } from '../../../src/ui/coordinatorStore.js';
 import { panelConVisita } from '../../helpers/loopback.js';
 import { translate } from '../../../src/ui/i18n.js';
+import { toLocalInput } from '../../../src/domain/time.js';
 
 const FIELD_NAMES = ['hotel', 'reservationCode', 'checkIn', 'checkOut', 'breakfastIncluded', 'recoveryRoom'];
 const LABEL_KEYS = [
@@ -106,8 +107,11 @@ describe('renderLodgingScreen — prellenado (edición de un hospedaje existente
 
     assert.ok(html.includes('value="Hotel Prueba Suite"'), 'el value de hotel debería aparecer prellenado');
     assert.ok(html.includes('value="RC-TEST-9911"'), 'el value de reservationCode debería aparecer prellenado');
-    assert.ok(html.includes('value="2026-04-06T15:00-07:00"'), 'el value de checkIn debería aparecer prellenado');
-    assert.ok(html.includes('value="2026-04-07T12:00-07:00"'), 'el value de checkOut debería aparecer prellenado');
+    // Etapa H (D75) — antes se prellenaba con el ISO crudo. El control nativo
+    // no lo entiende: el value es la hora de pared, y el ISO se vuelve a
+    // armar al guardar derivando el desplazamiento de la fecha (D76).
+    assert.ok(html.includes('value="2026-04-06T15:00"'), 'el value de checkIn debería aparecer prellenado');
+    assert.ok(html.includes('value="2026-04-07T12:00"'), 'el value de checkOut debería aparecer prellenado');
     assert.ok(/name="breakfastIncluded"[^>]*checked|checked[^>]*name="breakfastIncluded"/.test(html), 'breakfastIncluded debería venir marcado');
     assert.ok(/name="recoveryRoom"[^>]*checked|checked[^>]*name="recoveryRoom"/.test(html), 'recoveryRoom debería venir marcado');
   });
@@ -308,5 +312,84 @@ describe('renderLodgingScreen — errores del servidor (Etapa D)', () => {
     const html = renderLodgingScreen(ctx(store, visit.id, 'es'));
     assert.doesNotMatch(html, /data-role="form-errors"/);
     assert.doesNotMatch(html, /data-role="request-error"/);
+  });
+});
+
+// Etapa H (D75/D77) — check-in y check-out dejan de ser texto libre. Aquí
+// son datetime-local y NO <input type="date">, a diferencia de las fechas de
+// la visita: src/ui/screens/stay.js le pinta al paciente "Martes 10 · 3:00
+// p.m." leyendo la hora de este mismo campo, y computeExpiresAt (R1) usa
+// checkOut para decidir hasta cuándo vive el enlace. Capturar solo el día
+// obligaría a inventar una hora de hotel o a pintarle "12:00 a.m." al
+// paciente.
+describe('renderLodgingScreen — las fechas se capturan con el control nativo', () => {
+  const VENTANA = { min: '2026-03-10T00:00', max: '2026-03-12T23:59' };
+
+  function campoHtml(html, name) {
+    return html.match(new RegExp(`<input[^>]*name="${name}"[^>]*>`))?.[0] ?? '';
+  }
+
+  test('checkIn y checkOut son datetime-local; hotel y reservationCode siguen siendo texto', async () => {
+    const { store, visit } = await panelConVisita();
+    const html = renderLodgingScreen(ctx(store, visit.id, 'es'));
+
+    for (const name of ['checkIn', 'checkOut']) {
+      const campo = campoHtml(html, name);
+      assert.match(campo, /type="datetime-local"/, `${name} debe ser un control nativo de fecha y hora`);
+      assert.doesNotMatch(campo, /type="text"/, `${name} sigue siendo texto libre`);
+    }
+    // El nombre del hotel no es enumerable (el hospital trabaja con varios y
+    // ninguno vive en un catálogo del proyecto), así que sigue siendo texto:
+    // D40 acota lo enumerable, no todo campo.
+    for (const name of ['hotel', 'reservationCode']) {
+      assert.match(campoHtml(html, name), /type="text"/, `${name} no debía cambiar`);
+    }
+  });
+
+  test('un hospedaje ya guardado se prellena con la hora de pared, no con el ISO crudo', async () => {
+    const { store, visit } = await panelConVisita();
+    await guardar(store, visit.id, {
+      hotel: 'Quartz Hotel & Spa',
+      reservationCode: 'NCH-77',
+      checkIn: '2026-03-10T15:00-07:00',
+      checkOut: '2026-03-12T12:00-07:00',
+    });
+
+    const html = renderLodgingScreen(ctx(store, visit.id, 'es'));
+    // Un datetime-local con "…-07:00" adentro no lo entiende y sale VACÍO:
+    // abrir la pestaña para corregir el hotel borraría las dos fechas.
+    assert.match(campoHtml(html, 'checkIn'), /value="2026-03-10T15:00"/);
+    assert.match(campoHtml(html, 'checkOut'), /value="2026-03-12T12:00"/);
+    assert.doesNotMatch(html, /value="[^"]*[+-]\d\d:\d\d"/, 'ningún value debe traer desplazamiento');
+    assert.strictEqual(toLocalInput('2026-03-10T15:00-07:00'), '2026-03-10T15:00');
+  });
+
+  test('las dos fechas están acotadas a los días de la visita', async () => {
+    const { store, visit } = await panelConVisita();
+    const html = renderLodgingScreen(ctx(store, visit.id, 'es'));
+    for (const name of ['checkIn', 'checkOut']) {
+      const campo = campoHtml(html, name);
+      assert.match(campo, new RegExp(`min="${VENTANA.min}"`), `${name} sin min`);
+      assert.match(campo, new RegExp(`max="${VENTANA.max}"`), `${name} sin max`);
+    }
+  });
+
+  // Punto 4c — el control nativo no es la autoridad. validateLodging sigue
+  // trabajando sobre ISO y sigue exigiendo lo mismo, y el servidor también.
+  test('la validación sigue rechazando lo mismo que antes del control nativo', async () => {
+    assert.deepStrictEqual(
+      validateLodging({ hotel: 'Quartz', checkIn: '', checkOut: '' }),
+      { ok: false, errors: { checkIn: 'required', checkOut: 'required' } },
+    );
+    assert.strictEqual(validateLodging({ hotel: 'Q', checkIn: 'mañana', checkOut: '2026-03-12T12:00-07:00' }).errors.checkIn, 'invalidDate');
+
+    const { store, visit } = await panelConVisita();
+    const res = await store.setLodging(visit.id, {
+      hotel: 'Quartz',
+      checkIn: '2026-03-10T15:00', // lo que da un datetime-local en crudo
+      checkOut: '2026-03-12T12:00-07:00',
+    });
+    assert.strictEqual(res.ok, false);
+    assert.strictEqual(res.errors?.checkIn, 'noOffset');
   });
 });

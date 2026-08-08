@@ -26,7 +26,7 @@ import { escapeHtml, classNames, transferPointName, transferPointOptionsHtml } f
 import { transferPoints, TRANSFER_KINDS, VEHICLE_TYPES } from '../../../data/transferPoints.js';
 import { renderCard } from '../../components/card.js';
 import { renderBadge } from '../../components/badge.js';
-import { instantMs } from '../../../domain/time.js';
+import { instantMs, toIsoTijuana, toLocalInput } from '../../../domain/time.js';
 import { renderFormErrors, renderRequestError } from './formErrors.js';
 
 // Los motivos que devuelve el servidor vienen con las llaves del MODELO
@@ -47,8 +47,6 @@ const CAMPOS_TRASLADO = {
   'vehicle.plate': 'coordinator.transfers.plateLabel',
   notes: 'coordinator.transfers.notesLabel',
 };
-
-const SCHEDULED_AT_PLACEHOLDER = '2026-03-10T06:00-07:00';
 
 // Mismo criterio que telefonoValido en src/server/visitMutations.js, y a
 // propósito la misma regla escrita dos veces: D45 prohíbe que el servidor
@@ -129,6 +127,23 @@ function enumOpciones(valores, prefijo, t, selected) {
     .join('\n');
 }
 
+// Etapa H (D75/D76) — la hora de recogida deja de teclearse. El value NO es
+// el ISO guardado: un datetime-local con "2026-03-12T15:00-07:00" adentro no
+// lo entiende y sale VACÍO, así que abrir la edición para corregir las placas
+// borraría la hora del traslado sin avisar.
+//
+// A diferencia de citas y hospedaje, aquí NO va min/max de la ventana de la
+// visita: el traslado de regreso al aeropuerto es por definición posterior al
+// último evento de la visita — es justo lo que motivó la Etapa G y D69. Un
+// max="fin de la visita" haría imposible capturarlo.
+function fechaHoraCampo(name, label, value) {
+  return campo(
+    name,
+    label,
+    `<input type="datetime-local" name="${escapeHtml(name)}" value="${escapeHtml(toLocalInput(value))}" class="nc-coord-transfer-input" />`,
+  );
+}
+
 function selectCampo(name, label, opciones) {
   return campo(name, label, `<select name="${escapeHtml(name)}" class="nc-coord-transfer-input">${opciones}</select>`);
 }
@@ -143,7 +158,7 @@ function camposTraslado(lang, t, transfer = null) {
 
   return `
     ${selectCampo('kind', t('coordinator.transfers.kindLabel'), enumOpciones(TRANSFER_KINDS, 'transfer.kind', t, transfer?.kind))}
-    ${textoCampo('scheduledAt', t('coordinator.transfers.scheduledAtLabel'), transfer?.scheduledAt, ` placeholder="${escapeHtml(SCHEDULED_AT_PLACEHOLDER)}"`)}
+    ${fechaHoraCampo('scheduledAt', t('coordinator.transfers.scheduledAtLabel'), transfer?.scheduledAt)}
     ${selectCampo('meetingPointId', t('coordinator.transfers.meetingPointLabel'), transferPointOptionsHtml(transferPoints, lang, transfer?.meetingPointId, sinConfirmar))}
     ${textoCampo('flightNumber', t('coordinator.transfers.flightNumberLabel'), transfer?.flightNumber)}
     <p class="nc-coord-transfer-hint">${escapeHtml(t('coordinator.transfers.driverOptionalHint'))}</p>
@@ -255,7 +270,12 @@ function valoresDelFormulario(form) {
   const f = form.elements;
   return {
     kind: f.kind.value,
-    scheduledAt: f.scheduledAt.value,
+    // El control da hora de pared ("2026-03-12T15:00"); lo que se valida y se
+    // guarda es ISO con desplazamiento, derivado de ESA fecha (D76). Si no se
+    // puede interpretar pasa el valor crudo, para que el motivo del error sea
+    // 'invalidDate' y no 'required' — y para que lo diga también el servidor,
+    // que es la autoridad (D75).
+    scheduledAt: toIsoTijuana(f.scheduledAt.value) ?? f.scheduledAt.value,
     meetingPointId: f.meetingPointId.value,
     flightNumber: f.flightNumber.value,
     driverName: f.driverName.value,

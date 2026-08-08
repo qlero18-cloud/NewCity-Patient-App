@@ -2165,536 +2165,6 @@ const HANDOFF_CSS = `
 .nc-handoff-hint { margin: 10px 0 0; font-size: 13px; opacity: 0.8; text-align: center; }
 `;
 
-// --- src/ui/screens/coordinator/intake.js ---
-// Fase 09 — Alta de visita (docs/phases/phase-09-coordinator-demo.md):
-// formulario con el subconjunto de Visit (PRD §7) que le toca capturar a
-// la coordinadora — patientFirstName, lang, startsAt, endsAt. Primer
-// <form> del proyecto: sin librería de date-picker, así que startsAt/
-// endsAt son <input type="text"> con placeholder de ejemplo ISO en vez de
-// datetime-local, tal como decide el doc de esta fase.
-//
-// Al guardar, esta pantalla NO navega por sí misma — coordinatorApp.js
-// (el enrutador, construido aparte) decide qué hacer con la visita nueva
-// vía el callback onCreated; por eso este archivo no trae ningún
-// data-nav.
-//
-// Etapa D — onCreated ya no recibe la visita, recibe el resultado entero
-// del store: { ok, visit } o { ok: false, errors } . La visita solo existe
-// si el servidor la aceptó, y antes esa diferencia no viajaba a ningún
-// lado. El servidor valida lo mismo que el `required` de los campos, y
-// además lo que el navegador no puede: que las fechas se entiendan y que
-// endsAt vaya después de startsAt.
-
-
-
-// El sufijo no es decorativo: intake, itinerary y lodging tenían los tres
-// un `const CAMPOS` privado de su módulo, y build.py aplana todo el grafo a
-// un solo scope, así que al empaquetar el panel (Etapa F, #10) los tres
-// chocaron. Como pasa con las clases .nc-coord-* de itinerary.js, era un
-// conflicto que solo estaba dormido porque nadie había construido esto.
-const CAMPOS_INTAKE = {
-  patientFirstName: 'coordinator.intake.firstNameLabel',
-  lang: 'coordinator.intake.langLabel',
-  startsAt: 'coordinator.intake.startsAtLabel',
-  endsAt: 'coordinator.intake.endsAtLabel',
-};
-
-function renderIntakeScreen(ctx) {
-  const { t, errors, requestError } = ctx;
-
-  return `
-    <section class="nc-screen">
-      <h1 class="nc-screen-title">${escapeHtml(t('coordinator.intake.title'))}</h1>
-      <form class="nc-form" data-role="intake-form">
-        <label class="nc-field">
-          <span class="nc-field-label">${escapeHtml(t('coordinator.intake.firstNameLabel'))}</span>
-          <input type="text" name="patientFirstName" class="nc-input" required />
-        </label>
-
-        <label class="nc-field">
-          <span class="nc-field-label">${escapeHtml(t('coordinator.intake.langLabel'))}</span>
-          <select name="lang" class="nc-input">
-            <option value="es">${escapeHtml(t('common.langName.es'))}</option>
-            <option value="en">${escapeHtml(t('common.langName.en'))}</option>
-          </select>
-        </label>
-
-        <label class="nc-field">
-          <span class="nc-field-label">${escapeHtml(t('coordinator.intake.startsAtLabel'))}</span>
-          <input type="text" name="startsAt" class="nc-input" placeholder="2026-03-10T10:00-07:00" required />
-        </label>
-
-        <label class="nc-field">
-          <span class="nc-field-label">${escapeHtml(t('coordinator.intake.endsAtLabel'))}</span>
-          <input type="text" name="endsAt" class="nc-input" placeholder="2026-03-12T12:00-07:00" required />
-        </label>
-
-        ${renderRequestError(requestError, t)}
-        ${renderFormErrors(errors, t, CAMPOS_INTAKE)}
-
-        <button type="submit" class="nc-button nc-button--primary">${escapeHtml(t('coordinator.intake.save'))}</button>
-      </form>
-    </section>
-  `;
-}
-
-function attachIntakeScreen(rootEl, ctx = {}) {
-  const { store, onCreated } = ctx;
-  const form = rootEl.querySelector('[data-role="intake-form"]');
-  form?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const data = new FormData(form);
-    // Deshabilitar el botón mientras viaja no es cosmética aquí: crear dos
-    // veces la misma visita deja dos expedientes con dos tokens, y el
-    // paciente recibe uno de los dos sin manera de saber cuál es el bueno.
-    const boton = form.querySelector('button[type="submit"]');
-    if (boton) boton.disabled = true;
-
-    const res = await store.createVisit({
-      patientFirstName: data.get('patientFirstName'),
-      lang: data.get('lang'),
-      startsAt: data.get('startsAt'),
-      endsAt: data.get('endsAt'),
-    });
-
-    // Sin repintado no hay botón nuevo: si falló, se reactiva este. Si
-    // salió bien, el router se lleva la pantalla por delante y da igual.
-    if (!res.ok && boton) boton.disabled = false;
-    onCreated?.(res);
-  });
-}
-
-const INTAKE_CSS = `
-.nc-form { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
-.nc-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-.nc-field-label { font-weight: 600; opacity: 0.85; }
-.nc-input { min-height: 44px; border-radius: 10px; border: 1px solid var(--nc-card-border); background: var(--nc-card-bg); color: var(--nc-ink); font: 400 15px Barlow, system-ui, sans-serif; padding: 0 12px; }
-select.nc-input { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 18px) center, calc(100% - 13px) center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
-.nc-form button[type="submit"] { margin-top: 6px; }
-`;
-
-// --- src/data/locations.js ---
-// Ubicaciones del complejo (PRD §7 Location, §13 nomenclatura confirmada
-// por el cliente). Contenido real de NewCity — a diferencia de
-// src/data/fixtures.js, esto sobrevive al prototipo.
-//
-// Los 7 id de aquí coinciden a propósito con los locationId que ya usa el
-// catálogo de rutas (src/data/routes.js, fase 02) y con los 7 mapPointId
-// de docs/phases/phase-04-map-svg.md. Las tres listas se prueban cruzadas
-// en test/data/fixtures.test.js: si una cambia sin las otras, la prueba
-// lo detecta.
-//
-// El PRD §15 no trae ningún horario confirmado por el cliente para NINGÚN
-// punto del complejo — el ítem 4 lo dice explícito para Compass/Piso
-// 27/coordinación, pero tampoco hay dato real para el resto. Por eso
-// `hours` va unconfirmed: true en las 7, con un horario placeholder
-// razonable (07:00–20:00 todos los días) que la UI debe mostrar con el
-// distintivo [POR CONFIRMAR], nunca como si fuera un dato real.
-//
-// NOTA — hueco entre fases: phase-03-fixtures.md menciona "tienda de
-// conveniencia" como contenido confirmado, pero phase-04-map-svg.md fija
-// exactamente 7 mapPointId y ninguno le corresponde. No se inventa aquí
-// un mapPointId nuevo (esa lista la fija la fase 04, no esta) ni se
-// fuerza la tienda dentro de un punto existente por adivinar. Queda fuera
-// de este archivo hasta que se resuelva esa inconsistencia entre fases.
-
-// Nombre único a propósito (no solo "openingHours"): src/data/plaza.js
-// tiene un helper privado con la misma forma, y build.py (fase 05) aplana
-// todos los módulos a un solo scope al empaquetar — dos declaraciones
-// top-level con el mismo nombre chocarían ahí aunque nunca chocan como
-// módulos ES sueltos. Comportamiento idéntico, solo el nombre cambia.
-function locationsOpeningHours() {
-  return {
-    tz: 'America/Tijuana',
-    weekly: [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, open: '07:00', close: '20:00' })),
-    exceptions: [],
-    unconfirmed: true,
-  };
-}
-
-function loc(id, nameEs, nameEn, kind, floor, mapPointId, options = {}) {
-  return {
-    id,
-    name: { es: nameEs, en: nameEn },
-    kind,
-    floor,
-    hours: locationsOpeningHours(),
-    mapPointId,
-    ...options,
-  };
-}
-
-const locations = [
-  loc('estacionamiento', 'Estacionamiento', 'Parking', 'parking', 'P', 'mp_parking'),
-  loc('lobby_torre', 'Lobby Torre Médica · Acceso general', 'Medical Tower Lobby · General Access', 'lobby', 'PB', 'mp_lobby'),
-  loc('compass', 'Compass · Laboratorio e imagenología', 'Compass · Lab & Imaging', 'lab_imaging', 'N1', 'mp_compass'),
-  loc('piso27', 'Piso 27 · Consultorios', 'Floor 27 · Consultation Offices', 'consultorios', '27', 'mp_floor27'),
-  loc('quartz', 'Quartz Hotel & Spa', 'Quartz Hotel & Spa', 'hotel', 'N1', 'mp_quartz'),
-  loc('nivel1', "Nivel 1 · Gastronomía (Farmer's Table, The Park Restaurante)", 'Level 1 · Dining (Farmer\'s Table, The Park Restaurante)', 'dining', 'N1', 'mp_level1'),
-  // Nombre y ubicación exacta de la farmacia sin confirmar (PRD §15.6):
-  // aquí va marcada unconfirmed a nivel de ubicación completa, no solo el
-  // horario, porque más que el horario está pendiente.
-  loc('farmacia', 'Farmacia', 'Pharmacy', 'pharmacy', 'PB', 'mp_pharmacy', { unconfirmed: true }),
-];
-
-const LOCATION_IDS = locations.map((l) => l.id);
-
-// --- src/ui/screens/coordinator/itinerary.js ---
-// Fase 09 — Editor de itinerario del panel de coordinadores: agregar,
-// editar, mover y cancelar citas de una visita seleccionada (docs/phases/
-// phase-09-coordinator-demo.md: "agregar una cita, editarla, moverla
-// (cambiar startsAt) y cancelarla" — cuatro acciones propias). ctx =
-// { store, visitId, lang, t }. store.getVisit(visitId) regresa el record
-// completo { visit, appointments, passes, lodging } (src/ui/
-// coordinatorStore.js) — de ahí se lee .appointments, no
-// .visit.appointments.
-//
-// A propósito sin domain/ ni formateo para paciente: serviceName, startsAt
-// y durationMin se pintan tal cual los guarda la store — captura/consulta
-// cruda para la coordinadora, no la vista pulida que ya tiene el
-// ../itinerary.js del paciente.
-//
-// Dos excepciones, ambas porque "crudo" ahí significaba "en inglés en los
-// dos idiomas":
-//   - status se traduce entero. cancelled/moved vía renderBadge +
-//     coordinator.itinerary.{cancelledBadge,movedBadge}; los otros tres vía
-//     itinerary.status.{scheduled,in_progress,done}. (Una versión anterior
-//     de este comentario afirmaba que no existían llaves i18n para esos
-//     tres — era falso: están en src/ui/i18n.js desde la fase 05.)
-//   - locationId se pinta como nombre de la ubicación, no como slug: el id
-//     ya no lo teclea nadie, lo elige un <select> (D40), así que mostrarlo
-//     en crudo solo servía para depurar.
-//
-// El tachado de una cita cancelada reutiliza la TÉCNICA de ../itinerary.js
-// (una clase modificadora sobre la línea de serviceName, con classNames()),
-// no sus nombres: aquí son .nc-coord-itin-what/--cancelled. Antes eran
-// .nc-itin-what/--cancelled, prestadas literalmente de la pantalla del
-// paciente, lo que contradecía la razón misma de que este directorio
-// exista. No rompía nada todavía —los dos bundles son documentos distintos
-// y las reglas eran idénticas— pero era un conflicto latente: cambiar el
-// tachado del paciente habría dejado al panel con el estilo viejo en
-// silencio. test/ui/coordinator/cssNamespace.test.js lo impide de aquí en
-// adelante para todo el directorio, no solo para este par.
-//
-// Este archivo se basta solo en CSS: no hay garantía de orden de carga
-// entre las pantallas hermanas de coordinator/, así que además de sus
-// propias clases trae su copia de .nc-screen-title y .nc-empty-state
-// (primitivas compartidas del proyecto, mismas reglas en todos lados) en
-// vez de asumir que otra pantalla del panel las define primero.
-
-
-
-
-
-
-// Etapa D — el servidor devuelve motivos por campo y esto los nombra. Las
-// llaves son las mismas etiquetas que ya pinta cada <label> del formulario,
-// para que el error diga exactamente el nombre que se ve en pantalla.
-// (Sufijo _CITA por la colisión de scope que documenta intake.js.)
-const CAMPOS_CITA = {
-  serviceName: 'coordinator.itinerary.serviceNameLabel',
-  startsAt: 'coordinator.itinerary.startsAtLabel',
-  durationMin: 'coordinator.itinerary.durationLabel',
-  locationId: 'coordinator.itinerary.locationLabel',
-};
-
-// Formato que espera la store para startsAt. Se muestra como placeholder en
-// vez de dejar el campo mudo — mismo criterio que ya usan los dos campos de
-// fecha de intake.js.
-const STARTS_AT_PLACEHOLDER = '2026-03-10T08:00-07:00';
-
-function renderAppointmentCard(appointment, lang, t) {
-  const cancelled = appointment.status === 'cancelled';
-  const moved = appointment.status === 'moved';
-
-  // Cancelar y editar se omiten para una cita que ya está cancelada
-  // (editar contenido de algo cancelado no tiene sentido de negocio,
-  // mismo criterio ya aplicado a cancelar); mover sigue disponible siempre
-  // (no hay razón de negocio dada para bloquearlo).
-  const cancelControl = cancelled
-    ? ''
-    : `<button type="button" class="nc-button" data-role="cancel-appointment" data-appointment-id="${escapeHtml(appointment.id)}">${escapeHtml(t('coordinator.itinerary.cancel'))}</button>`;
-
-  // "editarla" (docs/phases/phase-09-coordinator-demo.md) es una acción
-  // propia, distinta de "moverla": edita serviceName/durationMin/
-  // locationId, nunca startsAt ni status (coordinatorStore.js#
-  // editAppointment). El botón no captura nada: revela el formulario
-  // inline de su tarjeta (renderEditForm, abajo). Mismo patrón que "mover",
-  // para no tener dos interacciones distintas en el mismo archivo para dos
-  // acciones hermanas.
-  const editControl = cancelled
-    ? ''
-    : `<button type="button" class="nc-button" data-role="edit-appointment" data-appointment-id="${escapeHtml(appointment.id)}">${escapeHtml(t('coordinator.itinerary.edit'))}</button>`;
-
-  // Fix (revisión adversarial, fase 09): coordinator.itinerary.
-  // cancelledBadge/movedBadge (i18n.js) existían sin usar, y el estado se
-  // pintaba como el enum crudo ("cancelled"/"moved") igual en es que en
-  // en — violando el criterio de aceptación "ninguna cadena nueva queda
-  // fija en un solo idioma". renderBadge es el mismo componente que ya
-  // usa ../itinerary.js (paciente) y qpass.js, no texto libre nuevo.
-  // 'updated' es la variante ya usada por el lado paciente para señalar
-  // que una cita cambió de horario — mismo significado que "movida" aquí.
-  // Los cinco status ya tienen llave i18n (itinerary.status.*, src/ui/
-  // i18n.js) — el comentario de cabecera de este archivo afirmaba lo
-  // contrario y era falso: scheduled/in_progress/done existen ahí desde la
-  // fase 05. Se pintan traducidos como los otros dos, en vez de dejar el
-  // enum crudo en inglés en ambos idiomas.
-  const statusHtml = cancelled
-    ? `<p class="nc-coord-itin-status-badge">${renderBadge(t('coordinator.itinerary.cancelledBadge'), 'cancelled')}</p>`
-    : moved
-      ? `<p class="nc-coord-itin-status-badge">${renderBadge(t('coordinator.itinerary.movedBadge'), 'updated')}</p>`
-      : `<p class="nc-coord-itin-status">${escapeHtml(t(`itinerary.status.${appointment.status}`))}</p>`;
-
-  return renderCard(
-    `
-      <p class="${classNames(['nc-coord-itin-what', cancelled && 'nc-coord-itin-what--cancelled'])}">${escapeHtml(appointment.serviceName)}</p>
-      <p class="nc-coord-itin-row"><span>${escapeHtml(t('coordinator.itinerary.startsAtLabel'))}</span> ${escapeHtml(appointment.startsAt)}</p>
-      <p class="nc-coord-itin-row"><span>${escapeHtml(t('coordinator.itinerary.durationLabel'))}</span> ${escapeHtml(appointment.durationMin)}</p>
-      <p class="nc-coord-itin-row"><span>${escapeHtml(t('coordinator.itinerary.locationLabel'))}</span> ${escapeHtml(locationName(locations, appointment.locationId, lang))}</p>
-      ${statusHtml}
-      <div class="nc-coord-itin-actions">
-        <button type="button" class="nc-button" data-role="move-appointment" data-appointment-id="${escapeHtml(appointment.id)}">${escapeHtml(t('coordinator.itinerary.move'))}</button>
-        ${editControl}
-        ${cancelControl}
-      </div>
-      ${renderMoveForm(appointment, t)}
-      ${cancelled ? '' : renderEditForm(appointment, lang, t)}
-    `,
-    { extraClass: cancelled ? 'nc-card--muted' : '' }
-  );
-}
-
-// D40 — mover y editar eran cadenas de window.prompt() (D33). Un prompt no
-// puede ser un <select>, así que dejaban abierta exactamente la misma puerta
-// que el dropdown cierra en el formulario de agregar: bastaba teclear mal la
-// ubicación al editar para romper el mapa de esa cita.
-//
-// Los dos formularios se pintan siempre, ocultos con [hidden], y el botón
-// correspondiente los muestra. Así no hay estado de "qué tarjeta está en
-// edición" que mantener entre repintados: tras una mutación exitosa el
-// router vuelve a pintar la pantalla desde cero y los formularios vuelven a
-// quedar ocultos solos.
-function renderMoveForm(appointment, t) {
-  return `
-    <form data-role="move-appointment-form" data-appointment-id="${escapeHtml(appointment.id)}" class="nc-coord-itin-form nc-coord-itin-form--inline" hidden>
-      <label class="nc-coord-itin-field">
-        <span>${escapeHtml(t('coordinator.itinerary.startsAtLabel'))}</span>
-        <input type="text" name="moveStartsAt" class="nc-coord-itin-input" required
-               placeholder="${escapeHtml(STARTS_AT_PLACEHOLDER)}" value="${escapeHtml(appointment.startsAt)}" />
-      </label>
-      <button type="submit" class="nc-button nc-button--primary nc-coord-itin-submit">${escapeHtml(t('coordinator.itinerary.move'))}</button>
-    </form>
-  `;
-}
-
-function renderEditForm(appointment, lang, t) {
-  return `
-    <form data-role="edit-appointment-form" data-appointment-id="${escapeHtml(appointment.id)}" class="nc-coord-itin-form nc-coord-itin-form--inline" hidden>
-      <label class="nc-coord-itin-field">
-        <span>${escapeHtml(t('coordinator.itinerary.serviceNameLabel'))}</span>
-        <input type="text" name="editServiceName" class="nc-coord-itin-input" required value="${escapeHtml(appointment.serviceName)}" />
-      </label>
-      <label class="nc-coord-itin-field">
-        <span>${escapeHtml(t('coordinator.itinerary.durationLabel'))}</span>
-        <input type="number" name="editDurationMin" class="nc-coord-itin-input" required min="1" step="1" value="${escapeHtml(appointment.durationMin)}" />
-      </label>
-      <label class="nc-coord-itin-field">
-        <span>${escapeHtml(t('coordinator.itinerary.locationLabel'))}</span>
-        <select name="editLocationId" class="nc-coord-itin-input" required>
-          ${locationOptionsHtml(locations, lang, appointment.locationId)}
-        </select>
-      </label>
-      <button type="submit" class="nc-button nc-button--primary nc-coord-itin-submit">${escapeHtml(t('coordinator.itinerary.edit'))}</button>
-    </form>
-  `;
-}
-
-function renderAddAppointmentForm(lang, t) {
-  return `
-    <form data-role="add-appointment-form" class="nc-coord-itin-form">
-      <label class="nc-coord-itin-field">
-        <span>${escapeHtml(t('coordinator.itinerary.serviceNameLabel'))}</span>
-        <input type="text" name="serviceName" class="nc-coord-itin-input" required />
-      </label>
-      <label class="nc-coord-itin-field">
-        <span>${escapeHtml(t('coordinator.itinerary.startsAtLabel'))}</span>
-        <input type="text" name="startsAt" class="nc-coord-itin-input" required placeholder="${escapeHtml(STARTS_AT_PLACEHOLDER)}" />
-      </label>
-      <label class="nc-coord-itin-field">
-        <span>${escapeHtml(t('coordinator.itinerary.durationLabel'))}</span>
-        <input type="number" name="durationMin" class="nc-coord-itin-input" required min="1" step="1" />
-      </label>
-      <label class="nc-coord-itin-field">
-        <span>${escapeHtml(t('coordinator.itinerary.locationLabel'))}</span>
-        <select name="locationId" class="nc-coord-itin-input" required>
-          ${locationOptionsHtml(locations, lang)}
-        </select>
-      </label>
-      <button type="submit" class="nc-button nc-button--primary nc-coord-itin-submit">${escapeHtml(t('coordinator.itinerary.addAppointment'))}</button>
-    </form>
-  `;
-}
-
-function renderItineraryScreen(ctx) {
-  const { store, visitId, lang, t, errors, requestError } = ctx;
-  const title = t('coordinator.itinerary.title');
-  const record = store.getVisit(visitId);
-
-  // Guard: visita inexistente -> alternativa corta, sin lanzar (misma
-  // disciplina de defensa en profundidad que ya usa src/ui/screens/
-  // stay.js para lodging ausente). El mensaje sale de
-  // coordinator.visitNotFound, la MISMA llave que usan lodging.js y
-  // qpass.js: antes cada archivo traía su propio `lang === 'en' ? … : …`,
-  // la única traducción del proyecto hecha fuera de i18n.js.
-  if (!record) {
-    return `
-      <section class="nc-screen">
-        <h1 class="nc-screen-title">${escapeHtml(title)}</h1>
-        <p class="nc-empty-state">${escapeHtml(t('coordinator.visitNotFound'))}</p>
-      </section>
-    `;
-  }
-
-  const { appointments } = record;
-
-  // Fix (revisión adversarial, fase 09): el criterio de aceptación del
-  // doc de esta fase pide que "una cita movida reordene la línea de
-  // tiempo" — antes se pintaba appointments tal cual, en su orden de
-  // inserción original, sin importar el startsAt nuevo tras moverla.
-  // Copia nueva vía spread + sort (nunca se muta record.appointments, el
-  // array real de la store) — new Date(...).getTime() en vez de comparar
-  // los strings ISO tal cual, para no depender de que todas las visitas
-  // usen el mismo offset de zona horaria.
-  const sortedAppointments = [...appointments].sort(
-    (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
-  );
-
-  const body = sortedAppointments.length === 0
-    ? `<p class="nc-empty-state">${escapeHtml(t('coordinator.itinerary.empty'))}</p>`
-    : `<div class="nc-coord-itin-list">${sortedAppointments.map((a) => renderAppointmentCard(a, lang, t)).join('\n')}</div>`;
-
-  return `
-    <section class="nc-screen">
-      <h1 class="nc-screen-title">${escapeHtml(title)}</h1>
-      ${body}
-      ${renderRequestError(requestError, t)}
-      ${renderFormErrors(errors, t, CAMPOS_CITA)}
-      ${renderAddAppointmentForm(lang, t)}
-    </section>
-  `;
-}
-
-// ctx aquí además trae { onChange } (mismo contrato que el resto de
-// attach*Screen interactivos): onChange se llama con el RESULTADO de cada
-// mutación, no solo cuando salió bien, y el router decide qué pintar —
-// repintar con los datos nuevos, o el motivo por el que el servidor dijo
-// que no.
-//
-// Etapa D: `now` ya no se recibe ni se manda. La store llama a la API y la
-// hora de lo que se guarda la estampa el servidor, que es el único que
-// puede decirla igual para todas las coordinadoras.
-function attachItineraryScreen(rootEl, ctx) {
-  const { store, visitId, onChange } = ctx;
-
-  const form = rootEl.querySelector('[data-role="add-appointment-form"]');
-  form?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const fields = form.elements;
-    const res = await store.addAppointment(visitId, {
-      serviceName: fields.serviceName.value,
-      startsAt: fields.startsAt.value,
-      durationMin: Number(fields.durationMin.value),
-      locationId: fields.locationId.value,
-    });
-    onChange?.(res);
-  });
-
-  // D40 — los botones ya no piden datos: revelan el formulario inline de su
-  // propia tarjeta. Mostrar uno esconde cualquier otro abierto, para que no
-  // queden dos ediciones a medias en pantalla al mismo tiempo.
-  function toggleInlineForm(role, appointmentId) {
-    const target = rootEl.querySelector(`[data-role="${role}"][data-appointment-id="${appointmentId}"]`);
-    if (!target) return;
-    const wasHidden = target.hidden;
-    rootEl.querySelectorAll('.nc-coord-itin-form--inline').forEach((f) => { f.hidden = true; });
-    target.hidden = !wasHidden;
-    if (!target.hidden) target.querySelector('input, select')?.focus();
-  }
-
-  rootEl.querySelectorAll('[data-role="move-appointment"]').forEach((btn) => {
-    btn.addEventListener('click', () => toggleInlineForm('move-appointment-form', btn.dataset.appointmentId));
-  });
-
-  rootEl.querySelectorAll('[data-role="edit-appointment"]').forEach((btn) => {
-    btn.addEventListener('click', () => toggleInlineForm('edit-appointment-form', btn.dataset.appointmentId));
-  });
-
-  rootEl.querySelectorAll('[data-role="move-appointment-form"]').forEach((moveForm) => {
-    moveForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const newStartsAt = moveForm.elements.moveStartsAt.value.trim();
-      if (!newStartsAt) return;
-      const res = await store.moveAppointment(visitId, moveForm.dataset.appointmentId, newStartsAt);
-      onChange?.(res);
-    });
-  });
-
-  rootEl.querySelectorAll('[data-role="edit-appointment-form"]').forEach((editForm) => {
-    editForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const fields = editForm.elements;
-      const res = await store.editAppointment(visitId, editForm.dataset.appointmentId, {
-        serviceName: fields.editServiceName.value.trim(),
-        durationMin: Number(fields.editDurationMin.value),
-        locationId: fields.editLocationId.value,
-      });
-      onChange?.(res);
-    });
-  });
-
-  rootEl.querySelectorAll('[data-role="cancel-appointment"]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const res = await store.cancelAppointment(visitId, btn.dataset.appointmentId);
-      onChange?.(res);
-    });
-  });
-}
-
-const ITINERARY_CSS = `
-.nc-screen-title { font-size: 20px; margin: 4px 0 16px; }
-.nc-empty-state { font-size: 13px; opacity: 0.65; }
-.nc-coord-itin-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
-.nc-coord-itin-what { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
-.nc-coord-itin-what--cancelled { text-decoration: line-through; opacity: 0.6; }
-.nc-coord-itin-row { display: flex; gap: 6px; margin: 0 0 4px; font-size: 13px; }
-.nc-coord-itin-row span { min-width: 100px; opacity: 0.7; }
-.nc-coord-itin-status { margin: 6px 0 0; font-size: 12px; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.03em; }
-.nc-coord-itin-status-badge { margin: 6px 0 0; }
-.nc-coord-itin-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.nc-coord-itin-form { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
-.nc-coord-itin-field { display: flex; flex-direction: column; gap: 4px; }
-.nc-coord-itin-input { min-height: 44px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--nc-card-border); background: var(--nc-surface); color: var(--nc-ink); font: 400 15px Barlow, system-ui, sans-serif; }
-.nc-coord-itin-submit { align-self: flex-start; }
-/* El <select> de ubicación (D40) necesita su propia flecha: Safari y
-   Firefox no pintan ninguna cuando se le quita la apariencia nativa, y sin
-   esto el campo parece un input de texto deshabilitado. Mismo tratamiento
-   que ya trae select.nc-input en intake.js, repetido aquí porque esa regla
-   está acotada a .nc-input y no alcanza a .nc-coord-itin-input. */
-select.nc-coord-itin-input {
-  appearance: none; -webkit-appearance: none; -moz-appearance: none;
-  padding-right: 34px;
-  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position: right 16px center, right 11px center;
-  background-size: 5px 5px, 5px 5px;
-  background-repeat: no-repeat;
-}
-/* Los formularios inline de mover/editar viven dentro de la tarjeta: se
-   separan de los botones y se marcan con un borde superior para que se lea
-   que pertenecen a esa cita y no al formulario de agregar de abajo. */
-.nc-coord-itin-form--inline { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--nc-card-border); }
-.nc-coord-itin-form--inline[hidden] { display: none; }
-`;
-
 // --- src/domain/time.js ---
 // Formato y aritmética de horas en America/Tijuana (PRD §7.1 INV-5, R6).
 //
@@ -2783,6 +2253,104 @@ function toTijuanaIso(ms) {
   return `${p.year}-${pad2(p.month)}-${pad2(p.day)}T${pad2(p.hour)}:${pad2(p.minute)}:${pad2(p.second)}${formatOffset(offset)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Etapa H — puente entre los controles nativos de fecha del panel y el ISO
+// con desplazamiento explícito que guarda el proyecto (PRD §7).
+//
+// <input type="datetime-local"> devuelve "2026-03-11T15:00", pelado: la hora
+// de pared sin zona. Escribir el desplazamiento a mano ('-07:00') acierta de
+// marzo a noviembre y corre las citas una hora el resto del año, porque Baja
+// California NO abolió el horario de verano junto con el resto de México
+// (sigue el calendario de EE. UU. por la frontera). Así que el offset se
+// deriva de LA FECHA, con el mismo tijuanaOffsetMinutes que ya usa
+// toTijuanaIso — una sola fuente de verdad, ya probada, sin tabla propia de
+// reglas de horario de verano.
+//
+// Siguen valiendo INV-1 e INV-5: son función de su argumento y de nada más.
+
+const LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/;
+const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?[+-]\d{2}:\d{2}$/;
+
+// Interpreta lo que devuelve un control nativo. Devuelve null en vez de una
+// fecha corrida cuando el calendario no cuadra: Date.UTC "arregla" solo un
+// 30 de febrero moviéndolo al 2 de marzo, y guardar eso en silencio sería
+// peor que rechazarlo.
+function parseLocal(local) {
+  if (typeof local !== 'string') return null;
+  const m = LOCAL_RE.exec(local.trim());
+  if (!m) return null;
+  const [year, month, day, hour, minute] = [m[1], m[2], m[3], m[4] ?? '00', m[5] ?? '00'].map(Number);
+  const asIfUtc = Date.UTC(year, month - 1, day, hour, minute);
+  const back = new Date(asIfUtc);
+  const cuadra =
+    back.getUTCFullYear() === year &&
+    back.getUTCMonth() + 1 === month &&
+    back.getUTCDate() === day &&
+    back.getUTCHours() === hour &&
+    back.getUTCMinutes() === minute;
+  return cuadra ? { year, month, day, hour, minute, asIfUtc } : null;
+}
+
+// tijuanaOffset('2026-01-15T15:00') -> '-08:00' | null
+//
+// El problema del huevo y la gallina: para saber qué offset regía hay que
+// saber de qué instante se habla, y para saber de qué instante se habla hay
+// que saber el offset. Se resuelve en dos pasadas: la primera usa la hora de
+// pared como si fuera UTC (se equivoca a lo mucho por las ~8 horas del
+// desplazamiento) y la segunda vuelve a preguntar ya sobre el instante
+// candidato. Converge salvo dentro de la hora que el cambio de horario borra
+// o repite, donde cualquier respuesta es igual de defendible.
+function tijuanaOffset(local) {
+  const p = parseLocal(local);
+  if (!p) return null;
+  const aproximado = tijuanaOffsetMinutes(new Date(p.asIfUtc));
+  const afinado = tijuanaOffsetMinutes(new Date(p.asIfUtc - aproximado * 60000));
+  return formatOffset(afinado);
+}
+
+// toIsoTijuana('2026-01-15T15:00') -> '2026-01-15T15:00-08:00' | null
+// Una fecha sin hora (lo que da <input type="date">) se guarda como
+// medianoche de ese día en Tijuana.
+function toIsoTijuana(local) {
+  const p = parseLocal(local);
+  if (!p) return null;
+  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}T${pad2(p.hour)}:${pad2(p.minute)}${tijuanaOffset(local)}`;
+}
+
+// toLocalInput('2026-03-11T15:00-07:00') -> '2026-03-11T15:00' | ''
+//
+// El camino de vuelta, para prellenar el formulario con lo ya guardado. NO
+// es un corte de los primeros 16 caracteres: eso funciona solo mientras todo
+// venga en offset de Tijuana, y el día que entre un '...Z' el corte devuelve
+// la hora UTC como si fuera local y la corre siete horas sin decir nada.
+//
+// El criterio es el único que no se puede falsificar: se calcula el instante
+// real y se comprueba que el reloj de pared de Tijuana en ese instante sea
+// exactamente lo que dice el ISO. Un desplazamiento que no corresponde a esa
+// fecha (un '-07:00' en enero, escrito por algo que no consultó el
+// calendario) no pasa. Devuelve '' —no null— porque el destino es un
+// atributo value.
+function toLocalInput(iso) {
+  if (typeof iso !== 'string') return '';
+  const m = ISO_RE.exec(iso.trim());
+  if (!m) return '';
+  const local = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}`;
+  const ms = new Date(iso.trim()).getTime();
+  if (!Number.isFinite(ms)) return '';
+  const p = tijuanaParts(new Date(ms));
+  const reloj = `${p.year}-${pad2(p.month)}-${pad2(p.day)}T${pad2(p.hour)}:${pad2(p.minute)}`;
+  return reloj === local ? local : '';
+}
+
+// El mismo puente para <input type="date">: el día es el de Tijuana, no el
+// de UTC — un instante de la noche cae en el día siguiente en UTC y sacar el
+// día del ISO crudo lo movería.
+function toDateInput(iso) {
+  return toLocalInput(iso).slice(0, 10);
+}
+
+// ---------------------------------------------------------------------------
+
 // Clave de día de calendario en America/Tijuana, ordenable como string
 // ("2026-03-10"). Se usa para agrupar (itinerary.js) y para medir
 // diferencia de días.
@@ -2863,6 +2431,584 @@ function formatDayLabel(iso, now, _lang) {
   return { es, en };
 }
 
+// --- src/ui/screens/coordinator/intake.js ---
+// Fase 09 — Alta de visita (docs/phases/phase-09-coordinator-demo.md):
+// formulario con el subconjunto de Visit (PRD §7) que le toca capturar a
+// la coordinadora — patientFirstName, lang, startsAt, endsAt.
+//
+// Etapa H (D75) — las dos fechas eran <input type="text"> con un ISO de
+// ejemplo en el placeholder, herencia de "sin librería de date-picker" de
+// la fase 09. No hace falta librería: el control nativo del navegador ya
+// existe. La visita se delimita por días, así que aquí es type="date"; la
+// hora la ponen las citas y el hospedaje, no la ventana.
+//
+// Al guardar, esta pantalla NO navega por sí misma — coordinatorApp.js
+// (el enrutador, construido aparte) decide qué hacer con la visita nueva
+// vía el callback onCreated; por eso este archivo no trae ningún
+// data-nav.
+//
+// Etapa D — onCreated ya no recibe la visita, recibe el resultado entero
+// del store: { ok, visit } o { ok: false, errors } . La visita solo existe
+// si el servidor la aceptó, y antes esa diferencia no viajaba a ningún
+// lado. El servidor valida lo mismo que el `required` de los campos, y
+// además lo que el navegador no puede: que las fechas se entiendan y que
+// endsAt vaya después de startsAt.
+
+
+
+
+// El sufijo no es decorativo: intake, itinerary y lodging tenían los tres
+// un `const CAMPOS` privado de su módulo, y build.py aplana todo el grafo a
+// un solo scope, así que al empaquetar el panel (Etapa F, #10) los tres
+// chocaron. Como pasa con las clases .nc-coord-* de itinerary.js, era un
+// conflicto que solo estaba dormido porque nadie había construido esto.
+const CAMPOS_INTAKE = {
+  patientFirstName: 'coordinator.intake.firstNameLabel',
+  lang: 'coordinator.intake.langLabel',
+  startsAt: 'coordinator.intake.startsAtLabel',
+  endsAt: 'coordinator.intake.endsAtLabel',
+};
+
+function renderIntakeScreen(ctx) {
+  const { t, errors, requestError } = ctx;
+
+  return `
+    <section class="nc-screen">
+      <h1 class="nc-screen-title">${escapeHtml(t('coordinator.intake.title'))}</h1>
+      <form class="nc-form" data-role="intake-form">
+        <label class="nc-field">
+          <span class="nc-field-label">${escapeHtml(t('coordinator.intake.firstNameLabel'))}</span>
+          <input type="text" name="patientFirstName" class="nc-input" required />
+        </label>
+
+        <label class="nc-field">
+          <span class="nc-field-label">${escapeHtml(t('coordinator.intake.langLabel'))}</span>
+          <select name="lang" class="nc-input">
+            <option value="es">${escapeHtml(t('common.langName.es'))}</option>
+            <option value="en">${escapeHtml(t('common.langName.en'))}</option>
+          </select>
+        </label>
+
+        <label class="nc-field">
+          <span class="nc-field-label">${escapeHtml(t('coordinator.intake.startsAtLabel'))}</span>
+          <input type="date" name="startsAt" class="nc-input" required />
+        </label>
+
+        <label class="nc-field">
+          <span class="nc-field-label">${escapeHtml(t('coordinator.intake.endsAtLabel'))}</span>
+          <input type="date" name="endsAt" class="nc-input" required />
+        </label>
+
+        ${renderRequestError(requestError, t)}
+        ${renderFormErrors(errors, t, CAMPOS_INTAKE)}
+
+        <button type="submit" class="nc-button nc-button--primary">${escapeHtml(t('coordinator.intake.save'))}</button>
+      </form>
+    </section>
+  `;
+}
+
+function attachIntakeScreen(rootEl, ctx = {}) {
+  const { store, onCreated } = ctx;
+  const form = rootEl.querySelector('[data-role="intake-form"]');
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    // Deshabilitar el botón mientras viaja no es cosmética aquí: crear dos
+    // veces la misma visita deja dos expedientes con dos tokens, y el
+    // paciente recibe uno de los dos sin manera de saber cuál es el bueno.
+    const boton = form.querySelector('button[type="submit"]');
+    if (boton) boton.disabled = true;
+
+    // El control da el día pelado ("2026-03-12"); lo que se guarda es ISO
+    // con desplazamiento. El inicio es la medianoche de ese día y el fin es
+    // su último minuto: si fueran las dos medianoche, elegir el mismo día
+    // para inicio y fin daría endsAt === startsAt y el servidor lo
+    // rechazaría con 'order' — una visita de un solo día es normal.
+    // toIsoTijuana devuelve null si el control mandó algo ininteligible, y
+    // null viaja tal cual para que conteste el servidor (D75: el control es
+    // comodidad, no autoridad).
+    const dia = (nombre) => String(data.get(nombre) ?? '').trim();
+    const res = await store.createVisit({
+      patientFirstName: data.get('patientFirstName'),
+      lang: data.get('lang'),
+      startsAt: toIsoTijuana(dia('startsAt')),
+      endsAt: toIsoTijuana(`${dia('endsAt')}T23:59`),
+    });
+
+    // Sin repintado no hay botón nuevo: si falló, se reactiva este. Si
+    // salió bien, el router se lleva la pantalla por delante y da igual.
+    if (!res.ok && boton) boton.disabled = false;
+    onCreated?.(res);
+  });
+}
+
+const INTAKE_CSS = `
+.nc-form { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
+.nc-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.nc-field-label { font-weight: 600; opacity: 0.85; }
+.nc-input { min-height: 44px; border-radius: 10px; border: 1px solid var(--nc-card-border); background: var(--nc-card-bg); color: var(--nc-ink); font: 400 15px Barlow, system-ui, sans-serif; padding: 0 12px; }
+select.nc-input { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 18px) center, calc(100% - 13px) center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+.nc-form button[type="submit"] { margin-top: 6px; }
+`;
+
+// --- src/data/locations.js ---
+// Ubicaciones del complejo (PRD §7 Location, §13 nomenclatura confirmada
+// por el cliente). Contenido real de NewCity — a diferencia de
+// src/data/fixtures.js, esto sobrevive al prototipo.
+//
+// Los 7 id de aquí coinciden a propósito con los locationId que ya usa el
+// catálogo de rutas (src/data/routes.js, fase 02) y con los 7 mapPointId
+// de docs/phases/phase-04-map-svg.md. Las tres listas se prueban cruzadas
+// en test/data/fixtures.test.js: si una cambia sin las otras, la prueba
+// lo detecta.
+//
+// El PRD §15 no trae ningún horario confirmado por el cliente para NINGÚN
+// punto del complejo — el ítem 4 lo dice explícito para Compass/Piso
+// 27/coordinación, pero tampoco hay dato real para el resto. Por eso
+// `hours` va unconfirmed: true en las 7, con un horario placeholder
+// razonable (07:00–20:00 todos los días) que la UI debe mostrar con el
+// distintivo [POR CONFIRMAR], nunca como si fuera un dato real.
+//
+// NOTA — hueco entre fases: phase-03-fixtures.md menciona "tienda de
+// conveniencia" como contenido confirmado, pero phase-04-map-svg.md fija
+// exactamente 7 mapPointId y ninguno le corresponde. No se inventa aquí
+// un mapPointId nuevo (esa lista la fija la fase 04, no esta) ni se
+// fuerza la tienda dentro de un punto existente por adivinar. Queda fuera
+// de este archivo hasta que se resuelva esa inconsistencia entre fases.
+
+// Nombre único a propósito (no solo "openingHours"): src/data/plaza.js
+// tiene un helper privado con la misma forma, y build.py (fase 05) aplana
+// todos los módulos a un solo scope al empaquetar — dos declaraciones
+// top-level con el mismo nombre chocarían ahí aunque nunca chocan como
+// módulos ES sueltos. Comportamiento idéntico, solo el nombre cambia.
+function locationsOpeningHours() {
+  return {
+    tz: 'America/Tijuana',
+    weekly: [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, open: '07:00', close: '20:00' })),
+    exceptions: [],
+    unconfirmed: true,
+  };
+}
+
+function loc(id, nameEs, nameEn, kind, floor, mapPointId, options = {}) {
+  return {
+    id,
+    name: { es: nameEs, en: nameEn },
+    kind,
+    floor,
+    hours: locationsOpeningHours(),
+    mapPointId,
+    ...options,
+  };
+}
+
+const locations = [
+  loc('estacionamiento', 'Estacionamiento', 'Parking', 'parking', 'P', 'mp_parking'),
+  loc('lobby_torre', 'Lobby Torre Médica · Acceso general', 'Medical Tower Lobby · General Access', 'lobby', 'PB', 'mp_lobby'),
+  loc('compass', 'Compass · Laboratorio e imagenología', 'Compass · Lab & Imaging', 'lab_imaging', 'N1', 'mp_compass'),
+  loc('piso27', 'Piso 27 · Consultorios', 'Floor 27 · Consultation Offices', 'consultorios', '27', 'mp_floor27'),
+  loc('quartz', 'Quartz Hotel & Spa', 'Quartz Hotel & Spa', 'hotel', 'N1', 'mp_quartz'),
+  loc('nivel1', "Nivel 1 · Gastronomía (Farmer's Table, The Park Restaurante)", 'Level 1 · Dining (Farmer\'s Table, The Park Restaurante)', 'dining', 'N1', 'mp_level1'),
+  // Nombre y ubicación exacta de la farmacia sin confirmar (PRD §15.6):
+  // aquí va marcada unconfirmed a nivel de ubicación completa, no solo el
+  // horario, porque más que el horario está pendiente.
+  loc('farmacia', 'Farmacia', 'Pharmacy', 'pharmacy', 'PB', 'mp_pharmacy', { unconfirmed: true }),
+];
+
+const LOCATION_IDS = locations.map((l) => l.id);
+
+// --- src/ui/screens/coordinator/dateWindow.js ---
+// Etapa H (D75) — la ventana de la visita, traducida a los atributos min/max
+// que entiende un <input type="datetime-local">.
+//
+// Se acota al DÍA, no al instante, y es a propósito: visit.startsAt/endsAt
+// delimitan días de estancia (intake.js los captura con <input type="date">),
+// así que una cita a las 10 de la mañana del último día es perfectamente
+// válida aunque el instante guardado en endsAt sea anterior. Con min/max al
+// instante el navegador la bloquearía y la coordinadora no tendría forma de
+// capturarla — el control estorbaría en vez de ayudar.
+//
+// Es una cota de comodidad, no la autoridad: quien mande el POST no pasa por
+// esta pantalla, y el servidor valida por su cuenta (mismo criterio que
+// locationId con su 422, D40). Por eso una visita con fechas ilegibles no
+// rompe nada: simplemente no se pinta la cota.
+
+
+// visitWindowAttrs(visit) -> ' min="2026-03-10T00:00" max="2026-03-12T23:59"'
+// Cadena vacía si falta cualquiera de las dos puntas. El formato que produce
+// toDateInput es estricto (YYYY-MM-DD), así que no hay nada que escapar aquí.
+function visitWindowAttrs(visit) {
+  const desde = toDateInput(visit?.startsAt);
+  const hasta = toDateInput(visit?.endsAt);
+  if (!desde || !hasta) return '';
+  return ` min="${desde}T00:00" max="${hasta}T23:59"`;
+}
+
+// --- src/ui/screens/coordinator/itinerary.js ---
+// Fase 09 — Editor de itinerario del panel de coordinadores: agregar,
+// editar, mover y cancelar citas de una visita seleccionada (docs/phases/
+// phase-09-coordinator-demo.md: "agregar una cita, editarla, moverla
+// (cambiar startsAt) y cancelarla" — cuatro acciones propias). ctx =
+// { store, visitId, lang, t }. store.getVisit(visitId) regresa el record
+// completo { visit, appointments, passes, lodging } (src/ui/
+// coordinatorStore.js) — de ahí se lee .appointments, no
+// .visit.appointments.
+//
+// A propósito sin domain/ ni formateo para paciente: serviceName, startsAt
+// y durationMin se pintan tal cual los guarda la store — captura/consulta
+// cruda para la coordinadora, no la vista pulida que ya tiene el
+// ../itinerary.js del paciente.
+//
+// Dos excepciones, ambas porque "crudo" ahí significaba "en inglés en los
+// dos idiomas":
+//   - status se traduce entero. cancelled/moved vía renderBadge +
+//     coordinator.itinerary.{cancelledBadge,movedBadge}; los otros tres vía
+//     itinerary.status.{scheduled,in_progress,done}. (Una versión anterior
+//     de este comentario afirmaba que no existían llaves i18n para esos
+//     tres — era falso: están en src/ui/i18n.js desde la fase 05.)
+//   - locationId se pinta como nombre de la ubicación, no como slug: el id
+//     ya no lo teclea nadie, lo elige un <select> (D40), así que mostrarlo
+//     en crudo solo servía para depurar.
+//
+// El tachado de una cita cancelada reutiliza la TÉCNICA de ../itinerary.js
+// (una clase modificadora sobre la línea de serviceName, con classNames()),
+// no sus nombres: aquí son .nc-coord-itin-what/--cancelled. Antes eran
+// .nc-itin-what/--cancelled, prestadas literalmente de la pantalla del
+// paciente, lo que contradecía la razón misma de que este directorio
+// exista. No rompía nada todavía —los dos bundles son documentos distintos
+// y las reglas eran idénticas— pero era un conflicto latente: cambiar el
+// tachado del paciente habría dejado al panel con el estilo viejo en
+// silencio. test/ui/coordinator/cssNamespace.test.js lo impide de aquí en
+// adelante para todo el directorio, no solo para este par.
+//
+// Este archivo se basta solo en CSS: no hay garantía de orden de carga
+// entre las pantallas hermanas de coordinator/, así que además de sus
+// propias clases trae su copia de .nc-screen-title y .nc-empty-state
+// (primitivas compartidas del proyecto, mismas reglas en todos lados) en
+// vez de asumir que otra pantalla del panel las define primero.
+
+
+
+
+
+
+
+
+// Etapa D — el servidor devuelve motivos por campo y esto los nombra. Las
+// llaves son las mismas etiquetas que ya pinta cada <label> del formulario,
+// para que el error diga exactamente el nombre que se ve en pantalla.
+// (Sufijo _CITA por la colisión de scope que documenta intake.js.)
+const CAMPOS_CITA = {
+  serviceName: 'coordinator.itinerary.serviceNameLabel',
+  startsAt: 'coordinator.itinerary.startsAtLabel',
+  durationMin: 'coordinator.itinerary.durationLabel',
+  locationId: 'coordinator.itinerary.locationLabel',
+};
+
+function renderAppointmentCard(appointment, lang, t, ventana) {
+  const cancelled = appointment.status === 'cancelled';
+  const moved = appointment.status === 'moved';
+
+  // Cancelar y editar se omiten para una cita que ya está cancelada
+  // (editar contenido de algo cancelado no tiene sentido de negocio,
+  // mismo criterio ya aplicado a cancelar); mover sigue disponible siempre
+  // (no hay razón de negocio dada para bloquearlo).
+  const cancelControl = cancelled
+    ? ''
+    : `<button type="button" class="nc-button" data-role="cancel-appointment" data-appointment-id="${escapeHtml(appointment.id)}">${escapeHtml(t('coordinator.itinerary.cancel'))}</button>`;
+
+  // "editarla" (docs/phases/phase-09-coordinator-demo.md) es una acción
+  // propia, distinta de "moverla": edita serviceName/durationMin/
+  // locationId, nunca startsAt ni status (coordinatorStore.js#
+  // editAppointment). El botón no captura nada: revela el formulario
+  // inline de su tarjeta (renderEditForm, abajo). Mismo patrón que "mover",
+  // para no tener dos interacciones distintas en el mismo archivo para dos
+  // acciones hermanas.
+  const editControl = cancelled
+    ? ''
+    : `<button type="button" class="nc-button" data-role="edit-appointment" data-appointment-id="${escapeHtml(appointment.id)}">${escapeHtml(t('coordinator.itinerary.edit'))}</button>`;
+
+  // Fix (revisión adversarial, fase 09): coordinator.itinerary.
+  // cancelledBadge/movedBadge (i18n.js) existían sin usar, y el estado se
+  // pintaba como el enum crudo ("cancelled"/"moved") igual en es que en
+  // en — violando el criterio de aceptación "ninguna cadena nueva queda
+  // fija en un solo idioma". renderBadge es el mismo componente que ya
+  // usa ../itinerary.js (paciente) y qpass.js, no texto libre nuevo.
+  // 'updated' es la variante ya usada por el lado paciente para señalar
+  // que una cita cambió de horario — mismo significado que "movida" aquí.
+  // Los cinco status ya tienen llave i18n (itinerary.status.*, src/ui/
+  // i18n.js) — el comentario de cabecera de este archivo afirmaba lo
+  // contrario y era falso: scheduled/in_progress/done existen ahí desde la
+  // fase 05. Se pintan traducidos como los otros dos, en vez de dejar el
+  // enum crudo en inglés en ambos idiomas.
+  const statusHtml = cancelled
+    ? `<p class="nc-coord-itin-status-badge">${renderBadge(t('coordinator.itinerary.cancelledBadge'), 'cancelled')}</p>`
+    : moved
+      ? `<p class="nc-coord-itin-status-badge">${renderBadge(t('coordinator.itinerary.movedBadge'), 'updated')}</p>`
+      : `<p class="nc-coord-itin-status">${escapeHtml(t(`itinerary.status.${appointment.status}`))}</p>`;
+
+  return renderCard(
+    `
+      <p class="${classNames(['nc-coord-itin-what', cancelled && 'nc-coord-itin-what--cancelled'])}">${escapeHtml(appointment.serviceName)}</p>
+      <p class="nc-coord-itin-row"><span>${escapeHtml(t('coordinator.itinerary.startsAtLabel'))}</span> ${escapeHtml(appointment.startsAt)}</p>
+      <p class="nc-coord-itin-row"><span>${escapeHtml(t('coordinator.itinerary.durationLabel'))}</span> ${escapeHtml(appointment.durationMin)}</p>
+      <p class="nc-coord-itin-row"><span>${escapeHtml(t('coordinator.itinerary.locationLabel'))}</span> ${escapeHtml(locationName(locations, appointment.locationId, lang))}</p>
+      ${statusHtml}
+      <div class="nc-coord-itin-actions">
+        <button type="button" class="nc-button" data-role="move-appointment" data-appointment-id="${escapeHtml(appointment.id)}">${escapeHtml(t('coordinator.itinerary.move'))}</button>
+        ${editControl}
+        ${cancelControl}
+      </div>
+      ${renderMoveForm(appointment, t, ventana)}
+      ${cancelled ? '' : renderEditForm(appointment, lang, t)}
+    `,
+    { extraClass: cancelled ? 'nc-card--muted' : '' }
+  );
+}
+
+// D40 — mover y editar eran cadenas de window.prompt() (D33). Un prompt no
+// puede ser un <select>, así que dejaban abierta exactamente la misma puerta
+// que el dropdown cierra en el formulario de agregar: bastaba teclear mal la
+// ubicación al editar para romper el mapa de esa cita.
+//
+// Los dos formularios se pintan siempre, ocultos con [hidden], y el botón
+// correspondiente los muestra. Así no hay estado de "qué tarjeta está en
+// edición" que mantener entre repintados: tras una mutación exitosa el
+// router vuelve a pintar la pantalla desde cero y los formularios vuelven a
+// quedar ocultos solos.
+// Etapa H (D75) — el value NO es appointment.startsAt: un datetime-local con
+// "2026-03-11T09:30-07:00" adentro no lo entiende y sale VACÍO, así que abrir
+// el formulario para mover una cita borraría en silencio la hora que ya
+// estaba. toLocalInput baja el ISO a hora de pared de Tijuana, y devuelve ''
+// si el dato guardado no cuadra — mejor un campo vacío y visible que una hora
+// corrida siete horas.
+function renderMoveForm(appointment, t, ventana) {
+  return `
+    <form data-role="move-appointment-form" data-appointment-id="${escapeHtml(appointment.id)}" class="nc-coord-itin-form nc-coord-itin-form--inline" hidden>
+      <label class="nc-coord-itin-field">
+        <span>${escapeHtml(t('coordinator.itinerary.startsAtLabel'))}</span>
+        <input type="datetime-local" name="moveStartsAt" class="nc-coord-itin-input" required${ventana}
+               value="${escapeHtml(toLocalInput(appointment.startsAt))}" />
+      </label>
+      <button type="submit" class="nc-button nc-button--primary nc-coord-itin-submit">${escapeHtml(t('coordinator.itinerary.move'))}</button>
+    </form>
+  `;
+}
+
+function renderEditForm(appointment, lang, t) {
+  return `
+    <form data-role="edit-appointment-form" data-appointment-id="${escapeHtml(appointment.id)}" class="nc-coord-itin-form nc-coord-itin-form--inline" hidden>
+      <label class="nc-coord-itin-field">
+        <span>${escapeHtml(t('coordinator.itinerary.serviceNameLabel'))}</span>
+        <input type="text" name="editServiceName" class="nc-coord-itin-input" required value="${escapeHtml(appointment.serviceName)}" />
+      </label>
+      <label class="nc-coord-itin-field">
+        <span>${escapeHtml(t('coordinator.itinerary.durationLabel'))}</span>
+        <input type="number" name="editDurationMin" class="nc-coord-itin-input" required min="1" step="1" value="${escapeHtml(appointment.durationMin)}" />
+      </label>
+      <label class="nc-coord-itin-field">
+        <span>${escapeHtml(t('coordinator.itinerary.locationLabel'))}</span>
+        <select name="editLocationId" class="nc-coord-itin-input" required>
+          ${locationOptionsHtml(locations, lang, appointment.locationId)}
+        </select>
+      </label>
+      <button type="submit" class="nc-button nc-button--primary nc-coord-itin-submit">${escapeHtml(t('coordinator.itinerary.edit'))}</button>
+    </form>
+  `;
+}
+
+function renderAddAppointmentForm(lang, t, ventana) {
+  return `
+    <form data-role="add-appointment-form" class="nc-coord-itin-form">
+      <label class="nc-coord-itin-field">
+        <span>${escapeHtml(t('coordinator.itinerary.serviceNameLabel'))}</span>
+        <input type="text" name="serviceName" class="nc-coord-itin-input" required />
+      </label>
+      <label class="nc-coord-itin-field">
+        <span>${escapeHtml(t('coordinator.itinerary.startsAtLabel'))}</span>
+        <input type="datetime-local" name="startsAt" class="nc-coord-itin-input" required${ventana} />
+      </label>
+      <label class="nc-coord-itin-field">
+        <span>${escapeHtml(t('coordinator.itinerary.durationLabel'))}</span>
+        <input type="number" name="durationMin" class="nc-coord-itin-input" required min="1" step="1" />
+      </label>
+      <label class="nc-coord-itin-field">
+        <span>${escapeHtml(t('coordinator.itinerary.locationLabel'))}</span>
+        <select name="locationId" class="nc-coord-itin-input" required>
+          ${locationOptionsHtml(locations, lang)}
+        </select>
+      </label>
+      <button type="submit" class="nc-button nc-button--primary nc-coord-itin-submit">${escapeHtml(t('coordinator.itinerary.addAppointment'))}</button>
+    </form>
+  `;
+}
+
+function renderItineraryScreen(ctx) {
+  const { store, visitId, lang, t, errors, requestError } = ctx;
+  const title = t('coordinator.itinerary.title');
+  const record = store.getVisit(visitId);
+
+  // Guard: visita inexistente -> alternativa corta, sin lanzar (misma
+  // disciplina de defensa en profundidad que ya usa src/ui/screens/
+  // stay.js para lodging ausente). El mensaje sale de
+  // coordinator.visitNotFound, la MISMA llave que usan lodging.js y
+  // qpass.js: antes cada archivo traía su propio `lang === 'en' ? … : …`,
+  // la única traducción del proyecto hecha fuera de i18n.js.
+  if (!record) {
+    return `
+      <section class="nc-screen">
+        <h1 class="nc-screen-title">${escapeHtml(title)}</h1>
+        <p class="nc-empty-state">${escapeHtml(t('coordinator.visitNotFound'))}</p>
+      </section>
+    `;
+  }
+
+  const { appointments } = record;
+  // Punto 6 — acotar el control a la ventana de la visita, para que la
+  // coordinadora no capture una cita fuera de la estancia sin darse cuenta.
+  const ventana = visitWindowAttrs(record.visit);
+
+  // Fix (revisión adversarial, fase 09): el criterio de aceptación del
+  // doc de esta fase pide que "una cita movida reordene la línea de
+  // tiempo" — antes se pintaba appointments tal cual, en su orden de
+  // inserción original, sin importar el startsAt nuevo tras moverla.
+  // Copia nueva vía spread + sort (nunca se muta record.appointments, el
+  // array real de la store) — new Date(...).getTime() en vez de comparar
+  // los strings ISO tal cual, para no depender de que todas las visitas
+  // usen el mismo offset de zona horaria.
+  const sortedAppointments = [...appointments].sort(
+    (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
+  );
+
+  const body = sortedAppointments.length === 0
+    ? `<p class="nc-empty-state">${escapeHtml(t('coordinator.itinerary.empty'))}</p>`
+    : `<div class="nc-coord-itin-list">${sortedAppointments.map((a) => renderAppointmentCard(a, lang, t, ventana)).join('\n')}</div>`;
+
+  return `
+    <section class="nc-screen">
+      <h1 class="nc-screen-title">${escapeHtml(title)}</h1>
+      ${body}
+      ${renderRequestError(requestError, t)}
+      ${renderFormErrors(errors, t, CAMPOS_CITA)}
+      ${renderAddAppointmentForm(lang, t, ventana)}
+    </section>
+  `;
+}
+
+// ctx aquí además trae { onChange } (mismo contrato que el resto de
+// attach*Screen interactivos): onChange se llama con el RESULTADO de cada
+// mutación, no solo cuando salió bien, y el router decide qué pintar —
+// repintar con los datos nuevos, o el motivo por el que el servidor dijo
+// que no.
+//
+// Etapa D: `now` ya no se recibe ni se manda. La store llama a la API y la
+// hora de lo que se guarda la estampa el servidor, que es el único que
+// puede decirla igual para todas las coordinadoras.
+function attachItineraryScreen(rootEl, ctx) {
+  const { store, visitId, onChange } = ctx;
+
+  const form = rootEl.querySelector('[data-role="add-appointment-form"]');
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const fields = form.elements;
+    const res = await store.addAppointment(visitId, {
+      serviceName: fields.serviceName.value,
+      startsAt: toIsoTijuana(fields.startsAt.value),
+      durationMin: Number(fields.durationMin.value),
+      locationId: fields.locationId.value,
+    });
+    onChange?.(res);
+  });
+
+  // D40 — los botones ya no piden datos: revelan el formulario inline de su
+  // propia tarjeta. Mostrar uno esconde cualquier otro abierto, para que no
+  // queden dos ediciones a medias en pantalla al mismo tiempo.
+  function toggleInlineForm(role, appointmentId) {
+    const target = rootEl.querySelector(`[data-role="${role}"][data-appointment-id="${appointmentId}"]`);
+    if (!target) return;
+    const wasHidden = target.hidden;
+    rootEl.querySelectorAll('.nc-coord-itin-form--inline').forEach((f) => { f.hidden = true; });
+    target.hidden = !wasHidden;
+    if (!target.hidden) target.querySelector('input, select')?.focus();
+  }
+
+  rootEl.querySelectorAll('[data-role="move-appointment"]').forEach((btn) => {
+    btn.addEventListener('click', () => toggleInlineForm('move-appointment-form', btn.dataset.appointmentId));
+  });
+
+  rootEl.querySelectorAll('[data-role="edit-appointment"]').forEach((btn) => {
+    btn.addEventListener('click', () => toggleInlineForm('edit-appointment-form', btn.dataset.appointmentId));
+  });
+
+  rootEl.querySelectorAll('[data-role="move-appointment-form"]').forEach((moveForm) => {
+    moveForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const newStartsAt = moveForm.elements.moveStartsAt.value.trim();
+      if (!newStartsAt) return;
+      // toIsoTijuana devuelve null si el control mandó algo ininteligible;
+      // null viaja tal cual y contesta el servidor (D75).
+      const res = await store.moveAppointment(visitId, moveForm.dataset.appointmentId, toIsoTijuana(newStartsAt));
+      onChange?.(res);
+    });
+  });
+
+  rootEl.querySelectorAll('[data-role="edit-appointment-form"]').forEach((editForm) => {
+    editForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const fields = editForm.elements;
+      const res = await store.editAppointment(visitId, editForm.dataset.appointmentId, {
+        serviceName: fields.editServiceName.value.trim(),
+        durationMin: Number(fields.editDurationMin.value),
+        locationId: fields.editLocationId.value,
+      });
+      onChange?.(res);
+    });
+  });
+
+  rootEl.querySelectorAll('[data-role="cancel-appointment"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const res = await store.cancelAppointment(visitId, btn.dataset.appointmentId);
+      onChange?.(res);
+    });
+  });
+}
+
+const ITINERARY_CSS = `
+.nc-screen-title { font-size: 20px; margin: 4px 0 16px; }
+.nc-empty-state { font-size: 13px; opacity: 0.65; }
+.nc-coord-itin-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+.nc-coord-itin-what { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.nc-coord-itin-what--cancelled { text-decoration: line-through; opacity: 0.6; }
+.nc-coord-itin-row { display: flex; gap: 6px; margin: 0 0 4px; font-size: 13px; }
+.nc-coord-itin-row span { min-width: 100px; opacity: 0.7; }
+.nc-coord-itin-status { margin: 6px 0 0; font-size: 12px; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.03em; }
+.nc-coord-itin-status-badge { margin: 6px 0 0; }
+.nc-coord-itin-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.nc-coord-itin-form { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.nc-coord-itin-field { display: flex; flex-direction: column; gap: 4px; }
+.nc-coord-itin-input { min-height: 44px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--nc-card-border); background: var(--nc-surface); color: var(--nc-ink); font: 400 15px Barlow, system-ui, sans-serif; }
+.nc-coord-itin-submit { align-self: flex-start; }
+/* El <select> de ubicación (D40) necesita su propia flecha: Safari y
+   Firefox no pintan ninguna cuando se le quita la apariencia nativa, y sin
+   esto el campo parece un input de texto deshabilitado. Mismo tratamiento
+   que ya trae select.nc-input en intake.js, repetido aquí porque esa regla
+   está acotada a .nc-input y no alcanza a .nc-coord-itin-input. */
+select.nc-coord-itin-input {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  padding-right: 34px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 16px center, right 11px center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+/* Los formularios inline de mover/editar viven dentro de la tarjeta: se
+   separan de los botones y se marcan con un borde superior para que se lea
+   que pertenecen a esa cita y no al formulario de agregar de abajo. */
+.nc-coord-itin-form--inline { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--nc-card-border); }
+.nc-coord-itin-form--inline[hidden] { display: none; }
+`;
+
 // --- src/ui/screens/coordinator/lodging.js ---
 // Fase 09 — Hospedaje: registro/edición de Lodging (PRD §7) para una
 // visita seleccionada del panel de coordinadores. ctx = { store, visitId,
@@ -2875,13 +3021,18 @@ function formatDayLabel(iso, now, _lang) {
 // eso ES "editar" en esta demo (docs/phases/phase-09-coordinator-demo.md,
 // "Alcance": "Registro de hospedaje ... asociado a una visita").
 //
-// checkIn/checkOut son <input type="text">, igual que el resto de fechas
-// capturadas a mano en esta demo (mismo razonamiento que intake.js con
-// startsAt/endsAt): sin dependencia de un date-picker.
+// Etapa H (D75/D77) — checkIn/checkOut eran <input type="text">. Ahora son
+// <input type="datetime-local">, con HORA, y no <input type="date"> como
+// las fechas de la visita: el hospedaje se guarda como instante y esa hora
+// se usa. src/ui/screens/stay.js le pinta al paciente "Martes 10 · 3:00
+// p.m." leyendo estos mismos campos, y computeExpiresAt (R1) usa checkOut
+// para decidir hasta cuándo vive su enlace. Capturar solo el día obligaría
+// a inventar una hora de hotel o a pintarle "12:00 a.m." al paciente.
 //
 // Nombres de campo iguales a los que ya lee src/ui/screens/stay.js del
 // lado paciente: hotel, reservationCode, checkIn, checkOut,
 // breakfastIncluded, recoveryRoom.
+
 
 
 
@@ -2960,6 +3111,22 @@ function textField(name, value, label) {
   `;
 }
 
+// Etapa H — hermano de textField para las dos fechas. El value NO es el ISO
+// guardado: un datetime-local con "2026-03-10T15:00-07:00" adentro no lo
+// entiende y sale VACÍO, así que abrir la pestaña para corregir el nombre del
+// hotel borraría las dos fechas sin avisar. toLocalInput lo baja a hora de
+// pared y devuelve '' si el dato guardado no cuadra con Tijuana — un campo
+// vacío se ve; una hora corrida siete horas, no.
+function dateTimeField(name, value, label, ventana) {
+  return `
+    <label class="nc-lodging-field">
+      <span class="nc-lodging-field-label">${escapeHtml(label)}</span>
+      <input type="datetime-local" name="${escapeHtml(name)}" value="${escapeHtml(toLocalInput(value))}"${ventana} class="nc-lodging-input" aria-describedby="nc-lodging-error-${escapeHtml(name)}" />
+      <span class="nc-lodging-error" id="nc-lodging-error-${escapeHtml(name)}" data-role="lodging-error" data-field="${escapeHtml(name)}" hidden></span>
+    </label>
+  `;
+}
+
 function checkboxField(name, checked, label) {
   return `
     <label class="nc-lodging-field nc-lodging-field--checkbox">
@@ -2989,6 +3156,8 @@ function renderLodgingScreen(ctx) {
   }
 
   const lodging = record.lodging;
+  // Punto 6 — la estancia se acota a los días de la visita.
+  const ventana = visitWindowAttrs(record.visit);
 
   return `
     <section class="nc-screen">
@@ -2997,8 +3166,8 @@ function renderLodgingScreen(ctx) {
         ${renderCard(`
           ${textField('hotel', lodging?.hotel, t('coordinator.lodging.hotelLabel'))}
           ${textField('reservationCode', lodging?.reservationCode, t('coordinator.lodging.reservationCodeLabel'))}
-          ${textField('checkIn', lodging?.checkIn, t('coordinator.lodging.checkInLabel'))}
-          ${textField('checkOut', lodging?.checkOut, t('coordinator.lodging.checkOutLabel'))}
+          ${dateTimeField('checkIn', lodging?.checkIn, t('coordinator.lodging.checkInLabel'), ventana)}
+          ${dateTimeField('checkOut', lodging?.checkOut, t('coordinator.lodging.checkOutLabel'), ventana)}
           ${checkboxField('breakfastIncluded', !!lodging?.breakfastIncluded, t('coordinator.lodging.breakfastLabel'))}
           ${checkboxField('recoveryRoom', !!lodging?.recoveryRoom, t('coordinator.lodging.recoveryLabel'))}
         `)}
@@ -3042,11 +3211,17 @@ function attachLodgingScreen(rootEl, ctx) {
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const fields = form.elements;
+    // El control da hora de pared ("2026-03-10T15:00"); lo que se valida y se
+    // guarda es ISO con desplazamiento. Si toIsoTijuana no puede con lo que
+    // llegó devuelve null y pasa el valor crudo: así validateLodging dice
+    // 'invalidDate' (el problema real) en vez de 'required' (un campo que sí
+    // se llenó). D75 — el control es comodidad, no autoridad.
+    const fecha = (valor) => toIsoTijuana(valor) ?? valor;
     const values = {
       hotel: fields.hotel.value,
       reservationCode: fields.reservationCode.value,
-      checkIn: fields.checkIn.value,
-      checkOut: fields.checkOut.value,
+      checkIn: fecha(fields.checkIn.value),
+      checkOut: fecha(fields.checkOut.value),
       breakfastIncluded: fields.breakfastIncluded.checked,
       recoveryRoom: fields.recoveryRoom.checked,
     };
@@ -3643,8 +3818,6 @@ const CAMPOS_TRASLADO = {
   notes: 'coordinator.transfers.notesLabel',
 };
 
-const SCHEDULED_AT_PLACEHOLDER = '2026-03-10T06:00-07:00';
-
 // Mismo criterio que telefonoValido en src/server/visitMutations.js, y a
 // propósito la misma regla escrita dos veces: D45 prohíbe que el servidor
 // importe código de UI, y al revés dejaría al navegador dependiendo de un
@@ -3724,6 +3897,23 @@ function enumOpciones(valores, prefijo, t, selected) {
     .join('\n');
 }
 
+// Etapa H (D75/D76) — la hora de recogida deja de teclearse. El value NO es
+// el ISO guardado: un datetime-local con "2026-03-12T15:00-07:00" adentro no
+// lo entiende y sale VACÍO, así que abrir la edición para corregir las placas
+// borraría la hora del traslado sin avisar.
+//
+// A diferencia de citas y hospedaje, aquí NO va min/max de la ventana de la
+// visita: el traslado de regreso al aeropuerto es por definición posterior al
+// último evento de la visita — es justo lo que motivó la Etapa G y D69. Un
+// max="fin de la visita" haría imposible capturarlo.
+function fechaHoraCampo(name, label, value) {
+  return campo(
+    name,
+    label,
+    `<input type="datetime-local" name="${escapeHtml(name)}" value="${escapeHtml(toLocalInput(value))}" class="nc-coord-transfer-input" />`,
+  );
+}
+
 function selectCampo(name, label, opciones) {
   return campo(name, label, `<select name="${escapeHtml(name)}" class="nc-coord-transfer-input">${opciones}</select>`);
 }
@@ -3738,7 +3928,7 @@ function camposTraslado(lang, t, transfer = null) {
 
   return `
     ${selectCampo('kind', t('coordinator.transfers.kindLabel'), enumOpciones(TRANSFER_KINDS, 'transfer.kind', t, transfer?.kind))}
-    ${textoCampo('scheduledAt', t('coordinator.transfers.scheduledAtLabel'), transfer?.scheduledAt, ` placeholder="${escapeHtml(SCHEDULED_AT_PLACEHOLDER)}"`)}
+    ${fechaHoraCampo('scheduledAt', t('coordinator.transfers.scheduledAtLabel'), transfer?.scheduledAt)}
     ${selectCampo('meetingPointId', t('coordinator.transfers.meetingPointLabel'), transferPointOptionsHtml(transferPoints, lang, transfer?.meetingPointId, sinConfirmar))}
     ${textoCampo('flightNumber', t('coordinator.transfers.flightNumberLabel'), transfer?.flightNumber)}
     <p class="nc-coord-transfer-hint">${escapeHtml(t('coordinator.transfers.driverOptionalHint'))}</p>
@@ -3850,7 +4040,12 @@ function valoresDelFormulario(form) {
   const f = form.elements;
   return {
     kind: f.kind.value,
-    scheduledAt: f.scheduledAt.value,
+    // El control da hora de pared ("2026-03-12T15:00"); lo que se valida y se
+    // guarda es ISO con desplazamiento, derivado de ESA fecha (D76). Si no se
+    // puede interpretar pasa el valor crudo, para que el motivo del error sea
+    // 'invalidDate' y no 'required' — y para que lo diga también el servidor,
+    // que es la autoridad (D75).
+    scheduledAt: toIsoTijuana(f.scheduledAt.value) ?? f.scheduledAt.value,
     meetingPointId: f.meetingPointId.value,
     flightNumber: f.flightNumber.value,
     driverName: f.driverName.value,

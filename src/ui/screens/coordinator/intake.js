@@ -1,9 +1,12 @@
 // Fase 09 — Alta de visita (docs/phases/phase-09-coordinator-demo.md):
 // formulario con el subconjunto de Visit (PRD §7) que le toca capturar a
-// la coordinadora — patientFirstName, lang, startsAt, endsAt. Primer
-// <form> del proyecto: sin librería de date-picker, así que startsAt/
-// endsAt son <input type="text"> con placeholder de ejemplo ISO en vez de
-// datetime-local, tal como decide el doc de esta fase.
+// la coordinadora — patientFirstName, lang, startsAt, endsAt.
+//
+// Etapa H (D75) — las dos fechas eran <input type="text"> con un ISO de
+// ejemplo en el placeholder, herencia de "sin librería de date-picker" de
+// la fase 09. No hace falta librería: el control nativo del navegador ya
+// existe. La visita se delimita por días, así que aquí es type="date"; la
+// hora la ponen las citas y el hospedaje, no la ventana.
 //
 // Al guardar, esta pantalla NO navega por sí misma — coordinatorApp.js
 // (el enrutador, construido aparte) decide qué hacer con la visita nueva
@@ -18,6 +21,7 @@
 // endsAt vaya después de startsAt.
 
 import { escapeHtml } from '../../util.js';
+import { toIsoTijuana } from '../../../domain/time.js';
 import { renderFormErrors, renderRequestError } from './formErrors.js';
 
 // El sufijo no es decorativo: intake, itinerary y lodging tenían los tres
@@ -54,12 +58,12 @@ export function renderIntakeScreen(ctx) {
 
         <label class="nc-field">
           <span class="nc-field-label">${escapeHtml(t('coordinator.intake.startsAtLabel'))}</span>
-          <input type="text" name="startsAt" class="nc-input" placeholder="2026-03-10T10:00-07:00" required />
+          <input type="date" name="startsAt" class="nc-input" required />
         </label>
 
         <label class="nc-field">
           <span class="nc-field-label">${escapeHtml(t('coordinator.intake.endsAtLabel'))}</span>
-          <input type="text" name="endsAt" class="nc-input" placeholder="2026-03-12T12:00-07:00" required />
+          <input type="date" name="endsAt" class="nc-input" required />
         </label>
 
         ${renderRequestError(requestError, t)}
@@ -83,11 +87,20 @@ export function attachIntakeScreen(rootEl, ctx = {}) {
     const boton = form.querySelector('button[type="submit"]');
     if (boton) boton.disabled = true;
 
+    // El control da el día pelado ("2026-03-12"); lo que se guarda es ISO
+    // con desplazamiento. El inicio es la medianoche de ese día y el fin es
+    // su último minuto: si fueran las dos medianoche, elegir el mismo día
+    // para inicio y fin daría endsAt === startsAt y el servidor lo
+    // rechazaría con 'order' — una visita de un solo día es normal.
+    // toIsoTijuana devuelve null si el control mandó algo ininteligible, y
+    // null viaja tal cual para que conteste el servidor (D75: el control es
+    // comodidad, no autoridad).
+    const dia = (nombre) => String(data.get(nombre) ?? '').trim();
     const res = await store.createVisit({
       patientFirstName: data.get('patientFirstName'),
       lang: data.get('lang'),
-      startsAt: data.get('startsAt'),
-      endsAt: data.get('endsAt'),
+      startsAt: toIsoTijuana(dia('startsAt')),
+      endsAt: toIsoTijuana(`${dia('endsAt')}T23:59`),
     });
 
     // Sin repintado no hay botón nuevo: si falló, se reactiva este. Si

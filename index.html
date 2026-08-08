@@ -104,6 +104,104 @@ function toTijuanaIso(ms) {
   return `${p.year}-${pad2(p.month)}-${pad2(p.day)}T${pad2(p.hour)}:${pad2(p.minute)}:${pad2(p.second)}${formatOffset(offset)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Etapa H — puente entre los controles nativos de fecha del panel y el ISO
+// con desplazamiento explícito que guarda el proyecto (PRD §7).
+//
+// <input type="datetime-local"> devuelve "2026-03-11T15:00", pelado: la hora
+// de pared sin zona. Escribir el desplazamiento a mano ('-07:00') acierta de
+// marzo a noviembre y corre las citas una hora el resto del año, porque Baja
+// California NO abolió el horario de verano junto con el resto de México
+// (sigue el calendario de EE. UU. por la frontera). Así que el offset se
+// deriva de LA FECHA, con el mismo tijuanaOffsetMinutes que ya usa
+// toTijuanaIso — una sola fuente de verdad, ya probada, sin tabla propia de
+// reglas de horario de verano.
+//
+// Siguen valiendo INV-1 e INV-5: son función de su argumento y de nada más.
+
+const LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/;
+const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?[+-]\d{2}:\d{2}$/;
+
+// Interpreta lo que devuelve un control nativo. Devuelve null en vez de una
+// fecha corrida cuando el calendario no cuadra: Date.UTC "arregla" solo un
+// 30 de febrero moviéndolo al 2 de marzo, y guardar eso en silencio sería
+// peor que rechazarlo.
+function parseLocal(local) {
+  if (typeof local !== 'string') return null;
+  const m = LOCAL_RE.exec(local.trim());
+  if (!m) return null;
+  const [year, month, day, hour, minute] = [m[1], m[2], m[3], m[4] ?? '00', m[5] ?? '00'].map(Number);
+  const asIfUtc = Date.UTC(year, month - 1, day, hour, minute);
+  const back = new Date(asIfUtc);
+  const cuadra =
+    back.getUTCFullYear() === year &&
+    back.getUTCMonth() + 1 === month &&
+    back.getUTCDate() === day &&
+    back.getUTCHours() === hour &&
+    back.getUTCMinutes() === minute;
+  return cuadra ? { year, month, day, hour, minute, asIfUtc } : null;
+}
+
+// tijuanaOffset('2026-01-15T15:00') -> '-08:00' | null
+//
+// El problema del huevo y la gallina: para saber qué offset regía hay que
+// saber de qué instante se habla, y para saber de qué instante se habla hay
+// que saber el offset. Se resuelve en dos pasadas: la primera usa la hora de
+// pared como si fuera UTC (se equivoca a lo mucho por las ~8 horas del
+// desplazamiento) y la segunda vuelve a preguntar ya sobre el instante
+// candidato. Converge salvo dentro de la hora que el cambio de horario borra
+// o repite, donde cualquier respuesta es igual de defendible.
+function tijuanaOffset(local) {
+  const p = parseLocal(local);
+  if (!p) return null;
+  const aproximado = tijuanaOffsetMinutes(new Date(p.asIfUtc));
+  const afinado = tijuanaOffsetMinutes(new Date(p.asIfUtc - aproximado * 60000));
+  return formatOffset(afinado);
+}
+
+// toIsoTijuana('2026-01-15T15:00') -> '2026-01-15T15:00-08:00' | null
+// Una fecha sin hora (lo que da <input type="date">) se guarda como
+// medianoche de ese día en Tijuana.
+function toIsoTijuana(local) {
+  const p = parseLocal(local);
+  if (!p) return null;
+  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}T${pad2(p.hour)}:${pad2(p.minute)}${tijuanaOffset(local)}`;
+}
+
+// toLocalInput('2026-03-11T15:00-07:00') -> '2026-03-11T15:00' | ''
+//
+// El camino de vuelta, para prellenar el formulario con lo ya guardado. NO
+// es un corte de los primeros 16 caracteres: eso funciona solo mientras todo
+// venga en offset de Tijuana, y el día que entre un '...Z' el corte devuelve
+// la hora UTC como si fuera local y la corre siete horas sin decir nada.
+//
+// El criterio es el único que no se puede falsificar: se calcula el instante
+// real y se comprueba que el reloj de pared de Tijuana en ese instante sea
+// exactamente lo que dice el ISO. Un desplazamiento que no corresponde a esa
+// fecha (un '-07:00' en enero, escrito por algo que no consultó el
+// calendario) no pasa. Devuelve '' —no null— porque el destino es un
+// atributo value.
+function toLocalInput(iso) {
+  if (typeof iso !== 'string') return '';
+  const m = ISO_RE.exec(iso.trim());
+  if (!m) return '';
+  const local = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}`;
+  const ms = new Date(iso.trim()).getTime();
+  if (!Number.isFinite(ms)) return '';
+  const p = tijuanaParts(new Date(ms));
+  const reloj = `${p.year}-${pad2(p.month)}-${pad2(p.day)}T${pad2(p.hour)}:${pad2(p.minute)}`;
+  return reloj === local ? local : '';
+}
+
+// El mismo puente para <input type="date">: el día es el de Tijuana, no el
+// de UTC — un instante de la noche cae en el día siguiente en UTC y sacar el
+// día del ISO crudo lo movería.
+function toDateInput(iso) {
+  return toLocalInput(iso).slice(0, 10);
+}
+
+// ---------------------------------------------------------------------------
+
 // Clave de día de calendario en America/Tijuana, ordenable como string
 // ("2026-03-10"). Se usa para agrupar (itinerary.js) y para medir
 // diferencia de días.

@@ -45,6 +45,8 @@ import { locations } from '../../../data/locations.js';
 import { renderCard } from '../../components/card.js';
 import { renderBadge } from '../../components/badge.js';
 import { renderFormErrors, renderRequestError } from './formErrors.js';
+import { toLocalInput, toIsoTijuana } from '../../../domain/time.js';
+import { visitWindowAttrs } from './dateWindow.js';
 
 // Etapa D — el servidor devuelve motivos por campo y esto los nombra. Las
 // llaves son las mismas etiquetas que ya pinta cada <label> del formulario,
@@ -57,12 +59,7 @@ const CAMPOS_CITA = {
   locationId: 'coordinator.itinerary.locationLabel',
 };
 
-// Formato que espera la store para startsAt. Se muestra como placeholder en
-// vez de dejar el campo mudo — mismo criterio que ya usan los dos campos de
-// fecha de intake.js.
-const STARTS_AT_PLACEHOLDER = '2026-03-10T08:00-07:00';
-
-function renderAppointmentCard(appointment, lang, t) {
+function renderAppointmentCard(appointment, lang, t, ventana) {
   const cancelled = appointment.status === 'cancelled';
   const moved = appointment.status === 'moved';
 
@@ -116,7 +113,7 @@ function renderAppointmentCard(appointment, lang, t) {
         ${editControl}
         ${cancelControl}
       </div>
-      ${renderMoveForm(appointment, t)}
+      ${renderMoveForm(appointment, t, ventana)}
       ${cancelled ? '' : renderEditForm(appointment, lang, t)}
     `,
     { extraClass: cancelled ? 'nc-card--muted' : '' }
@@ -133,13 +130,19 @@ function renderAppointmentCard(appointment, lang, t) {
 // edición" que mantener entre repintados: tras una mutación exitosa el
 // router vuelve a pintar la pantalla desde cero y los formularios vuelven a
 // quedar ocultos solos.
-function renderMoveForm(appointment, t) {
+// Etapa H (D75) — el value NO es appointment.startsAt: un datetime-local con
+// "2026-03-11T09:30-07:00" adentro no lo entiende y sale VACÍO, así que abrir
+// el formulario para mover una cita borraría en silencio la hora que ya
+// estaba. toLocalInput baja el ISO a hora de pared de Tijuana, y devuelve ''
+// si el dato guardado no cuadra — mejor un campo vacío y visible que una hora
+// corrida siete horas.
+function renderMoveForm(appointment, t, ventana) {
   return `
     <form data-role="move-appointment-form" data-appointment-id="${escapeHtml(appointment.id)}" class="nc-coord-itin-form nc-coord-itin-form--inline" hidden>
       <label class="nc-coord-itin-field">
         <span>${escapeHtml(t('coordinator.itinerary.startsAtLabel'))}</span>
-        <input type="text" name="moveStartsAt" class="nc-coord-itin-input" required
-               placeholder="${escapeHtml(STARTS_AT_PLACEHOLDER)}" value="${escapeHtml(appointment.startsAt)}" />
+        <input type="datetime-local" name="moveStartsAt" class="nc-coord-itin-input" required${ventana}
+               value="${escapeHtml(toLocalInput(appointment.startsAt))}" />
       </label>
       <button type="submit" class="nc-button nc-button--primary nc-coord-itin-submit">${escapeHtml(t('coordinator.itinerary.move'))}</button>
     </form>
@@ -168,7 +171,7 @@ function renderEditForm(appointment, lang, t) {
   `;
 }
 
-function renderAddAppointmentForm(lang, t) {
+function renderAddAppointmentForm(lang, t, ventana) {
   return `
     <form data-role="add-appointment-form" class="nc-coord-itin-form">
       <label class="nc-coord-itin-field">
@@ -177,7 +180,7 @@ function renderAddAppointmentForm(lang, t) {
       </label>
       <label class="nc-coord-itin-field">
         <span>${escapeHtml(t('coordinator.itinerary.startsAtLabel'))}</span>
-        <input type="text" name="startsAt" class="nc-coord-itin-input" required placeholder="${escapeHtml(STARTS_AT_PLACEHOLDER)}" />
+        <input type="datetime-local" name="startsAt" class="nc-coord-itin-input" required${ventana} />
       </label>
       <label class="nc-coord-itin-field">
         <span>${escapeHtml(t('coordinator.itinerary.durationLabel'))}</span>
@@ -215,6 +218,9 @@ export function renderItineraryScreen(ctx) {
   }
 
   const { appointments } = record;
+  // Punto 6 — acotar el control a la ventana de la visita, para que la
+  // coordinadora no capture una cita fuera de la estancia sin darse cuenta.
+  const ventana = visitWindowAttrs(record.visit);
 
   // Fix (revisión adversarial, fase 09): el criterio de aceptación del
   // doc de esta fase pide que "una cita movida reordene la línea de
@@ -230,7 +236,7 @@ export function renderItineraryScreen(ctx) {
 
   const body = sortedAppointments.length === 0
     ? `<p class="nc-empty-state">${escapeHtml(t('coordinator.itinerary.empty'))}</p>`
-    : `<div class="nc-coord-itin-list">${sortedAppointments.map((a) => renderAppointmentCard(a, lang, t)).join('\n')}</div>`;
+    : `<div class="nc-coord-itin-list">${sortedAppointments.map((a) => renderAppointmentCard(a, lang, t, ventana)).join('\n')}</div>`;
 
   return `
     <section class="nc-screen">
@@ -238,7 +244,7 @@ export function renderItineraryScreen(ctx) {
       ${body}
       ${renderRequestError(requestError, t)}
       ${renderFormErrors(errors, t, CAMPOS_CITA)}
-      ${renderAddAppointmentForm(lang, t)}
+      ${renderAddAppointmentForm(lang, t, ventana)}
     </section>
   `;
 }
@@ -261,7 +267,7 @@ export function attachItineraryScreen(rootEl, ctx) {
     const fields = form.elements;
     const res = await store.addAppointment(visitId, {
       serviceName: fields.serviceName.value,
-      startsAt: fields.startsAt.value,
+      startsAt: toIsoTijuana(fields.startsAt.value),
       durationMin: Number(fields.durationMin.value),
       locationId: fields.locationId.value,
     });
@@ -293,7 +299,9 @@ export function attachItineraryScreen(rootEl, ctx) {
       event.preventDefault();
       const newStartsAt = moveForm.elements.moveStartsAt.value.trim();
       if (!newStartsAt) return;
-      const res = await store.moveAppointment(visitId, moveForm.dataset.appointmentId, newStartsAt);
+      // toIsoTijuana devuelve null si el control mandó algo ininteligible;
+      // null viaja tal cual y contesta el servidor (D75).
+      const res = await store.moveAppointment(visitId, moveForm.dataset.appointmentId, toIsoTijuana(newStartsAt));
       onChange?.(res);
     });
   });

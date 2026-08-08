@@ -21,6 +21,7 @@ import { createLoopbackApi, panelConVisita } from '../../helpers/loopback.js';
 import { translate } from '../../../src/ui/i18n.js';
 import { locations, LOCATION_IDS } from '../../../src/data/locations.js';
 import { locationName, escapeHtml } from '../../../src/ui/util.js';
+import { toLocalInput } from '../../../src/domain/time.js';
 
 // Los nombres de ubicación traen ·, &, paréntesis y apóstrofes. Hay que
 // pasarlos por escapeHtml (así viajan en el HTML: "Quartz Hotel &amp; Spa")
@@ -237,10 +238,15 @@ for (const lang of ['es', 'en']) {
         'durationMin debe ser type="number": hoy acepta texto libre y termina en Number() -> NaN'
       );
       assert.match(html, /<input[^>]*name="durationMin"[^>]*min="1"|<input[^>]*min="1"[^>]*name="durationMin"/, 'durationMin debe tener min="1"');
+      // Etapa H (D75) — esta aserción exigía un placeholder con el ISO de
+      // ejemplo, que era la muleta de un campo de texto: decía cómo teclear
+      // lo que ya no se teclea. Se cambia deliberadamente por el control
+      // nativo, que es la ayuda de verdad. El detalle se prueba aparte, en
+      // "las fechas se capturan con el control nativo".
       assert.match(
         html,
-        /<input[^>]*name="startsAt"[^>]*placeholder="[^"]+"|<input[^>]*placeholder="[^"]+"[^>]*name="startsAt"/,
-        'startsAt debe traer placeholder con el formato ISO esperado, como ya hacen los de intake'
+        /<input[^>]*name="startsAt"[^>]*type="datetime-local"|<input[^>]*type="datetime-local"[^>]*name="startsAt"/,
+        'startsAt debe capturarse con el control nativo de fecha y hora'
       );
     });
 
@@ -328,3 +334,93 @@ for (const lang of ['es', 'en']) {
     });
   });
 }
+
+// Etapa H (D75/D76) — la hora de una cita deja de teclearse. Los dos campos
+// de fecha de esta pantalla (agregar y mover) son <input type="datetime-local">
+// y el valor que viaja al servidor lo arma toIsoTijuana en el attach, no la
+// coordinadora.
+describe('renderItineraryScreen — las fechas se capturan con el control nativo', () => {
+  const VENTANA = { min: '2026-03-10T00:00', max: '2026-03-12T23:59' };
+
+  function campoHtml(html, name) {
+    return html.match(new RegExp(`<input[^>]*name="${name}"[^>]*>`))?.[0] ?? '';
+  }
+
+  test('el startsAt del formulario de agregar es datetime-local, no texto', async () => {
+    const { store, visit } = await panelConVisita();
+    const campo = campoHtml(renderItineraryScreen(ctx(store, visit.id, 'es')), 'startsAt');
+    assert.match(campo, /type="datetime-local"/, 'startsAt debe ser un control nativo de fecha y hora');
+    assert.doesNotMatch(campo, /type="text"/);
+    assert.doesNotMatch(campo, /placeholder="20\d\d-/, 'el placeholder con ISO de ejemplo ya no aplica');
+  });
+
+  test('el moveStartsAt del formulario de mover también, y viene prellenado en formato de control', async () => {
+    const { store, visit } = await panelConVisita();
+    await agregarCita(store, visit.id, {
+      serviceName: 'Laboratorio',
+      startsAt: '2026-03-11T09:30-07:00',
+      durationMin: 30,
+      locationId: LOCATION_IDS[0],
+    });
+
+    const campo = campoHtml(renderItineraryScreen(ctx(store, visit.id, 'es')), 'moveStartsAt');
+    assert.match(campo, /type="datetime-local"/);
+    // El value es la hora de pared, sin desplazamiento: un datetime-local con
+    // "2026-03-11T09:30-07:00" adentro no lo entiende y sale VACÍO, borrando
+    // en silencio la hora que ya estaba guardada.
+    assert.match(campo, /value="2026-03-11T09:30"/, 'debe prellenarse con la hora local, no con el ISO crudo');
+    assert.doesNotMatch(campo, /value="[^"]*[+-]\d\d:\d\d"/, 'el ISO con desplazamiento no cabe en un datetime-local');
+    assert.strictEqual(toLocalInput('2026-03-11T09:30-07:00'), '2026-03-11T09:30');
+  });
+
+  // Punto 6 — acotar a la ventana de la visita. Se acota al DÍA, no al
+  // instante: la visita de la fixture "empieza" a las 00:00 y "termina" a
+  // las 00:00 del día 12, y con min/max al instante una cita a las 10 de la
+  // mañana del día 12 quedaría fuera de su propia visita.
+  test('agregar y mover están acotados a los días de la visita', async () => {
+    const { store, visit } = await panelConVisita();
+    await agregarCita(store, visit.id, {
+      serviceName: 'Laboratorio',
+      startsAt: '2026-03-11T09:30-07:00',
+      durationMin: 30,
+      locationId: LOCATION_IDS[0],
+    });
+
+    const html = renderItineraryScreen(ctx(store, visit.id, 'es'));
+    for (const name of ['startsAt', 'moveStartsAt']) {
+      const campo = campoHtml(html, name);
+      assert.match(campo, new RegExp(`min="${VENTANA.min}"`), `${name} sin min`);
+      assert.match(campo, new RegExp(`max="${VENTANA.max}"`), `${name} sin max`);
+    }
+  });
+});
+
+// Punto 4c — el control nativo es comodidad, no autoridad. Quien mande el
+// POST no tiene por qué haber pasado por la pantalla, así que el servidor
+// sigue rechazando exactamente lo mismo que antes. Mismo criterio que
+// locationId con su 422 (D40).
+describe('el control nativo no relaja la validación del servidor', () => {
+  test('una fecha sin desplazamiento sigue siendo 422 noOffset', async () => {
+    const { store, visit } = await panelConVisita();
+    const res = await store.addAppointment(visit.id, {
+      serviceName: 'Laboratorio',
+      startsAt: '2026-03-11T09:30', // lo que da un datetime-local en crudo
+      durationMin: 30,
+      locationId: LOCATION_IDS[0],
+    });
+    assert.strictEqual(res.ok, false);
+    assert.strictEqual(res.errors?.startsAt, 'noOffset');
+  });
+
+  test('una fecha ininteligible sigue siendo 422 invalidDate', async () => {
+    const { store, visit } = await panelConVisita();
+    const res = await store.addAppointment(visit.id, {
+      serviceName: 'Laboratorio',
+      startsAt: 'mañana',
+      durationMin: 30,
+      locationId: LOCATION_IDS[0],
+    });
+    assert.strictEqual(res.ok, false);
+    assert.strictEqual(res.errors?.startsAt, 'invalidDate');
+  });
+});

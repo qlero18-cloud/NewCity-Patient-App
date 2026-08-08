@@ -113,3 +113,33 @@ describe('renderIntakeScreen — idioma del paciente sin códigos crudos (Etapa 
     assert.strictEqual(translate('es', 'common.langName.en'), translate('en', 'common.langName.en'));
   });
 });
+
+// Etapa H (D75) — las dos fechas de la visita dejan de ser texto libre. Aquí
+// son <input type="date"> y no datetime-local: "del 10 al 12 de marzo" es un
+// dato de días, y ninguna pantalla del paciente muestra una hora sacada de
+// visit.startsAt/endsAt (solo las usa el panel, y ahora la ventana min/max
+// de citas y hospedaje).
+describe('renderIntakeScreen — las fechas se capturan con el control nativo', () => {
+  test('inicio y fin de la visita son <input type="date">', () => {
+    const html = renderIntakeScreen(ctx('es'));
+    assert.match(html, /<input[^>]*type="date"[^>]*name="startsAt"|<input[^>]*name="startsAt"[^>]*type="date"/);
+    assert.match(html, /<input[^>]*type="date"[^>]*name="endsAt"|<input[^>]*name="endsAt"[^>]*type="date"/);
+  });
+
+  test('ninguna de las dos sigue siendo type="text"', () => {
+    const html = renderIntakeScreen(ctx('es'));
+    for (const name of ['startsAt', 'endsAt']) {
+      const campo = html.match(new RegExp(`<input[^>]*name="${name}"[^>]*>`))?.[0] ?? '';
+      assert.doesNotMatch(campo, /type="text"/, `${name} sigue siendo texto libre`);
+    }
+  });
+
+  // El placeholder con un ISO de ejemplo era la muleta de un campo de texto:
+  // decía cómo teclear lo que ya no se teclea. Dejarlo puesto sobre un
+  // control nativo solo estorba (los navegadores lo ignoran o lo pintan
+  // encima de su propio formato).
+  test('ya no quedan placeholders con ISO de ejemplo', () => {
+    const html = renderIntakeScreen(ctx('es'));
+    assert.doesNotMatch(html, /placeholder="20\d\d-/);
+  });
+});

@@ -9,9 +9,13 @@
 // eso ES "editar" en esta demo (docs/phases/phase-09-coordinator-demo.md,
 // "Alcance": "Registro de hospedaje ... asociado a una visita").
 //
-// checkIn/checkOut son <input type="text">, igual que el resto de fechas
-// capturadas a mano en esta demo (mismo razonamiento que intake.js con
-// startsAt/endsAt): sin dependencia de un date-picker.
+// Etapa H (D75/D77) — checkIn/checkOut eran <input type="text">. Ahora son
+// <input type="datetime-local">, con HORA, y no <input type="date"> como
+// las fechas de la visita: el hospedaje se guarda como instante y esa hora
+// se usa. src/ui/screens/stay.js le pinta al paciente "Martes 10 · 3:00
+// p.m." leyendo estos mismos campos, y computeExpiresAt (R1) usa checkOut
+// para decidir hasta cuándo vive su enlace. Capturar solo el día obligaría
+// a inventar una hora de hotel o a pintarle "12:00 a.m." al paciente.
 //
 // Nombres de campo iguales a los que ya lee src/ui/screens/stay.js del
 // lado paciente: hotel, reservationCode, checkIn, checkOut,
@@ -19,8 +23,9 @@
 
 import { escapeHtml } from '../../util.js';
 import { renderCard } from '../../components/card.js';
-import { instantMs } from '../../../domain/time.js';
+import { instantMs, toIsoTijuana, toLocalInput } from '../../../domain/time.js';
 import { renderFormErrors, renderRequestError } from './formErrors.js';
+import { visitWindowAttrs } from './dateWindow.js';
 
 // Etapa D — el servidor valida lo mismo que validateLodging, y a veces
 // más. Los errores por campo de ARRIBA (los <span> junto a cada input) los
@@ -95,6 +100,22 @@ function textField(name, value, label) {
   `;
 }
 
+// Etapa H — hermano de textField para las dos fechas. El value NO es el ISO
+// guardado: un datetime-local con "2026-03-10T15:00-07:00" adentro no lo
+// entiende y sale VACÍO, así que abrir la pestaña para corregir el nombre del
+// hotel borraría las dos fechas sin avisar. toLocalInput lo baja a hora de
+// pared y devuelve '' si el dato guardado no cuadra con Tijuana — un campo
+// vacío se ve; una hora corrida siete horas, no.
+function dateTimeField(name, value, label, ventana) {
+  return `
+    <label class="nc-lodging-field">
+      <span class="nc-lodging-field-label">${escapeHtml(label)}</span>
+      <input type="datetime-local" name="${escapeHtml(name)}" value="${escapeHtml(toLocalInput(value))}"${ventana} class="nc-lodging-input" aria-describedby="nc-lodging-error-${escapeHtml(name)}" />
+      <span class="nc-lodging-error" id="nc-lodging-error-${escapeHtml(name)}" data-role="lodging-error" data-field="${escapeHtml(name)}" hidden></span>
+    </label>
+  `;
+}
+
 function checkboxField(name, checked, label) {
   return `
     <label class="nc-lodging-field nc-lodging-field--checkbox">
@@ -124,6 +145,8 @@ export function renderLodgingScreen(ctx) {
   }
 
   const lodging = record.lodging;
+  // Punto 6 — la estancia se acota a los días de la visita.
+  const ventana = visitWindowAttrs(record.visit);
 
   return `
     <section class="nc-screen">
@@ -132,8 +155,8 @@ export function renderLodgingScreen(ctx) {
         ${renderCard(`
           ${textField('hotel', lodging?.hotel, t('coordinator.lodging.hotelLabel'))}
           ${textField('reservationCode', lodging?.reservationCode, t('coordinator.lodging.reservationCodeLabel'))}
-          ${textField('checkIn', lodging?.checkIn, t('coordinator.lodging.checkInLabel'))}
-          ${textField('checkOut', lodging?.checkOut, t('coordinator.lodging.checkOutLabel'))}
+          ${dateTimeField('checkIn', lodging?.checkIn, t('coordinator.lodging.checkInLabel'), ventana)}
+          ${dateTimeField('checkOut', lodging?.checkOut, t('coordinator.lodging.checkOutLabel'), ventana)}
           ${checkboxField('breakfastIncluded', !!lodging?.breakfastIncluded, t('coordinator.lodging.breakfastLabel'))}
           ${checkboxField('recoveryRoom', !!lodging?.recoveryRoom, t('coordinator.lodging.recoveryLabel'))}
         `)}
@@ -177,11 +200,17 @@ export function attachLodgingScreen(rootEl, ctx) {
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const fields = form.elements;
+    // El control da hora de pared ("2026-03-10T15:00"); lo que se valida y se
+    // guarda es ISO con desplazamiento. Si toIsoTijuana no puede con lo que
+    // llegó devuelve null y pasa el valor crudo: así validateLodging dice
+    // 'invalidDate' (el problema real) en vez de 'required' (un campo que sí
+    // se llenó). D75 — el control es comodidad, no autoridad.
+    const fecha = (valor) => toIsoTijuana(valor) ?? valor;
     const values = {
       hotel: fields.hotel.value,
       reservationCode: fields.reservationCode.value,
-      checkIn: fields.checkIn.value,
-      checkOut: fields.checkOut.value,
+      checkIn: fecha(fields.checkIn.value),
+      checkOut: fecha(fields.checkOut.value),
       breakfastIncluded: fields.breakfastIncluded.checked,
       recoveryRoom: fields.recoveryRoom.checked,
     };
