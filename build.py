@@ -207,15 +207,47 @@ def render(target):
 
 def inline_script_hash(html):
     """sha256 base64 del <script> en línea, tal como lo calcula el navegador."""
-    # Los comentarios se quitan antes de buscar: una mención de
-    # `<script type="module">` DENTRO de un comentario engancha primero y se
-    # lleva prosa hasta el primer </script> real. Pasó de verdad con
-    # coordinator.html y el resultado fue un hash que ningún navegador iba a
-    # calcular — página en blanco en producción, verde en local.
-    sin_comentarios = re.sub(r'<!--.*?-->', '', html, flags=re.S)
-    inline = re.search(r'<script\b[^>]*>(.*?)</script>', sin_comentarios, flags=re.S).group(1)
-    digest = base64.b64encode(hashlib.sha256(inline.encode('utf-8')).digest()).decode('ascii')
-    return f"'sha256-{digest}'"
+    # Dos modos de fallo conocidos, los dos con página en blanco en
+    # producción y verde en local, y el arreglo simple de cada uno
+    # reintroduce el otro:
+    #
+    #   Buscar <script> directo: una mención de `<script type="module">`
+    #   DENTRO de un comentario engancha primero y se lleva prosa hasta el
+    #   primer </script> real (pasó con coordinator.html sin construir).
+    #
+    #   Quitar los comentarios antes de buscar: dentro de un <script> un
+    #   `<!--` es TEXTO del script, no un comentario; el navegador hashea
+    #   esos bytes y esta función los estaba borrando (pasó con el bundle
+    #   del panel, que trae un `<!-- ... -->` en una plantilla de JS: hash
+    #   de 254220 bytes contra 254613 reales).
+    #
+    # Recorrido de izquierda a derecha: los comentarios se saltan solo
+    # mientras estamos FUERA de un script; una vez dentro, los bytes van
+    # crudos, que es la regla del propio HTML. Misma lógica que
+    # inlineScripts() en test/deploy/csp.test.js — si se toca una, tocar
+    # la otra.
+    bajo = html.lower()
+    i = 0
+    while i < len(html):
+        script = bajo.find('<script', i)
+        if script == -1:
+            break
+        comentario = bajo.find('<!--', i)
+        if comentario != -1 and comentario < script:
+            fin = bajo.find('-->', comentario + 4)
+            i = len(html) if fin == -1 else fin + 3
+            continue
+        abre = html.find('>', script)
+        cierra = bajo.find('</script', abre + 1)
+        if abre == -1 or cierra == -1:
+            break
+        attrs = html[script + len('<script'):abre]
+        if not re.search(r'\bsrc\s*=', attrs, flags=re.I):
+            inline = html[abre + 1:cierra]
+            digest = base64.b64encode(hashlib.sha256(inline.encode('utf-8')).digest()).decode('ascii')
+            return f"'sha256-{digest}'"
+        i = cierra + 1
+    raise SystemExit('build.py: no se encontró un <script> en línea que hashear')
 
 
 def build(check_only=False):

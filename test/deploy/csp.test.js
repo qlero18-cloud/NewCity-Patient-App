@@ -39,27 +39,55 @@ function read(rel) {
 // Un <script> sin `src=` es un script en línea, y es lo único que la CSP
 // puede autorizar por hash. Los que tienen `src=` los cubre 'self'.
 //
-// Los comentarios se quitan ANTES de buscar, y no por limpieza: el
-// encabezado de coordinator.html contenía el texto literal
-// `<script type="module">` explicando su propia estructura. Sin quitarlo,
-// la búsqueda enganchaba esa mención dentro del comentario y se llevaba de
-// corrido el resto del comentario, el <title> y el <body> hasta el primer
-// </script> real — un "script" de 900 caracteres de prosa cuyo hash el
-// navegador jamás iba a calcular. La suite pasaba en verde y el panel
-// quedaba en blanco en producción. Lo encontró el navegador, no este
-// archivo; por eso abajo hay un test que verifica que lo extraído se
-// parezca a JavaScript y no a HTML.
+// Se recorre el documento de izquierda a derecha en vez de aplicar una
+// expresión regular al texto entero, porque las dos formas obvias fallan y
+// cada una rompió producción:
 //
-// Ese encabezado hoy vive en coordinator-app.html y ya no escribe el tag
-// literal (lo dice explícitamente ahí), porque ahora build.py corre la
-// MISMA búsqueda para empaquetar y un enganche así no dejaría un hash malo:
-// dejaría un HTML mutilado. Aun así el filtro se queda — es una línea, y el
-// modo de fallo que evita solo se ve en producción.
+//   Buscar <script> directo: el encabezado de coordinator.html contenía el
+//   texto literal `<script type="module">` explicando su propia estructura.
+//   La búsqueda enganchaba esa mención DENTRO del comentario y se llevaba
+//   de corrido prosa, <title> y <body> hasta el primer </script> real.
+//
+//   Quitar los comentarios antes de buscar: arreglaba lo anterior y rompía
+//   los bytes. Dentro de un <script> un `<!--` no abre un comentario — es
+//   texto del script, y el navegador lo hashea. El bundle del panel trae
+//   uno de 393 bytes dentro de una plantilla de JavaScript, así que el
+//   guard hasheaba 254220 bytes y el navegador 254613: página en blanco en
+//   producción con la suite en verde. Otra vez lo encontró el navegador y
+//   no este archivo.
+//
+// El recorrido satisface a los dos: los comentarios se saltan solo mientras
+// estamos FUERA de un script, y una vez dentro el rango se toma crudo. Es la
+// regla del propio HTML — el contenido de <script> es texto en bruto.
 function inlineScripts(html) {
-  const sinComentarios = html.replace(/<!--[\s\S]*?-->/g, '');
-  return [...sinComentarios.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)]
-    .filter(([, attrs]) => !/\bsrc\s*=/.test(attrs))
-    .map(([, , body]) => body);
+  const bajo = html.toLowerCase();
+  const out = [];
+  let i = 0;
+
+  while (i < html.length) {
+    const script = bajo.indexOf('<script', i);
+    if (script === -1) break;
+
+    // Un comentario que empieza antes del <script> se salta entero: si lo
+    // menciona por dentro, esa mención no cuenta.
+    const comentario = bajo.indexOf('<!--', i);
+    if (comentario !== -1 && comentario < script) {
+      const fin = bajo.indexOf('-->', comentario + 4);
+      i = fin === -1 ? html.length : fin + 3;
+      continue;
+    }
+
+    const abre = html.indexOf('>', script);
+    if (abre === -1) break;
+    const cierra = bajo.indexOf('</script', abre + 1);
+    if (cierra === -1) break;
+
+    const attrs = html.slice(script + '<script'.length, abre);
+    if (!/\bsrc\s*=/i.test(attrs)) out.push(html.slice(abre + 1, cierra));
+    i = cierra + 1;
+  }
+
+  return out;
 }
 
 // El navegador hashea EXACTAMENTE los bytes entre `>` y `</script>`: ni
@@ -111,8 +139,60 @@ describe('_headers existe y cubre todo el sitio', () => {
   });
 });
 
+// Los dos modos de fallo de la extracción, enfrentados. Cada uno rompió
+// producción de verdad, y arreglar uno a la brava reintroduce el otro:
+//
+//   1. Un `<script type="module">` MENCIONADO dentro de un comentario
+//      engancha primero y se lleva de corrido prosa, <title> y <body> hasta
+//      el primer </script> real.
+//   2. Quitar los comentarios antes de buscar arregla (1) y rompe los bytes:
+//      dentro de un <script> un `<!--` NO abre un comentario, es texto del
+//      script. El navegador lo hashea; quien lo quita, no.
+//
+// La regla que satisface a los dos: recorrer el documento de izquierda a
+// derecha saltando los comentarios que están FUERA de un script, y una vez
+// dentro tomar el rango crudo sin tocarlo.
+describe('inlineScripts — extracción, contra sus dos modos de fallo', () => {
+  test('un <script> mencionado dentro de un comentario no se extrae ni arrastra al de verdad', () => {
+    const html = [
+      '<!-- el panel se publicaba con <script type="module"> y el hash no cubría nada -->',
+      '<title>NewCity</title>',
+      '<script>const a = 1;</script>',
+    ].join('\n');
+    assert.deepEqual(inlineScripts(html), ['const a = 1;']);
+  });
+
+  test('un comentario HTML DENTRO del script es texto del script, y va al hash', () => {
+    // Este es el caso que dejó el panel en blanco: coordinator.html trae un
+    // `<!-- ... -->` de 393 bytes dentro de una plantilla de JavaScript.
+    const cuerpo = 'const t = `<input><!-- sin value, nunca --></input>`;';
+    assert.deepEqual(inlineScripts(`<script>${cuerpo}</script>`), [cuerpo]);
+  });
+
+  test('los <script src=> los cubre \'self\', no un hash', () => {
+    assert.deepEqual(inlineScripts('<script src="./x.js"></script><script>y()</script>'), ['y()']);
+  });
+});
+
 describe('script-src — un hash por cada script en línea publicado', () => {
   const found = HTML_FILES.flatMap((f) => inlineScripts(read(f)).map((s) => ({ file: f, source: s })));
+
+  test('lo extraído son los bytes literales del archivo, sin normalizar', () => {
+    // El navegador hashea el rango crudo entre `>` y `</script>`. Cualquier
+    // extracción que "limpie" el HTML antes de recortar produce un hash que
+    // ningún navegador va a calcular nunca: suite en verde, página en blanco.
+    //
+    // Es el único test de este archivo que habría atrapado el fallo del
+    // comentario dentro del script — los demás comparan el hash del guard
+    // contra `_headers`, y ahí los dos lados venían de la MISMA extracción
+    // equivocada, así que coincidían perfectamente entre ellos y con nada.
+    for (const { file, source } of found) {
+      assert.ok(
+        read(file).includes(source),
+        `lo extraído de ${file} no aparece tal cual en el archivo: la extracción normalizó bytes`
+      );
+    }
+  });
 
   test('el guard tiene algo que revisar (si no, pasaría en falso)', () => {
     // Dos empaquetados + dos fuentes = 4. Si build.py deja de emitir uno, o
@@ -129,11 +209,17 @@ describe('script-src — un hash por cada script en línea publicado', () => {
     // Las marcas son las que un derrame arrastra y el código legítimo no.
     // `<body` y `<div` NO sirven: el bundle de index.html los trae a
     // montones dentro de plantillas de JavaScript, que es exactamente lo
-    // que hace la app. `<script`, `-->` y `<title` sí distinguen — los tres
-    // aparecían en el texto que se capturó de más, y en ninguno de los tres
-    // scripts reales.
+    // que hace la app.
+    //
+    // `-->` TAMPOCO sirve, y creerlo costó caro: se cayó de esta lista
+    // porque el bundle del panel trae un `<!-- ... -->` legítimo dentro de
+    // una plantilla de JavaScript. Mientras la extracción quitaba los
+    // comentarios, ese `-->` desaparecía y el test parecía válido; era una
+    // marca que solo se cumplía porque los bytes ya venían mutilados.
+    // Quedan `<script` y `<title`, que sí aparecían en el derrame real y no
+    // en ninguno de los scripts del proyecto.
     for (const { file, source } of found) {
-      for (const marca of ['<script', '-->', '<title']) {
+      for (const marca of ['<script', '<title']) {
         assert.ok(
           !source.includes(marca),
           `el script "en línea" de ${file} contiene ${marca}: la extracción se salió del <script>`

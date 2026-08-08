@@ -175,7 +175,7 @@ Cada fase tiene su propio comando exacto en la sección "Verificación" de `docs
 
 ```bash
 cd "newcity-patient-app"
-npm test                              # los 1056 casos automatizados de todas las fases y etapas
+npm test                              # los 1060 casos automatizados de todas las fases y etapas
 python3 build.py --check              # confirma que index.html y coordinator.html están al día
 node test/e2e/patient-journey.mjs     # los 19 pasos del recorrido (10 del paciente + 6 de coordinación + 3 de traslados)
 ```
