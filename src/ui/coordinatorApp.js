@@ -78,13 +78,70 @@ const GATE_CSS = `
 .nc-gate-msg { margin: 0; font-size: 14px; opacity: 0.8; }
 `;
 
-const ALL_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, IMPORT_CSS, ITINERARY_CSS, LODGING_CSS, TRANSFERS_CSS, QPASS_CSS, HANDOFF_CSS, PASS_SCREEN_CSS, SUBNAV_CSS, SIGNIN_CSS, FORM_ERRORS_CSS, GATE_CSS].join('\n');
+// Etapa J — el panel se usa en la computadora de la coordinadora, no en el
+// teléfono del paciente.
+//
+// `.nc-main { max-width: 480px }` sale de theme.js y es la medida CORRECTA
+// para el paciente: theme.js lo comparten los dos bundles (app.js y este),
+// así que aquí no se toca ni una línea de theme.js — se corrige desde el
+// bundle del panel, que es el único que debe ensancharse. Por eso esta
+// constante se une AL FINAL de COORDINATOR_CSS: las media queries no suman
+// especificidad, y a igual especificidad gana la última declaración.
+//
+// Medido en el navegador antes de escribirlo: a 1280px el expediente
+// quedaba en una columna de 480px con 800px en blanco, y la tabla de
+// revisión de la importación pedía 618px dentro de 448px.
+export const LAYOUT_CSS = `
+/* El encabezado creció a título + volver + idioma + salir. A 390px eso no
+   cabe en un renglón: sin envolver, el último botón se sale de la pantalla. */
+.nc-header { flex-wrap: wrap; gap: 8px 12px; }
+.nc-coord-header-actions { flex-wrap: wrap; justify-content: flex-end; }
+/* nowrap sin recorte convierte un nombre largo en un empujón horizontal. */
+.nc-coord-user { overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+
+@media (min-width: 700px) {
+  .nc-main { max-width: 720px; padding: 20px 24px 28px; }
+  .nc-header { padding: 16px 24px; }
+  .nc-visit-subnav { padding: 12px 24px; }
+  /* En el teléfono los botones del subnav se reparten el ancho; en pantalla
+     ancha, estirados, quedan cinco botones de 140px con dos palabras. */
+  .nc-visit-subnav .nc-button { flex: 0 0 auto; }
+  .nc-coord-user { max-width: 260px; }
+}
+
+@media (min-width: 1000px) {
+  .nc-main { max-width: 980px; padding: 24px 24px 28px; }
+  .nc-header { padding: 16px 32px; }
+  .nc-visit-subnav { padding: 12px 32px; }
+  /* Ancho de LECTURA, que no es lo mismo que ancho de pantalla: una tarjeta
+     de itinerario o un formulario de hospedaje estirados a 1200px se leen
+     peor, no mejor. Esta regla vive aquí y no en cada pantalla porque
+     .nc-screen es una clase compartida (test/ui/coordinator/
+     cssNamespace.test.js) y porque así hay UN solo lugar donde se decide.
+     La revisión de la importación es la única excepción y se declara con
+     dos clases, así que gana por especificidad sin depender del orden. */
+  .nc-screen { max-width: 760px; }
+  .nc-screen.nc-coord-import { max-width: none; }
+}
+
+/* El escalón que existe por la tabla de revisión: sus seis columnas
+   legibles piden ~1040px (ver los th:nth-child de import.js). */
+@media (min-width: 1280px) {
+  .nc-main { max-width: 1200px; padding: 24px 24px 32px; }
+}
+`;
+
+// Exportado (antes era `const ALL_CSS` privado) para que se pueda probar el
+// ORDEN: LAYOUT_CSS ajusta reglas que ya declararon theme.js y las pantallas,
+// y a igual especificidad gana la última. Si alguien lo mueve al principio de
+// esta lista, el panel vuelve a la columna de 480px sin que falle nada más.
+export const COORDINATOR_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, IMPORT_CSS, ITINERARY_CSS, LODGING_CSS, TRANSFERS_CSS, QPASS_CSS, HANDOFF_CSS, PASS_SCREEN_CSS, SUBNAV_CSS, SIGNIN_CSS, FORM_ERRORS_CSS, GATE_CSS, LAYOUT_CSS].join('\n');
 
 function injectStylesOnce() {
   if (document.getElementById('nc-styles')) return;
   const style = document.createElement('style');
   style.id = 'nc-styles';
-  style.textContent = ALL_CSS;
+  style.textContent = COORDINATOR_CSS;
   document.head.appendChild(style);
 }
 

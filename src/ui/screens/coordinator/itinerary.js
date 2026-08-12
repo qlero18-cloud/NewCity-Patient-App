@@ -360,4 +360,10 @@ select.nc-coord-itin-input {
    que pertenecen a esa cita y no al formulario de agregar de abajo. */
 .nc-coord-itin-form--inline { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--nc-card-border); }
 .nc-coord-itin-form--inline[hidden] { display: none; }
+/* Etapa J — la lista se queda en UNA columna aunque haya ancho: es
+   cronológica, y en rejilla se leería en zigzag. Lo que sí sobra es el
+   ancho de los campos. */
+@media (min-width: 700px) {
+  .nc-coord-itin-form { max-width: 560px; }
+}
 `;

@@ -117,4 +117,9 @@ export const INTAKE_CSS = `
 .nc-input { min-height: 44px; border-radius: 10px; border: 1px solid var(--nc-card-border); background: var(--nc-card-bg); color: var(--nc-ink); font: 400 15px Barlow, system-ui, sans-serif; padding: 0 12px; }
 select.nc-input { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 18px) center, calc(100% - 13px) center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
 .nc-form button[type="submit"] { margin-top: 6px; }
+/* Etapa J — un campo de "Nombre de pila" de 1100px de ancho se lee peor
+   que uno de 480: el tope no es decorativo, es el ancho de lectura. */
+@media (min-width: 700px) {
+  .nc-form { max-width: 560px; }
+}
 `;

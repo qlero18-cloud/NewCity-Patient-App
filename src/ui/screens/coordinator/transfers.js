@@ -412,4 +412,9 @@ select.nc-coord-transfer-input {
 }
 .nc-coord-transfer-form--inline { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--nc-card-border); }
 .nc-coord-transfer-form--inline[hidden] { display: none; }
+/* Etapa J — la lista también es cronológica (recogidas en orden), así que
+   se queda en una columna; solo se topan los campos. */
+@media (min-width: 700px) {
+  .nc-coord-transfer-form { max-width: 560px; }
+}
 `;

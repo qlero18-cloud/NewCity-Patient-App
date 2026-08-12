@@ -77,4 +77,13 @@ export const VISITS_CSS = `
 .nc-visit-row:last-child { margin-bottom: 0; }
 .nc-visit-row span { min-width: 100px; opacity: 0.7; }
 .nc-visit-actions { display: flex; flex-direction: column; gap: 8px; }
+/* Etapa J — esta lista NO es cronológica: son pacientes, un conjunto. En
+   cuanto hay ancho se acomodan en rejilla en vez de dejar un metro de
+   blanco a la derecha de tarjetas de una sola línea. Las listas que sí
+   llevan orden en el tiempo (itinerario, traslados) se quedan en una
+   columna a propósito: leerlas en zigzag sería peor. */
+@media (min-width: 700px) {
+  .nc-visit-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+  .nc-visit-actions { flex-direction: row; flex-wrap: wrap; }
+}
 `;

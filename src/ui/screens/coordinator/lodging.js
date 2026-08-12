@@ -268,4 +268,8 @@ export const LODGING_CSS = `
 .nc-lodging-submit { align-self: flex-start; }
 .nc-lodging-error { font-size: 12px; color: var(--nc-danger, #b3261e); }
 .nc-lodging-saved { margin: 0; font-size: 13px; opacity: 0.85; }
+/* Etapa J — mismo criterio que el alta: el tope es el ancho de lectura. */
+@media (min-width: 700px) {
+  .nc-lodging-form { max-width: 560px; }
+}
 `;

@@ -498,10 +498,14 @@ export const IMPORT_CSS = `
 .nc-coord-import-file { min-height: 44px; font: 400 14px Barlow, system-ui, sans-serif; color: var(--nc-ink); }
 .nc-coord-import-error { margin: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--nc-danger, #b3261e); color: var(--nc-danger, #b3261e); font-size: 13px; }
 .nc-coord-import-form { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
-.nc-coord-import-patient { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--nc-card-border); border-radius: 12px; padding: 12px; }
+/* Etapa J — la ficha del paciente son dos campos cortos y una casilla: sin
+   tope se estira a los 1200px del panel y se lee peor que en el teléfono.
+   La tabla de abajo sí quiere todo el ancho, por eso el tope va aquí y no
+   en .nc-coord-import-form. */
+.nc-coord-import-patient { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--nc-card-border); border-radius: 12px; padding: 12px; max-width: 560px; }
 .nc-coord-import-confirm { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; min-height: 44px; }
 .nc-coord-import-confirm input { width: 20px; height: 20px; }
-.nc-coord-import-discarded { border: 1px solid var(--nc-card-border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.nc-coord-import-discarded { border: 1px solid var(--nc-card-border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 6px; max-width: 560px; }
 .nc-coord-import-counts { margin: 0; font-size: 14px; font-weight: 600; }
 .nc-coord-import-notes { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
 .nc-coord-import-warnings { padding: 10px 12px 10px 30px; border-radius: 10px; border: 1px solid var(--nc-danger, #b3261e); color: var(--nc-danger, #b3261e); }
@@ -520,4 +524,28 @@ export const IMPORT_CSS = `
 select.nc-coord-import-input { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 18px) center, calc(100% - 13px) center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
 .nc-coord-import-details { min-height: 44px; }
 .nc-coord-import-badge { margin-left: 8px; }
+/* Etapa J — el peor caso medido de todo el panel: seis columnas de campos
+   dentro de la columna de teléfono daban 40-63px por campo ("BLOC",
+   "Médi") para textos de hasta 301 caracteres. El mínimo por columna se
+   fija por lo que cada una tiene DENTRO, no a ojo:
+     1 hora        185  el control datetime-local nativo no baja de ~180
+     2 servicio    260  "BLOOD WORK / URINALYSIS (FASTING 8-12 HOURS)" en un
+                        input de una línea, que no envuelve: es la columna
+                        que más gana con cada píxel
+     3 duración     88  número de dos o tres dígitos
+     4 ubicación   170  <select> con "Piso 10 · Consultorios"
+     5 preparación 190  "AYUNO 8-12 HORAS" + el textarea de sub-estudios,
+                        que sí envuelve y por eso cede ancho a la 2
+     6 notas       160  las marcas de typo/hora corregida
+   Suman 1053 y en el escalón de 1280px caben 1080 (1200 - 48 de padding -
+   72 de relleno de celda): la revisión deja de desplazarse en horizontal
+   en una laptop. Debajo de eso el desplazamiento SE QUEDA, a propósito:
+   apretarlas otra vez es volver al bug, y .nc-coord-import-scroll ya está
+   para eso. */
+.nc-coord-import-table th:nth-child(1) { min-width: 185px; }
+.nc-coord-import-table th:nth-child(2) { min-width: 260px; }
+.nc-coord-import-table th:nth-child(3) { min-width: 88px; }
+.nc-coord-import-table th:nth-child(4) { min-width: 170px; }
+.nc-coord-import-table th:nth-child(5) { min-width: 190px; }
+.nc-coord-import-table th:nth-child(6) { min-width: 160px; }
 `;

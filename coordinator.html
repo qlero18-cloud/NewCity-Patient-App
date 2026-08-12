@@ -4100,10 +4100,14 @@ const IMPORT_CSS = `
 .nc-coord-import-file { min-height: 44px; font: 400 14px Barlow, system-ui, sans-serif; color: var(--nc-ink); }
 .nc-coord-import-error { margin: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--nc-danger, #b3261e); color: var(--nc-danger, #b3261e); font-size: 13px; }
 .nc-coord-import-form { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
-.nc-coord-import-patient { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--nc-card-border); border-radius: 12px; padding: 12px; }
+/* Etapa J — la ficha del paciente son dos campos cortos y una casilla: sin
+   tope se estira a los 1200px del panel y se lee peor que en el teléfono.
+   La tabla de abajo sí quiere todo el ancho, por eso el tope va aquí y no
+   en .nc-coord-import-form. */
+.nc-coord-import-patient { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--nc-card-border); border-radius: 12px; padding: 12px; max-width: 560px; }
 .nc-coord-import-confirm { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; min-height: 44px; }
 .nc-coord-import-confirm input { width: 20px; height: 20px; }
-.nc-coord-import-discarded { border: 1px solid var(--nc-card-border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.nc-coord-import-discarded { border: 1px solid var(--nc-card-border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 6px; max-width: 560px; }
 .nc-coord-import-counts { margin: 0; font-size: 14px; font-weight: 600; }
 .nc-coord-import-notes { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
 .nc-coord-import-warnings { padding: 10px 12px 10px 30px; border-radius: 10px; border: 1px solid var(--nc-danger, #b3261e); color: var(--nc-danger, #b3261e); }
@@ -4122,6 +4126,30 @@ const IMPORT_CSS = `
 select.nc-coord-import-input { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 18px) center, calc(100% - 13px) center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
 .nc-coord-import-details { min-height: 44px; }
 .nc-coord-import-badge { margin-left: 8px; }
+/* Etapa J — el peor caso medido de todo el panel: seis columnas de campos
+   dentro de la columna de teléfono daban 40-63px por campo ("BLOC",
+   "Médi") para textos de hasta 301 caracteres. El mínimo por columna se
+   fija por lo que cada una tiene DENTRO, no a ojo:
+     1 hora        185  el control datetime-local nativo no baja de ~180
+     2 servicio    260  "BLOOD WORK / URINALYSIS (FASTING 8-12 HOURS)" en un
+                        input de una línea, que no envuelve: es la columna
+                        que más gana con cada píxel
+     3 duración     88  número de dos o tres dígitos
+     4 ubicación   170  <select> con "Piso 10 · Consultorios"
+     5 preparación 190  "AYUNO 8-12 HORAS" + el textarea de sub-estudios,
+                        que sí envuelve y por eso cede ancho a la 2
+     6 notas       160  las marcas de typo/hora corregida
+   Suman 1053 y en el escalón de 1280px caben 1080 (1200 - 48 de padding -
+   72 de relleno de celda): la revisión deja de desplazarse en horizontal
+   en una laptop. Debajo de eso el desplazamiento SE QUEDA, a propósito:
+   apretarlas otra vez es volver al bug, y .nc-coord-import-scroll ya está
+   para eso. */
+.nc-coord-import-table th:nth-child(1) { min-width: 185px; }
+.nc-coord-import-table th:nth-child(2) { min-width: 260px; }
+.nc-coord-import-table th:nth-child(3) { min-width: 88px; }
+.nc-coord-import-table th:nth-child(4) { min-width: 170px; }
+.nc-coord-import-table th:nth-child(5) { min-width: 190px; }
+.nc-coord-import-table th:nth-child(6) { min-width: 160px; }
 `;
 
 // --- src/ui/screens/coordinator/intake.js ---
@@ -4243,6 +4271,11 @@ const INTAKE_CSS = `
 .nc-input { min-height: 44px; border-radius: 10px; border: 1px solid var(--nc-card-border); background: var(--nc-card-bg); color: var(--nc-ink); font: 400 15px Barlow, system-ui, sans-serif; padding: 0 12px; }
 select.nc-input { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 18px) center, calc(100% - 13px) center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
 .nc-form button[type="submit"] { margin-top: 6px; }
+/* Etapa J — un campo de "Nombre de pila" de 1100px de ancho se lee peor
+   que uno de 480: el tope no es decorativo, es el ancho de lectura. */
+@media (min-width: 700px) {
+  .nc-form { max-width: 560px; }
+}
 `;
 
 // --- src/ui/screens/coordinator/dateWindow.js ---
@@ -4634,6 +4667,12 @@ select.nc-coord-itin-input {
    que pertenecen a esa cita y no al formulario de agregar de abajo. */
 .nc-coord-itin-form--inline { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--nc-card-border); }
 .nc-coord-itin-form--inline[hidden] { display: none; }
+/* Etapa J — la lista se queda en UNA columna aunque haya ancho: es
+   cronológica, y en rejilla se leería en zigzag. Lo que sí sobra es el
+   ancho de los campos. */
+@media (min-width: 700px) {
+  .nc-coord-itin-form { max-width: 560px; }
+}
 `;
 
 // --- src/ui/screens/coordinator/lodging.js ---
@@ -4906,6 +4945,10 @@ const LODGING_CSS = `
 .nc-lodging-submit { align-self: flex-start; }
 .nc-lodging-error { font-size: 12px; color: var(--nc-danger, #b3261e); }
 .nc-lodging-saved { margin: 0; font-size: 13px; opacity: 0.85; }
+/* Etapa J — mismo criterio que el alta: el tope es el ancho de lectura. */
+@media (min-width: 700px) {
+  .nc-lodging-form { max-width: 560px; }
+}
 `;
 
 // --- src/domain/passes.js ---
@@ -5809,6 +5852,11 @@ select.nc-coord-transfer-input {
 }
 .nc-coord-transfer-form--inline { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--nc-card-border); }
 .nc-coord-transfer-form--inline[hidden] { display: none; }
+/* Etapa J — la lista también es cronológica (recogidas en orden), así que
+   se queda en una columna; solo se topan los campos. */
+@media (min-width: 700px) {
+  .nc-coord-transfer-form { max-width: 560px; }
+}
 `;
 
 // --- src/ui/screens/coordinator/visits.js ---
@@ -5890,6 +5938,15 @@ const VISITS_CSS = `
 .nc-visit-row:last-child { margin-bottom: 0; }
 .nc-visit-row span { min-width: 100px; opacity: 0.7; }
 .nc-visit-actions { display: flex; flex-direction: column; gap: 8px; }
+/* Etapa J — esta lista NO es cronológica: son pacientes, un conjunto. En
+   cuanto hay ancho se acomodan en rejilla en vez de dejar un metro de
+   blanco a la derecha de tarjetas de una sola línea. Las listas que sí
+   llevan orden en el tiempo (itinerario, traslados) se quedan en una
+   columna a propósito: leerlas en zigzag sería peor. */
+@media (min-width: 700px) {
+  .nc-visit-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+  .nc-visit-actions { flex-direction: row; flex-wrap: wrap; }
+}
 `;
 
 // --- src/domain/expiry.js ---
@@ -6618,13 +6675,70 @@ const GATE_CSS = `
 .nc-gate-msg { margin: 0; font-size: 14px; opacity: 0.8; }
 `;
 
-const ALL_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, IMPORT_CSS, ITINERARY_CSS, LODGING_CSS, TRANSFERS_CSS, QPASS_CSS, HANDOFF_CSS, PASS_SCREEN_CSS, SUBNAV_CSS, SIGNIN_CSS, FORM_ERRORS_CSS, GATE_CSS].join('\n');
+// Etapa J — el panel se usa en la computadora de la coordinadora, no en el
+// teléfono del paciente.
+//
+// `.nc-main { max-width: 480px }` sale de theme.js y es la medida CORRECTA
+// para el paciente: theme.js lo comparten los dos bundles (app.js y este),
+// así que aquí no se toca ni una línea de theme.js — se corrige desde el
+// bundle del panel, que es el único que debe ensancharse. Por eso esta
+// constante se une AL FINAL de COORDINATOR_CSS: las media queries no suman
+// especificidad, y a igual especificidad gana la última declaración.
+//
+// Medido en el navegador antes de escribirlo: a 1280px el expediente
+// quedaba en una columna de 480px con 800px en blanco, y la tabla de
+// revisión de la importación pedía 618px dentro de 448px.
+const LAYOUT_CSS = `
+/* El encabezado creció a título + volver + idioma + salir. A 390px eso no
+   cabe en un renglón: sin envolver, el último botón se sale de la pantalla. */
+.nc-header { flex-wrap: wrap; gap: 8px 12px; }
+.nc-coord-header-actions { flex-wrap: wrap; justify-content: flex-end; }
+/* nowrap sin recorte convierte un nombre largo en un empujón horizontal. */
+.nc-coord-user { overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+
+@media (min-width: 700px) {
+  .nc-main { max-width: 720px; padding: 20px 24px 28px; }
+  .nc-header { padding: 16px 24px; }
+  .nc-visit-subnav { padding: 12px 24px; }
+  /* En el teléfono los botones del subnav se reparten el ancho; en pantalla
+     ancha, estirados, quedan cinco botones de 140px con dos palabras. */
+  .nc-visit-subnav .nc-button { flex: 0 0 auto; }
+  .nc-coord-user { max-width: 260px; }
+}
+
+@media (min-width: 1000px) {
+  .nc-main { max-width: 980px; padding: 24px 24px 28px; }
+  .nc-header { padding: 16px 32px; }
+  .nc-visit-subnav { padding: 12px 32px; }
+  /* Ancho de LECTURA, que no es lo mismo que ancho de pantalla: una tarjeta
+     de itinerario o un formulario de hospedaje estirados a 1200px se leen
+     peor, no mejor. Esta regla vive aquí y no en cada pantalla porque
+     .nc-screen es una clase compartida (test/ui/coordinator/
+     cssNamespace.test.js) y porque así hay UN solo lugar donde se decide.
+     La revisión de la importación es la única excepción y se declara con
+     dos clases, así que gana por especificidad sin depender del orden. */
+  .nc-screen { max-width: 760px; }
+  .nc-screen.nc-coord-import { max-width: none; }
+}
+
+/* El escalón que existe por la tabla de revisión: sus seis columnas
+   legibles piden ~1040px (ver los th:nth-child de import.js). */
+@media (min-width: 1280px) {
+  .nc-main { max-width: 1200px; padding: 24px 24px 32px; }
+}
+`;
+
+// Exportado (antes era `const ALL_CSS` privado) para que se pueda probar el
+// ORDEN: LAYOUT_CSS ajusta reglas que ya declararon theme.js y las pantallas,
+// y a igual especificidad gana la última. Si alguien lo mueve al principio de
+// esta lista, el panel vuelve a la columna de 480px sin que falle nada más.
+const COORDINATOR_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, IMPORT_CSS, ITINERARY_CSS, LODGING_CSS, TRANSFERS_CSS, QPASS_CSS, HANDOFF_CSS, PASS_SCREEN_CSS, SUBNAV_CSS, SIGNIN_CSS, FORM_ERRORS_CSS, GATE_CSS, LAYOUT_CSS].join('\n');
 
 function injectStylesOnce() {
   if (document.getElementById('nc-styles')) return;
   const style = document.createElement('style');
   style.id = 'nc-styles';
-  style.textContent = ALL_CSS;
+  style.textContent = COORDINATOR_CSS;
   document.head.appendChild(style);
 }
 
