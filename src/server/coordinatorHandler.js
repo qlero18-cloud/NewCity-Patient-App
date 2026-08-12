@@ -22,6 +22,9 @@
 import { validateVisitInput } from './visitStore.js';
 import {
   addAppointment,
+  addAppointments,
+  validateAppointmentInput,
+  MAX_IMPORT_APPOINTMENTS,
   moveAppointment,
   editAppointment,
   cancelAppointment,
@@ -185,10 +188,75 @@ async function patchTraslado(request, deps, visitId, transferId) {
   return res instanceof Response ? res : mutado(200, res, 'transfer');
 }
 
+// Etapa I — el itinerario de Word entero, de una vez: la visita y sus citas
+// en la misma petición.
+//
+// Es una ruta propia y no `POST /visits` con las citas dentro porque la
+// promesa es distinta: aquí, si UNA fila no pasa, no se crea nada. Si la
+// visita quedara creada y vacía, la coordinadora corregiría la fila,
+// volvería a importar, y tendría dos expedientes del mismo paciente sin
+// enterarse.
+//
+// De ahí el orden: se valida TODO —la visita y las N filas— antes de tocar
+// el almacén. `store.createVisit` escribe, así que validar después sería
+// prometer atomicidad y no darla.
+//
+// Lo que queda fuera del alcance, dicho de frente: entre createVisit y
+// saveVisit hay dos escrituras, y una caída del almacén justo en medio
+// dejaría la visita sin citas. Blobs no tiene transacciones y no hay forma
+// de cerrar esa ventana desde aquí; se elige así porque el resultado —una
+// visita vacía y visible en la lista— se ve y se corrige, mientras que el
+// caso que D83 sí evita —la mitad de las citas— no se distingue de un
+// itinerario completo.
+async function importarItinerario(request, deps) {
+  const leido = await leerJson(request);
+  if (!leido.ok) return leido.response;
+
+  const cuerpo = leido.body ?? {};
+  const errors = {};
+
+  const visita = validateVisitInput(cuerpo.visit);
+  if (!visita.ok) Object.assign(errors, visita.errors);
+
+  // Las mismas reglas de addAppointments, aplicadas ANTES de crear nada. Se
+  // repiten aquí en vez de llamar a addAppointments primero porque esa
+  // función necesita un `record` que todavía no existe.
+  const citas = cuerpo.appointments;
+  if (!Array.isArray(citas) || citas.length === 0) errors.appointments = 'required';
+  else if (citas.length > MAX_IMPORT_APPOINTMENTS) errors.appointments = 'tooLong';
+  else {
+    const fallas = [];
+    citas.forEach((c, index) => {
+      const { ok, errors: motivos } = validateAppointmentInput(c);
+      if (!ok) fallas.push({ index, errors: motivos });
+    });
+    if (fallas.length > 0) errors.appointments = fallas;
+  }
+
+  // Los dos juntos y no la visita primero: corregir el nombre del paciente,
+  // reenviar, y recién entonces enterarse de que además había una fila mala
+  // es el viaje de ida y vuelta que hace abandonar una importación.
+  if (Object.keys(errors).length > 0) return unprocessable(errors);
+
+  const record = await deps.store.createVisit(cuerpo.visit, deps.now, deps.by);
+  const res = addAppointments(record, citas, { now: deps.now, by: deps.by, newId: deps.newId });
+  // No puede fallar —se acaba de validar lo mismo— pero si algún día las dos
+  // validaciones se separan, esto lo dice en vez de guardar a medias.
+  if (!res.ok) return unprocessable(res.errors);
+
+  await deps.store.saveVisit(record);
+  return json(201, { record });
+}
+
 // Devuelve la respuesta ya hecha, o null si la ruta no es de este archivo.
 async function rutear(request, deps, segmentos) {
   const [raiz, visitId, seccion, itemId] = segmentos;
   const { method } = request;
+
+  if (raiz === 'import' && segmentos.length === 1) {
+    if (method !== 'POST') return json(405, { error: 'method_not_allowed' });
+    return importarItinerario(request, deps);
+  }
 
   if (raiz !== 'visits') return null;
 

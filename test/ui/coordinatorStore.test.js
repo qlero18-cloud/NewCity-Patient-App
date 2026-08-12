@@ -245,6 +245,58 @@ describe('mutaciones: la copia local se reemplaza con la del servidor', () => {
   });
 });
 
+// Etapa I — una sola llamada para el itinerario entero (D83). No es
+// createVisit seguido de N addAppointment: eso es justo lo que la ruta
+// /import existe para evitar.
+describe('importItinerary', () => {
+  const CUERPO = { visit: VISITA, appointments: [CITA, { ...CITA, serviceName: 'Laboratorio' }] };
+
+  test('manda visita y citas juntas a /import, en una sola petición', async () => {
+    const api = apiDoble({
+      'POST /import': { status: 201, body: { record: registro('v_9', { appointments: [{ id: 'a_1' }, { id: 'a_2' }] }) } },
+    });
+    const store = createCoordinatorStore({ api });
+
+    const res = await store.importItinerary(CUERPO);
+
+    assert.strictEqual(res.ok, true);
+    assert.strictEqual(api.llamadas.length, 1, 'una escritura, no una por cita');
+    assert.equal(api.llamadas[0].method, 'POST');
+    assert.equal(api.llamadas[0].path, '/import');
+    assert.deepEqual(api.llamadas[0].body, CUERPO);
+  });
+
+  test('la copia local queda al día sin otra vuelta a la red', async () => {
+    const expediente = registro('v_9', { appointments: [{ id: 'a_1' }, { id: 'a_2' }] });
+    const api = apiDoble({ 'POST /import': { status: 201, body: { record: expediente } } });
+    const store = createCoordinatorStore({ api });
+
+    const res = await store.importItinerary(CUERPO);
+
+    assert.deepEqual(res.visit, expediente.visit, 'con token: es lo único que hay para mandarle al paciente');
+    assert.deepEqual(store.getVisit('v_9'), expediente, 'el expediente del servidor, tal cual');
+    assert.deepEqual(store.listVisits().map((r) => r.visit.id), ['v_9'], 'y aparece en la lista');
+  });
+
+  test('un 422 llega con los errores por índice de fila, sin tocar la copia local', async () => {
+    const errores = { appointments: [{ index: 7, errors: { locationId: 'unknown' } }] };
+    const api = apiDoble({ 'POST /import': { status: 422, body: { error: 'invalid', errors: errores } } });
+    const store = createCoordinatorStore({ api });
+
+    const res = await store.importItinerary(CUERPO);
+
+    assert.deepEqual(res, { ok: false, errors: errores });
+    assert.deepEqual(store.listVisits(), [], 'todo o nada: no se creó nada que mostrar');
+  });
+
+  test('un 401 se distingue de un 422, igual que en el resto del store', async () => {
+    const api = apiDoble({ 'POST /import': { status: 401, body: { error: 'unauthenticated' } } });
+    const store = createCoordinatorStore({ api });
+
+    assert.deepEqual(await store.importItinerary(CUERPO), { ok: false, unauthenticated: true });
+  });
+});
+
 describe('fallos que no son del formulario', () => {
   test('un 401 se reporta como sesión caída, no como dato inválido', async () => {
     // Sin esto, una sesión vencida se ve como un formulario que dejó de

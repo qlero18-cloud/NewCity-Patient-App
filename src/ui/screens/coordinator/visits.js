@@ -48,7 +48,13 @@ export function renderVisitsScreen(ctx) {
     <section class="nc-screen">
       <h1 class="nc-screen-title">${escapeHtml(t('coordinator.visits.title'))}</h1>
       ${body}
-      <button type="button" class="nc-button nc-button--primary" data-nav="intake">${escapeHtml(t('coordinator.visits.newVisit'))}</button>
+      <div class="nc-visit-actions">
+        <button type="button" class="nc-button nc-button--primary" data-nav="intake">${escapeHtml(t('coordinator.visits.newVisit'))}</button>
+        <!-- Etapa I — el otro camino de entrada, no el único: hay visitas
+             que no salen de un documento (una cita suelta, un cambio de
+             última hora) y el alta manual sigue siendo lo correcto ahí. -->
+        <button type="button" class="nc-button" data-nav="import">${escapeHtml(t('coordinator.visits.importItinerary'))}</button>
+      </div>
     </section>
   `;
 }
@@ -70,4 +76,5 @@ export const VISITS_CSS = `
 .nc-visit-row { display: flex; gap: 6px; margin: 0 0 4px; font-size: 13px; }
 .nc-visit-row:last-child { margin-bottom: 0; }
 .nc-visit-row span { min-width: 100px; opacity: 0.7; }
+.nc-visit-actions { display: flex; flex-direction: column; gap: 8px; }
 `;

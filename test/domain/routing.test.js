@@ -9,6 +9,11 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { defaultOrigin, resolveRoute } from '../../src/domain/routing.js';
 import { routes, MAP_HIGHLIGHT_IDS } from '../../src/data/routes.js';
+// Única dependencia de la fase 03 en este archivo, y a propósito: la
+// propiedad "toda ubicación tiene tramo de ida y vuelta al lobby" habla del
+// catálogo de ubicaciones real, no de una copia suya. Con la lista repetida a
+// mano, agregar una ubicación sin sus tramos no rompía nada aquí.
+import { LOCATION_IDS } from '../../src/data/locations.js';
 
 const A1 = { id: 'a1', visitId: 'v_demo1', startsAt: '2026-03-10T08:00-07:00', durationMin: 45, serviceName: 'Laboratorio', locationId: 'compass', status: 'scheduled', updatedAt: '2026-03-01T00:00-08:00' };
 const A2 = { id: 'a2', visitId: 'v_demo1', startsAt: '2026-03-10T09:30-07:00', durationMin: 60, serviceName: 'Resonancia magnética', locationId: 'compass', status: 'scheduled', updatedAt: '2026-03-01T00:00-08:00' };
@@ -212,12 +217,26 @@ describe('Integridad del catálogo provisional (src/data/routes.js)', () => {
       'lobby_torre->nivel1',
       'farmacia->lobby_torre',
       'lobby_torre->farmacia',
+
+      // D80/D81 — los seis pisos de consultorios que faltaban. A cada uno le
+      // bastan sus dos tramos contra el lobby: resolveRoute() compone el
+      // resto (compass→piso10 sale como compass→lobby→piso10). Escribir a
+      // mano los otros pares habría sido inventar contenido par por par, que
+      // es justo lo que D41 rechazó.
+      'lobby_torre->piso10', 'piso10->lobby_torre',
+      'lobby_torre->piso11', 'piso11->lobby_torre',
+      'lobby_torre->piso16', 'piso16->lobby_torre',
+      'lobby_torre->piso22', 'piso22->lobby_torre',
+      'lobby_torre->piso28', 'piso28->lobby_torre',
+      'lobby_torre->piso29', 'piso29->lobby_torre',
     ].sort();
     assert.deepStrictEqual(pairs, expected);
   });
 
   test('toda ubicación tiene ruta directa hacia y desde lobby_torre — es lo que hace posible componer', () => {
-    const LOCATION_IDS = ['estacionamiento', 'lobby_torre', 'compass', 'piso27', 'quartz', 'nivel1', 'farmacia'];
+    // Se importa la lista real en vez de repetirla aquí: si alguien agrega
+    // una ubicación y se le olvidan sus tramos contra el lobby, esta prueba
+    // tiene que caerse sola. Con la lista copiada a mano no se caía.
     const pairs = new Set(routes.map((r) => `${r.fromLocationId}->${r.toLocationId}`));
 
     for (const id of LOCATION_IDS) {
@@ -225,6 +244,33 @@ describe('Integridad del catálogo provisional (src/data/routes.js)', () => {
       assert.ok(pairs.has(`${id}->lobby_torre`), `falta la ruta directa ${id} → lobby_torre`);
       assert.ok(pairs.has(`lobby_torre->${id}`), `falta la ruta directa lobby_torre → ${id}`);
     }
+  });
+
+  test('la ruta de cada piso de consultorios nombra ESE piso, no el 27 (D81)', () => {
+    // El punto entero del cambio: antes toda consulta caía en "Piso 27" y el
+    // paciente subía al piso equivocado con el mapa dándole la razón.
+    for (const n of [10, 11, 16, 22, 27, 28, 29]) {
+      const ida = routes.find((r) => r.fromLocationId === 'lobby_torre' && r.toLocationId === `piso${n}`);
+      assert.ok(ida, `falta la ruta lobby_torre → piso${n}`);
+      assert.ok(ida.steps.some((s) => s.instruction.es.includes(`piso ${n}`)), `lobby_torre → piso${n}: el texto en español no nombra el piso ${n}`);
+      assert.ok(ida.steps.some((s) => s.instruction.en.includes(`floor ${n}`)), `lobby_torre → piso${n}: el texto en inglés no nombra el piso ${n}`);
+
+      const vuelta = routes.find((r) => r.fromLocationId === `piso${n}` && r.toLocationId === 'lobby_torre');
+      assert.ok(vuelta, `falta la ruta piso${n} → lobby_torre`);
+      assert.ok(vuelta.steps.some((s) => s.instruction.es.includes(`piso ${n}`)), `piso${n} → lobby_torre: el texto en español no nombra el piso ${n}`);
+      assert.ok(vuelta.steps.some((s) => s.instruction.en.includes(`floor ${n}`)), `piso${n} → lobby_torre: el texto en inglés no nombra el piso ${n}`);
+    }
+  });
+
+  test('compass → piso de consultorios se compone por el lobby y conserva el piso correcto', () => {
+    // No hay tramo directo compass→piso10 y no hace falta: lo que importa es
+    // que el paciente que sale del laboratorio reciba pasos que lo lleven al
+    // piso 10, no al 27.
+    const r = resolveRoute('compass', 'piso10', routes);
+    assert.ok(r && r.steps?.length, 'compass → piso10 debería resolverse componiendo por el lobby');
+    assert.strictEqual(r.composed, true);
+    assert.ok(r.steps.some((s) => s.instruction.es.includes('piso 10')), 'los pasos compuestos deberían nombrar el piso 10');
+    assert.ok(!r.steps.some((s) => s.instruction.es.includes('piso 27')), 'los pasos compuestos no deberían mencionar el piso 27');
   });
 
   test('ninguna ruta del catálogo directo sale y llega a la misma ubicación', () => {

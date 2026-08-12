@@ -51,6 +51,7 @@ import { CARD_CSS } from './components/card.js';
 import { BADGE_CSS } from './components/badge.js';
 import { renderVisitsScreen, attachVisitsScreen, VISITS_CSS } from './screens/coordinator/visits.js';
 import { renderIntakeScreen, attachIntakeScreen, INTAKE_CSS } from './screens/coordinator/intake.js';
+import { renderImportScreen, attachImportScreen, IMPORT_CSS } from './screens/coordinator/import.js';
 import { renderItineraryScreen, attachItineraryScreen, ITINERARY_CSS } from './screens/coordinator/itinerary.js';
 import { renderLodgingScreen, attachLodgingScreen, LODGING_CSS } from './screens/coordinator/lodging.js';
 import { renderTransfersScreen, attachTransfersScreen, TRANSFERS_CSS } from './screens/coordinator/transfers.js';
@@ -77,7 +78,7 @@ const GATE_CSS = `
 .nc-gate-msg { margin: 0; font-size: 14px; opacity: 0.8; }
 `;
 
-const ALL_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, ITINERARY_CSS, LODGING_CSS, TRANSFERS_CSS, QPASS_CSS, HANDOFF_CSS, PASS_SCREEN_CSS, SUBNAV_CSS, SIGNIN_CSS, FORM_ERRORS_CSS, GATE_CSS].join('\n');
+const ALL_CSS = [THEME_CSS, CARD_CSS, BADGE_CSS, VISITS_CSS, INTAKE_CSS, IMPORT_CSS, ITINERARY_CSS, LODGING_CSS, TRANSFERS_CSS, QPASS_CSS, HANDOFF_CSS, PASS_SCREEN_CSS, SUBNAV_CSS, SIGNIN_CSS, FORM_ERRORS_CSS, GATE_CSS].join('\n');
 
 function injectStylesOnce() {
   if (document.getElementById('nc-styles')) return;
@@ -104,6 +105,11 @@ const LANG_STORAGE_KEY = 'nc-coordinator-lang';
 const SCREENS = {
   visits: { render: renderVisitsScreen, attach: attachVisitsScreen, needsVisit: false },
   intake: { render: renderIntakeScreen, attach: attachIntakeScreen, needsVisit: false },
+  // Etapa I — needsVisit: false porque esta pantalla CREA la visita, no la
+  // edita: pedirle una seleccionada la mandaría a #/visits antes de poder
+  // subir nada. Aterriza en el itinerario por el mismo onCreated que usa el
+  // alta manual, así que lo importado se revisa en la pantalla de siempre.
+  import: { render: renderImportScreen, attach: attachImportScreen, needsVisit: false },
   itinerary: { render: renderItineraryScreen, attach: attachItineraryScreen, needsVisit: true },
   lodging: { render: renderLodgingScreen, attach: attachLodgingScreen, needsVisit: true },
   // Etapa G — junto a hospedaje porque es lo mismo de la visita que no pasa

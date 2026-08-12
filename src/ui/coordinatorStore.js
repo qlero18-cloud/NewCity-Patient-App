@@ -141,6 +141,28 @@ export function createCoordinatorStore({ api }) {
       return { ok: true, visit };
     },
 
+    // Etapa I — la visita y sus N citas en UNA sola petición (D83).
+    //
+    // No es `createVisit` seguido de N `addAppointment`: `saveVisit` no tiene
+    // compare-and-set (src/server/visitStore.js), así que diecinueve ciclos
+    // leer-modificar-escribir multiplican por diecinueve la ventana en la que
+    // dos coordinadoras se pisan. Y una importación a medias es peor que
+    // ninguna, porque desde el panel se ve igual que una completa.
+    //
+    // La copia local se siembra igual que en createVisit, con el expediente
+    // que devolvió el servidor: importar y quedarse sin nada que pintar
+    // obligaría a una segunda vuelta a la red para ver lo que se acaba de
+    // capturar.
+    async importItinerary(cuerpo) {
+      const res = await pedir('POST', '/import', cuerpo);
+      if (!res.ok) return res;
+
+      const record = res.body.record;
+      records.set(record.visit.id, record);
+      summaries.set(record.visit.id, { visit: record.visit });
+      return { ok: true, visit: record.visit };
+    },
+
     addAppointment(visitId, input) {
       return mutar('POST', `/visits/${encodeURIComponent(visitId)}/appointments`, input, 'appointment');
     },

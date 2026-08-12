@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 import {
   validateAppointmentInput,
   addAppointment,
+  addAppointments,
   moveAppointment,
   editAppointment,
   cancelAppointment,
@@ -35,6 +36,10 @@ import {
   MAX_SERVICE_NAME,
   MAX_DRIVER_NAME,
   MAX_PLATE,
+  MAX_PREP,
+  MAX_DOCTOR,
+  MAX_DETAILS,
+  MAX_IMPORT_APPOINTMENTS,
 } from '../../src/server/visitMutations.js';
 
 const AHORA = '2026-03-10T09:00:00.000-07:00';
@@ -152,6 +157,13 @@ describe('addAppointment', () => {
       serviceName: 'Resonancia magnética',
       locationId: 'compass',
       status: 'scheduled',
+      // Etapa I (D82). Van SIEMPRE presentes y normalizados a cadena vacía,
+      // no ausentes cuando no se usan, que es como ya se guardan
+      // `reservationCode` del hospedaje y las placas del vehículo. Un campo
+      // que a veces está y a veces no obliga a cada lector a preguntar.
+      prep: '',
+      doctor: '',
+      details: '',
       createdAt: AHORA,
       createdBy: POR,
       updatedAt: AHORA,
@@ -711,5 +723,237 @@ describe('cancelTransfer', () => {
 
   test('un expediente sin la llave transfers da notFound, no una excepción', () => {
     assert.deepEqual(cancelTransfer(registro(), 't_fijo', ctx()), { ok: false, notFound: true });
+  });
+});
+
+// ---------------------------------------------------------------------
+// Etapa I — los tres campos que el documento de la coordinadora ya trae
+// (D82) y la importación de un itinerario completo en UNA escritura (D83).
+// ---------------------------------------------------------------------
+
+describe('los tres campos nuevos de la cita (D82)', () => {
+  test('preparación, médico y sub-estudios se guardan recortados', () => {
+    const r = registro();
+    addAppointment(r, {
+      ...citaValida(),
+      prep: '  FASTING 8-12 HOURS  ',
+      doctor: '  DR. LUNA  ',
+      details: '  URINALYSIS, METABOLIC PANEL  ',
+    }, ctx());
+
+    const a = r.appointments[0];
+    assert.equal(a.prep, 'FASTING 8-12 HOURS');
+    assert.equal(a.doctor, 'DR. LUNA');
+    assert.equal(a.details, 'URINALYSIS, METABOLIC PANEL');
+  });
+
+  test('los tres son OPCIONALES: una cita sin ellos sigue siendo válida', () => {
+    // El formulario de la Etapa A no los manda y tiene que seguir
+    // funcionando igual. Exigirlos rompería la captura a mano, que es el
+    // camino que hoy usan las coordinadoras.
+    assert.equal(validateAppointmentInput(citaValida()).ok, true);
+  });
+
+  test('cada uno tiene su propio tope y reporta tooLong', () => {
+    // `details` necesita tope propio y no puede reusar MAX_SERVICE_NAME: la
+    // lista de estudios del laboratorio de Margarita pasa de 200 caracteres
+    // y el nombre del estudio son 120. Con un solo tope, o se parte la
+    // lista o se aflojan los nombres.
+    for (const [campo, tope] of [['prep', MAX_PREP], ['doctor', MAX_DOCTOR], ['details', MAX_DETAILS]]) {
+      const alLimite = validateAppointmentInput({ ...citaValida(), [campo]: 'x'.repeat(tope) });
+      assert.equal(alLimite.ok, true, `${campo}: ${tope} caracteres debería caber`);
+
+      const pasado = validateAppointmentInput({ ...citaValida(), [campo]: 'x'.repeat(tope + 1) });
+      assert.equal(pasado.ok, false, `${campo}: ${tope + 1} caracteres debería sobrar`);
+      assert.equal(pasado.errors[campo], 'tooLong');
+    }
+  });
+
+  test('los topes son distintos entre sí y `details` es el más grande', () => {
+    assert.equal(MAX_DOCTOR, 120);
+    assert.equal(MAX_PREP, 280);
+    assert.equal(MAX_DETAILS, 600);
+    assert.ok(MAX_DETAILS > MAX_SERVICE_NAME, 'la lista de estudios no cabe en un nombre de estudio');
+  });
+
+  test('el tope se mide sobre el texto ya recortado', () => {
+    const conEspacios = `   ${'x'.repeat(MAX_DOCTOR)}   `;
+    assert.equal(validateAppointmentInput({ ...citaValida(), doctor: conEspacios }).ok, true);
+  });
+
+  test('editar una cita SIN mandar los campos nuevos no los borra', () => {
+    // El formulario de edición que ya existe manda tres campos y nada más.
+    // Si "ausente" significara "vacío", editarle el nombre a una cita
+    // importada le borraría el ayuno — y nadie relacionaría una cosa con la
+    // otra. Ausente es "no lo toques"; presente, aunque sea vacío, sí manda.
+    const r = registro();
+    addAppointment(r, { ...citaValida(), prep: 'FASTING 8-12 HOURS', doctor: 'DR. LUNA', details: 'TSH' }, ctx());
+
+    editAppointment(r, 'a_fijo', {
+      serviceName: 'Resonancia magnética de cuerpo completo',
+      durationMin: 120,
+      locationId: 'compass',
+    }, ctx({ now: LUEGO, by: 'beto.lara' }));
+
+    const a = r.appointments[0];
+    assert.equal(a.prep, 'FASTING 8-12 HOURS');
+    assert.equal(a.doctor, 'DR. LUNA');
+    assert.equal(a.details, 'TSH');
+    assert.equal(a.serviceName, 'Resonancia magnética de cuerpo completo', 'lo que sí mandó sí cambió');
+  });
+
+  test('editar mandando cadena vacía SÍ borra el campo', () => {
+    const r = registro();
+    addAppointment(r, { ...citaValida(), prep: 'FASTING 8-12 HOURS' }, ctx());
+
+    editAppointment(r, 'a_fijo', { ...citaValida(), prep: '' }, ctx({ now: LUEGO }));
+    assert.equal(r.appointments[0].prep, '', 'una preparación equivocada tiene que poderse quitar');
+  });
+});
+
+describe('addAppointments — la importación es una sola escritura, todo o nada (D83)', () => {
+  // `newId` con contador: las citas importadas necesitan ids distintos, y el
+  // ctx compartido del archivo devuelve siempre el mismo a propósito.
+  function ctxLote(extra = {}) {
+    let n = 0;
+    return ctx({ newId: (p) => `${p}_${++n}`, ...extra });
+  }
+
+  const lote = () => ([
+    { startsAt: '2026-03-10T08:00:00.000-07:00', durationMin: 30, serviceName: 'BLOOD WORK', locationId: 'compass', prep: 'FASTING 8-12 HOURS', details: 'URINALYSIS, TSH' },
+    { startsAt: '2026-03-10T11:00:00.000-07:00', durationMin: 30, serviceName: 'OPHTHALMOLOGY CONSULTATION', locationId: 'piso11', doctor: 'DR. ORTEGA' },
+    { startsAt: '2026-03-10T14:00:00.000-07:00', durationMin: 120, serviceName: 'FULL-BODY MRI', locationId: 'compass' },
+  ]);
+
+  test('agrega las tres citas en una sola pasada, en el orden recibido', () => {
+    const r = registro();
+    const res = addAppointments(r, lote(), ctxLote());
+
+    assert.equal(res.ok, true);
+    assert.equal(r.appointments.length, 3);
+    assert.deepEqual(r.appointments.map((a) => a.serviceName), ['BLOOD WORK', 'OPHTHALMOLOGY CONSULTATION', 'FULL-BODY MRI']);
+    assert.deepEqual(r.appointments.map((a) => a.id), ['a_1', 'a_2', 'a_3'], 'cada cita con su id, no todas con el mismo');
+    assert.deepEqual(res.appointments, r.appointments);
+  });
+
+  test('las citas importadas quedan firmadas igual que las capturadas a mano', () => {
+    const r = registro();
+    addAppointments(r, lote(), ctxLote({ by: 'beti.ramirez' }));
+
+    for (const a of r.appointments) {
+      assert.equal(a.visitId, 'v_1');
+      assert.equal(a.status, 'scheduled');
+      assert.equal(a.createdBy, 'beti.ramirez');
+      assert.equal(a.createdAt, AHORA);
+      assert.equal(a.updatedBy, 'beti.ramirez');
+    }
+    assert.equal(r.appointments[0].prep, 'FASTING 8-12 HOURS');
+    assert.equal(r.appointments[0].details, 'URINALYSIS, TSH');
+    assert.equal(r.appointments[1].doctor, 'DR. ORTEGA');
+  });
+
+  test('UNA cita mala tumba la importación entera y no deja nada a medias', () => {
+    // Este es el punto de D83. Una importación a medias es peor que ninguna:
+    // la coordinadora ve citas en el expediente, supone que terminó, y al
+    // paciente le faltan seis. Ninguna es visiblemente distinta de todas.
+    const r = registro();
+    const entradas = lote();
+    entradas[1].locationId = 'piso13';
+
+    const res = addAppointments(r, entradas, ctxLote());
+
+    assert.equal(res.ok, false);
+    assert.equal(r.appointments.length, 0, 'ni siquiera la primera, que era válida');
+  });
+
+  test('el error dice EN QUÉ FILA falló y por qué', () => {
+    const r = registro();
+    const entradas = lote();
+    entradas[1].locationId = 'piso13';
+    entradas[2].serviceName = '';
+
+    const res = addAppointments(r, entradas, ctxLote());
+
+    assert.deepEqual(res.errors, {
+      appointments: [
+        { index: 1, errors: { locationId: 'unknown' } },
+        { index: 2, errors: { serviceName: 'required' } },
+      ],
+    });
+  });
+
+  test('reporta TODAS las filas malas de una vez, no la primera y ya', () => {
+    // Corregir de una en una, con un viaje al servidor por fila, es lo que
+    // hace que alguien abandone una importación de 19 citas a la mitad.
+    const r = registro();
+    const entradas = lote().map((e) => ({ ...e, locationId: 'inventada' }));
+    const res = addAppointments(r, entradas, ctxLote());
+
+    assert.deepEqual(res.errors.appointments.map((e) => e.index), [0, 1, 2]);
+  });
+
+  test('una lista vacía es un error, no un éxito silencioso', () => {
+    const r = registro();
+    const res = addAppointments(r, [], ctxLote());
+
+    assert.equal(res.ok, false);
+    assert.equal(res.errors.appointments, 'required');
+  });
+
+  test('lo que no sea un arreglo se rechaza sin reventar', () => {
+    for (const basura of [null, undefined, 42, 'no soy una lista', {}, { length: 3 }]) {
+      const r = registro();
+      const res = addAppointments(r, basura, ctxLote());
+      assert.equal(res.ok, false, `no debería aceptar ${JSON.stringify(basura)}`);
+      assert.equal(res.errors.appointments, 'required');
+      assert.equal(r.appointments.length, 0);
+    }
+  });
+
+  test('un lote absurdamente largo se rechaza', () => {
+    // El itinerario más grande de los reales trae 19 citas. El tope no es
+    // una regla clínica, es lo mismo que MAX_DURATION_MIN: un cinturón
+    // contra un payload que nadie tecleó.
+    const r = registro();
+    const una = lote()[0];
+
+    assert.equal(addAppointments(r, Array.from({ length: MAX_IMPORT_APPOINTMENTS }, () => ({ ...una })), ctxLote()).ok, true);
+    assert.ok(MAX_IMPORT_APPOINTMENTS >= 19, 'tiene que caber el itinerario real más grande');
+
+    const r2 = registro();
+    const res = addAppointments(r2, Array.from({ length: MAX_IMPORT_APPOINTMENTS + 1 }, () => ({ ...una })), ctxLote());
+    assert.equal(res.ok, false);
+    assert.equal(res.errors.appointments, 'tooLong');
+    assert.equal(r2.appointments.length, 0);
+  });
+
+  test('importar no borra las citas que ya estaban', () => {
+    // La coordinadora puede haber capturado algo a mano antes de importar.
+    const r = registro();
+    addAppointment(r, citaValida(), ctx());
+    addAppointments(r, lote(), ctxLote());
+
+    assert.equal(r.appointments.length, 4);
+    assert.equal(r.appointments[0].serviceName, 'Resonancia magnética', 'la de antes sigue primero');
+  });
+
+  test('tampoco entran campos que el cliente no tiene por qué mandar', () => {
+    const r = registro();
+    addAppointments(r, [{ ...lote()[0], status: 'done', createdBy: 'otro', id: 'a_mío', visitId: 'v_9' }], ctxLote());
+
+    const a = r.appointments[0];
+    assert.equal(a.status, 'scheduled');
+    assert.equal(a.createdBy, POR);
+    assert.equal(a.id, 'a_1');
+    assert.equal(a.visitId, 'v_1');
+  });
+
+  test('no muta la lista de entradas que recibe', () => {
+    const r = registro();
+    const entradas = lote();
+    const copia = JSON.parse(JSON.stringify(entradas));
+    addAppointments(r, entradas, ctxLote());
+
+    assert.deepEqual(entradas, copia);
   });
 });

@@ -52,10 +52,32 @@ describe('Identificadores del mapa (docs/phases/phase-04-map-svg.md)', () => {
     }
   });
 
-  test('todo mapPointId de locations.js (fase 03) corresponde uno a uno con MAP_POINT_IDS, sin sobrar ni faltar', () => {
-    const deLocations = locations.map((l) => l.mapPointId);
-    assert.deepStrictEqual([...deLocations].sort(), [...MAP_POINT_IDS].sort());
-    assert.strictEqual(new Set(deLocations).size, locations.length, 'locations.js no debe repetir mapPointId entre ubicaciones distintas');
+  // D80 — la relación ubicación↔punto YA NO es 1 a 1, a propósito. Los siete
+  // pisos de consultorios de la Torre Médica comparten mp_floor27, cuya
+  // etiqueta ya era genérica ("Consultorios") y que D30 define como una
+  // aproximación de la torre entera, no de un piso concreto. No es una regla
+  // nueva: plaza.js lleva desde la fase 03 compartiendo mp_level1 entre
+  // Farmer's Table y The Park Restaurante.
+  //
+  // Por eso aquí YA NO se afirma inyectividad ("ninguna ubicación repite
+  // mapPointId"): esa aserción se eliminó con intención. Si alguien la
+  // restaura creyendo que se cayó por descuido, que lea esto antes. Era
+  // cierta por accidente — había 7 ubicaciones y 7 puntos —, nunca fue una
+  // decisión de diseño.
+  //
+  // Lo que sí hacía falta conservar de la aserción vieja son estas dos
+  // mitades, que ahora se prueban por separado.
+  test('todo mapPointId de locations.js (fase 03) existe en MAP_POINT_IDS', () => {
+    for (const loc of locations) {
+      assert.ok(MAP_POINT_IDS.includes(loc.mapPointId), `${loc.id}: mapPointId "${loc.mapPointId}" no está en la lista de la fase 04`);
+    }
+  });
+
+  test('todo punto del mapa lo usa al menos una ubicación — ningún punto dibujado queda huérfano', () => {
+    const usados = new Set(locations.map((l) => l.mapPointId));
+    for (const id of MAP_POINT_IDS) {
+      assert.ok(usados.has(id), `mapPointId "${id}" no lo usa ninguna ubicación de locations.js: sería geometría muerta en el SVG`);
+    }
   });
 });
 

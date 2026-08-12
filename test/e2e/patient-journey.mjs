@@ -50,6 +50,14 @@ import { handleVisitRequest, TOKEN_HEADER } from '../../src/server/visitHandler.
 import { resolveVisitContext } from '../../src/ui/visitSource.js';
 import { saveVisitCache, loadVisitCache, clearVisitCache } from '../../src/ui/visitCache.js';
 import { visitUrl } from '../../src/ui/screens/coordinator/handoff.js';
+// Etapa I — la cadena de la importación, de punta a punta.
+import { readDocxDocumentXml } from '../../src/ui/docxFile.js';
+import { docxTableRows, docxParagraphsOutsideTables } from '../../src/domain/docxTable.js';
+import { parseItinerary } from '../../src/domain/itineraryParse.js';
+import { toLocalInput } from '../../src/domain/time.js';
+import { buildImportPayload } from '../../src/ui/screens/coordinator/import.js';
+import { renderItineraryScreen } from '../../src/ui/screens/itinerary.js';
+import { documento, parrafo, tabla, docxDe, archivo } from '../helpers/docx.js';
 
 function step(n, description, fn) {
   fn();
@@ -438,5 +446,186 @@ await stepAsync(19, 'la víspera le asignan chofer al regreso, y el día del reg
   assert.match(proximo.driver.phone, /^\+\d{8,15}$/, 'E.164 con + (D73): la pantalla arma wa.me/<dígitos> y un número local marcaría a otro país');
 });
 
-console.log('\n19/19 pasos del recorrido pasaron (10 del paciente + 6 del tramo coordinadora→paciente + 3 de traslados).');
-console.log('Pendiente, fuera del alcance de este script: recorrido visual en navegador y prueba en teléfono real.');
+// =====================================================================
+// Etapa I — el itinerario que la coordinadora ya tenía escrito en Word.
+//
+// Los tres pasos van juntos porque el valor de la etapa está justo en que
+// se encadenen: leer el .docx no sirve si el intérprete no lo entiende, y
+// entenderlo no sirve si lo entendido no llega al teléfono del paciente con
+// el piso correcto y con "FASTING 8-12 HOURS" todavía adentro. Cada pieza
+// tiene sus pruebas unitarias; esto es lo único que las corre en fila.
+//
+// El documento es SINTÉTICO (D88): reproduce las variaciones catalogadas de
+// los cinco itinerarios reales —celda de hora vacía que continúa la cita
+// anterior, fila de 2 celdas para la comida, typo del diccionario, piso que
+// antes no existía— con datos inventados. Los reales no entran al repo.
+// =====================================================================
+
+const DOC_XML = documento([
+  parrafo('CHECK-UP ITINERARY'),
+  parrafo('Patient: Bernardo Salas DOB: April 6th 1970 Phone Number: +1 555 0100'),
+  parrafo('Scheduled Date: July 30 – 31, 2026 – 7:30 AM.'),
+  tabla([
+    ['TIME', 'STUDY', 'LOCATION'],
+    ['THRUSDAY , JULY 30', '', ''],
+    // La preparación va en la columna de la ubicación: así vienen los cinco
+    // documentos reales. Esta fila llega SIN ubicación reconocida a
+    // propósito — es lo que la coordinadora resuelve en el <select> del paso
+    // 21, y la razón de que la pantalla de revisión sea obligatoria (D84).
+    ['7:30AM', 'BLOOD WORK', 'FASTING 8-12 HOURS'],
+    ['', 'URUNALYSIS, LIPID PROFILE', ''],
+    ['9:00AM', 'CARDIC CONSULTATION (DR. LUNA)', '10TH FLOOR'],
+    ['11:30AM', 'LUNCH BREAK'],
+    ['1:00PM', 'OPHTALMOLOGY (2 HOURS)', '22TH FLOOR'],
+  ]),
+].join(''));
+
+let leido;
+
+await stepAsync(20, 'el .docx que ya escribe la coordinadora se lee y se entiende: typos corregidos, el piso correcto y la comida aparte', async () => {
+  const res = await readDocxDocumentXml(archivo(docxDe(DOC_XML)));
+  assert.strictEqual(res.ok, true, `no se pudo leer el documento: ${JSON.stringify(res)}`);
+
+  leido = parseItinerary({
+    rows: docxTableRows(res.xml),
+    headings: docxParagraphsOutsideTables(res.xml),
+    locations,
+  });
+
+  // El nombre se lee pero NO se importa solo: la coordinadora lo confirma en
+  // pantalla (D84). Es la lección del documento real que traía el nombre de
+  // otra paciente adentro.
+  assert.strictEqual(leido.patientName, 'Bernardo Salas');
+  assert.deepStrictEqual(leido.discarded, ['dob', 'phone'], 'fecha de nacimiento y teléfono se descartan a propósito (D61)');
+
+  assert.strictEqual(leido.counts.importable, 3, 'tres citas: la de URUNALYSIS cuelga de la primera, no es una cuarta');
+  assert.strictEqual(leido.counts.meals, 1, 'LUNCH BREAK se ve pero no se importa');
+
+  const citas = leido.rows.filter((f) => f.kind === 'appointment');
+  // D85 — el diccionario corrige, no adivina. Sin esto el paciente lee
+  // "URUNALYSIS" y "CARDIC" en su teléfono.
+  assert.ok(citas[0].details.includes('URINALYSIS'), `los sub-estudios llegan corregidos: ${citas[0].details}`);
+  assert.match(citas[1].serviceName, /CARDIAC/);
+  assert.match(citas[2].serviceName, /OPHTHALMOLOGY/);
+
+  // D82 — lo que hasta esta etapa se perdía entero.
+  assert.strictEqual(citas[0].prep, 'FASTING 8-12 HOURS');
+  assert.strictEqual(citas[1].doctor, 'DR. LUNA');
+
+  // D80 — el piso 10 existe; "22TH" es ordinal malformado y se tolera al
+  // leer. Antes de esta etapa las dos caían en piso27.
+  assert.strictEqual(citas[1].locationId, 'piso10');
+  assert.strictEqual(citas[2].locationId, 'piso22');
+
+  // D84 — y lo que NO se adivina: sin ubicación reconocida, `null` y una
+  // nota. El intérprete jamás manda texto libre de ubicación al servidor.
+  assert.strictEqual(citas[0].locationId, null);
+  assert.ok(citas[0].notes.some((n) => n.code === 'locationUnknown'));
+  assert.strictEqual(leido.counts.needsAttention, 1, 'una fila pide intervención y el conteo lo dice');
+
+  // D86 — "(2 HOURS)" explícito gana; lo que no lo dice son 30 minutos
+  // recortados por el hueco, marcados como supuestos.
+  assert.strictEqual(citas[2].durationMin, 120);
+  assert.ok(citas[0].notes.some((n) => n.code === 'durationInferred'));
+
+  // THRUSDAY → THURSDAY: el typo estaba en la fila de día, y de esa fila
+  // sale la fecha de todas las citas del bloque.
+  assert.match(citas[0].startsAt, /^2026-07-30T07:30/);
+});
+
+let visitaImportada;
+
+await stepAsync(21, 'las tres citas y la visita entran al servidor en UNA sola escritura, con el nombre que confirmó la coordinadora', async () => {
+  const payload = buildImportPayload({
+    // Confirmado a mano en la pantalla de revisión, no copiado en silencio.
+    patientFirstName: 'Bernardo',
+    lang: 'es',
+    rows: leido.rows
+      .filter((f) => f.kind === 'appointment')
+      .map((f) => ({
+        startsAt: toLocalInput(f.startsAt),
+        durationMin: String(f.durationMin),
+        serviceName: f.serviceName,
+        // Lo que la coordinadora elige en el <select> de esa fila: el
+        // laboratorio está en Compass, cosa que el documento no dice porque
+        // en esa columna escribió la preparación.
+        locationId: f.locationId ?? 'compass',
+        prep: f.prep,
+        doctor: f.doctor,
+        details: f.details,
+      })),
+  });
+
+  assert.strictEqual(payload.appointments.length, 3, 'la comida no viaja al servidor');
+  // D83 — una sola petición. Diecinueve escrituras contra un saveVisit sin
+  // compare-and-set multiplican por diecinueve la ventana en la que dos
+  // coordinadoras se pisan, y una importación a medias se ve igual que una
+  // completa desde el panel.
+  const antes = panel.llamadas.length;
+  const res = await store.importItinerary(payload);
+  assert.ok(res.ok, `la importación falló: ${JSON.stringify(res)}`);
+  assert.strictEqual(panel.llamadas.length - antes, 1, 'una sola vuelta a la red para la visita entera');
+
+  visitaImportada = res.visit;
+  assert.strictEqual(visitaImportada.patientFirstName, 'Bernardo');
+  // La ventana de la visita sale de las citas, no del reloj (INV-1).
+  assert.match(visitaImportada.startsAt, /^2026-07-30T07:30/);
+  assert.match(visitaImportada.endsAt, /^2026-07-30T15:00/, 'la última cita empieza a la 1:00PM y dura 2 horas');
+
+  const expediente = store.getVisit(visitaImportada.id);
+  assert.strictEqual(expediente.appointments.length, 3, 'el panel queda al día sin otra vuelta a la red');
+});
+
+await stepAsync(22, 'el paciente abre su enlace y ve el itinerario completo: la preparación, el médico y el piso al que de verdad va', async () => {
+  const emitido = await store.issueQpass(visitaImportada.id, { scope: 'torre', format: 'qr', payload: 'payload-e2e-import' });
+  assert.ok(emitido.ok, `no se pudo emitir el pase de la visita importada: ${JSON.stringify(emitido)}`);
+
+  // Antes de la cita: el enlace tiene que estar vivo cuando el paciente lo
+  // consulta la víspera, que es cuando importa leer "ven en ayunas".
+  const LA_VISPERA = '2026-07-29T20:00-07:00';
+  const cliente = clienteDelPaciente(LA_VISPERA);
+  const resuelto = await resolveVisitContext(visitaImportada.token, { api: cliente, cache: CACHE, now: LA_VISPERA });
+  assert.ok(resuelto, 'la visita importada tiene que abrir en el teléfono igual que una capturada a mano');
+  assert.strictEqual(resuelto.source, 'network');
+  assert.strictEqual(resuelto.record.appointments.length, 3);
+
+  // El hueco más fácil de no ver: visitHandler arma la respuesta campo por
+  // campo, así que un campo guardado en Blobs no llega al teléfono solo por
+  // estar guardado. Es el mismo tropiezo del paso 18 con los traslados.
+  const sangre = resuelto.record.appointments.find((a) => a.serviceName.startsWith('BLOOD WORK'));
+  assert.strictEqual(sangre.prep, 'FASTING 8-12 HOURS', 'la preparación tiene que llegar al paciente: es el dato que le cambia la mañana');
+  assert.ok(sangre.details.includes('URINALYSIS'), 'los sub-estudios corregidos, no los del typo');
+
+  const cardio = resuelto.record.appointments.find((a) => a.serviceName.includes('CARDIAC'));
+  assert.strictEqual(cardio.doctor, 'DR. LUNA');
+  assert.strictEqual(cardio.locationId, 'piso10');
+
+  // Y lo que cierra el círculo con la Etapa A: que el mapa lo mande al piso
+  // 10 de verdad. Antes de D80 esta cita se capturaba como piso27 y la ruta
+  // le confirmaba, con toda seguridad, un piso equivocado.
+  const ruta = resolveRoute(defaultOrigin(cardio, resuelto.record.appointments, resuelto.record.lodging), 'piso10', routes);
+  assert.ok(ruta && ruta.steps?.length, 'la cita del piso 10 tiene que tener ruta');
+  assert.ok(
+    ruta.steps.some((s) => s.instruction.es.includes('piso 10')),
+    `la ruta debería nombrar el piso 10: ${ruta.steps.map((s) => s.instruction.es).join(' | ')}`,
+  );
+
+  // Lo último del camino: que salga pintado. renderItineraryScreen es pura,
+  // así que aquí se ve el HTML que leería el paciente.
+  const html = renderItineraryScreen({
+    appointments: resuelto.record.appointments,
+    transfers: resuelto.record.transfers,
+    now: LA_VISPERA,
+    lang: 'es',
+    t: (path) => translate('es', path),
+    lastViewedItineraryAt: null,
+  });
+  assert.ok(html.includes('FASTING 8-12 HOURS'), 'la preparación tiene que verse, no solo viajar');
+  assert.ok(html.includes('DR. LUNA'));
+  assert.ok(html.includes('URINALYSIS'));
+  assert.ok(html.includes('Piso 10'), 'el renglón de la cita nombra el piso correcto');
+  assert.ok(!html.includes('LUNCH BREAK'), 'la comida no se importó, así que no puede aparecer en el itinerario');
+});
+
+console.log('\n22/22 pasos del recorrido pasaron (10 del paciente + 6 del tramo coordinadora→paciente + 3 de traslados + 3 de importación .docx).');
+console.log('Pendiente, fuera del alcance de este script: recorrido visual en navegador (incluidos los cinco .docx reales, fuera del repo) y prueba en teléfono real.');

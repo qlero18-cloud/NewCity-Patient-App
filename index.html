@@ -965,6 +965,11 @@ const STRINGS = {
         cancelled: 'Cancelada',
       },
       empty: 'No hay citas registradas en esta visita.',
+      // Etapa I (D82). Etiquetas, no oraciones: van pegadas al texto que
+      // escribió la coordinadora en su documento y que se muestra verbatim.
+      prepLabel: 'Preparación:',
+      doctorLabel: 'Te atiende:',
+      detailsLabel: 'Incluye:',
     },
     map: {
       title: 'Mapa y accesos',
@@ -1126,6 +1131,7 @@ const STRINGS = {
         title: 'Visitas',
         empty: 'No hay visitas todavía.',
         newVisit: 'Nueva visita',
+        importItinerary: 'Importar itinerario (.docx)',
       },
       intake: {
         title: 'Alta de visita',
@@ -1134,6 +1140,78 @@ const STRINGS = {
         startsAtLabel: 'Inicio de la visita',
         endsAtLabel: 'Fin de la visita',
         save: 'Guardar visita',
+      },
+      // Etapa I — importar el itinerario que la coordinadora ya escribió en
+      // Word. Los códigos de `note` y `warning` son, uno por uno, los que
+      // devuelve src/domain/itineraryParse.js: cada cosa que el intérprete
+      // corrigió o supuso tiene que poder leerse en pantalla (D85), porque
+      // una corrección invisible nadie la va a cachar.
+      import: {
+        title: 'Importar itinerario',
+        intro: 'Sube el documento de Word y revisa lo que se propone antes de crear la visita.',
+        uploadLabel: 'Documento de Word (.docx)',
+        uploadHint: 'El archivo no sale de esta computadora: se lee aquí mismo.',
+        fileError: {
+          missing: 'No recibimos ningún archivo.',
+          type: 'Solo aceptamos archivos .docx de Word.',
+          size: 'Ese archivo es demasiado grande para ser un itinerario.',
+          notZip: 'No pudimos abrirlo: no parece un .docx de Word.',
+          noDocument: 'El archivo abrió, pero adentro no viene un documento de Word.',
+          unsupportedCompression: 'Ese .docx viene comprimido de una forma que no sabemos leer. Vuelve a guardarlo desde Word.',
+          unreadable: 'El archivo está incompleto o dañado. Vuelve a guardarlo desde Word.',
+          noRows: 'No encontramos ninguna cita en ese documento. Revisa que sea un itinerario de check-up.',
+        },
+        rowErrors: 'El servidor rechazó algunas filas. Revisa las marcadas y vuelve a intentar.',
+        patientTitle: 'Paciente',
+        patientNameLabel: 'Nombre de pila',
+        confirmNameLabel: 'Confirmo que este es el paciente de esta visita.',
+        confirmNameHint: 'Las plantillas reusadas llegan con el nombre de otra persona adentro. Compáralo con el expediente antes de importar.',
+        langLabel: 'Idioma del paciente',
+        langPlaceholder: 'Elige el idioma',
+        locationPlaceholder: 'Elige la ubicación',
+        counts: (leidas, importables, atencion) => `${leidas} filas leídas · ${importables} se importarán · ${atencion} necesitan tu atención`,
+        skippedNote: (n) => `Otras ${n} filas son encabezados o vienen vacías y no se muestran.`,
+        tableCaption: 'Todo lo de esta tabla se puede corregir antes de importar.',
+        col: {
+          time: 'Hora',
+          service: 'Estudio o consulta',
+          doctor: 'Médico',
+          duration: 'Minutos',
+          location: 'Ubicación',
+          prep: 'Preparación',
+          details: 'Sub-estudios',
+          notes: 'Avisos',
+        },
+        notImported: 'No se importa',
+        mergedInto: 'Se suma al estudio de arriba',
+        discardedTitle: 'Lo que no se guarda de este documento',
+        discarded: {
+          dob: 'Fecha de nacimiento',
+          phone: 'Teléfono',
+          email: 'Correo electrónico',
+        },
+        note: {
+          typoFixed: (n) => `Corregido: ${n.from} → ${n.to}`,
+          timeFlipped: (n) => `Hora corregida: ${n.from} → ${n.to}`,
+          durationInferred: 'Duración supuesta: el documento no la dice.',
+          overlap: 'Se encima con la cita siguiente.',
+          locationMissing: 'El documento no dice dónde es.',
+          locationUnknown: (n) => `No reconocimos la ubicación: ${n.text}`,
+          noDate: 'Sin fecha: el documento no trae el año.',
+          timeUnreadable: (n) => `No pudimos leer la hora: ${n.text}`,
+          timeOutOfOrder: (n) => `Esta hora rompe el orden del día: ${n.text}`,
+          serviceNameTooLong: 'El nombre del estudio es demasiado largo. Recórtalo.',
+          prepTooLong: 'La preparación es demasiado larga. Recórtala.',
+          detailsTooLong: 'Los sub-estudios son demasiado largos. Recórtalos.',
+          orphanDetail: 'Esta fila continúa una cita que no existe.',
+        },
+        warning: {
+          dateUnreadable: (w) => `No pudimos leer la fecha del encabezado: ${w.text}`,
+          dateRangeTooLong: (w) => `El encabezado abarca ${w.days} días. Solo usamos el primero.`,
+          dayNotInHeader: (w) => `La tabla menciona el ${w.day}, que no viene en el encabezado.`,
+          noDate: 'El documento no trae el año, así que las citas quedaron sin fecha.',
+        },
+        submit: 'Crear visita con estas citas',
       },
       itinerary: {
         title: 'Itinerario',
@@ -1282,6 +1360,9 @@ const STRINGS = {
         cancelled: 'Cancelled',
       },
       empty: 'No appointments on record for this visit.',
+      prepLabel: 'Preparation:',
+      doctorLabel: 'Seen by:',
+      detailsLabel: 'Includes:',
     },
     map: {
       title: 'Map & access',
@@ -1413,6 +1494,7 @@ const STRINGS = {
         title: 'Visits',
         empty: 'No visits yet.',
         newVisit: 'New visit',
+        importItinerary: 'Import itinerary (.docx)',
       },
       intake: {
         title: 'Visit intake',
@@ -1421,6 +1503,73 @@ const STRINGS = {
         startsAtLabel: 'Visit start',
         endsAtLabel: 'Visit end',
         save: 'Save visit',
+      },
+      import: {
+        title: 'Import itinerary',
+        intro: 'Upload the Word document and review what we propose before creating the visit.',
+        uploadLabel: 'Word document (.docx)',
+        uploadHint: 'The file never leaves this computer: we read it right here.',
+        fileError: {
+          missing: 'We did not receive a file.',
+          type: 'We only accept Word .docx files.',
+          size: 'That file is too large to be an itinerary.',
+          notZip: 'We could not open it: it does not look like a Word .docx.',
+          noDocument: 'The file opened, but there is no Word document inside.',
+          unsupportedCompression: 'That .docx is compressed in a way we cannot read. Save it again from Word.',
+          unreadable: 'The file is incomplete or damaged. Save it again from Word.',
+          noRows: 'We found no appointments in that document. Check that it is a check-up itinerary.',
+        },
+        rowErrors: 'The server rejected some rows. Review the marked ones and try again.',
+        patientTitle: 'Patient',
+        patientNameLabel: 'First name',
+        confirmNameLabel: 'I confirm this is the patient for this visit.',
+        confirmNameHint: 'Reused templates arrive with another person’s name inside. Check it against the record before importing.',
+        langLabel: 'Patient language',
+        langPlaceholder: 'Choose a language',
+        locationPlaceholder: 'Choose a location',
+        counts: (read, importable, attention) => `${read} rows read · ${importable} will be imported · ${attention} need your attention`,
+        skippedNote: (n) => `Another ${n} rows are headers or blank and are not shown.`,
+        tableCaption: 'Everything in this table can be corrected before importing.',
+        col: {
+          time: 'Time',
+          service: 'Study or consultation',
+          doctor: 'Doctor',
+          duration: 'Minutes',
+          location: 'Location',
+          prep: 'Preparation',
+          details: 'Sub-studies',
+          notes: 'Notices',
+        },
+        notImported: 'Not imported',
+        mergedInto: 'Added to the study above',
+        discardedTitle: 'What we do not keep from this document',
+        discarded: {
+          dob: 'Date of birth',
+          phone: 'Phone number',
+          email: 'Email address',
+        },
+        note: {
+          typoFixed: (n) => `Corrected: ${n.from} → ${n.to}`,
+          timeFlipped: (n) => `Time corrected: ${n.from} → ${n.to}`,
+          durationInferred: 'Assumed duration: the document does not state it.',
+          overlap: 'It overlaps the next appointment.',
+          locationMissing: 'The document does not say where it is.',
+          locationUnknown: (n) => `We did not recognize the location: ${n.text}`,
+          noDate: 'No date: the document has no year.',
+          timeUnreadable: (n) => `We could not read the time: ${n.text}`,
+          timeOutOfOrder: (n) => `This time breaks the order of the day: ${n.text}`,
+          serviceNameTooLong: 'The study name is too long. Shorten it.',
+          prepTooLong: 'The preparation text is too long. Shorten it.',
+          detailsTooLong: 'The sub-studies text is too long. Shorten it.',
+          orphanDetail: 'This row continues an appointment that does not exist.',
+        },
+        warning: {
+          dateUnreadable: (w) => `We could not read the date in the header: ${w.text}`,
+          dateRangeTooLong: (w) => `The header spans ${w.days} days. We use only the first one.`,
+          dayNotInHeader: (w) => `The table mentions ${w.day}, which is not in the header.`,
+          noDate: 'The document has no year, so the appointments were left without a date.',
+        },
+        submit: 'Create visit with these appointments',
       },
       itinerary: {
         title: 'Itinerary',
@@ -1638,11 +1787,18 @@ const HELP_CSS = `
 // por el cliente). Contenido real de NewCity — a diferencia de
 // src/data/fixtures.js, esto sobrevive al prototipo.
 //
-// Los 7 id de aquí coinciden a propósito con los locationId que ya usa el
-// catálogo de rutas (src/data/routes.js, fase 02) y con los 7 mapPointId
-// de docs/phases/phase-04-map-svg.md. Las tres listas se prueban cruzadas
-// en test/data/fixtures.test.js: si una cambia sin las otras, la prueba
-// lo detecta.
+// Los id de aquí coinciden a propósito con los locationId que usa el
+// catálogo de rutas (src/data/routes.js, fase 02), y cada uno apunta a uno
+// de los 7 mapPointId de docs/phases/phase-04-map-svg.md. Las tres listas se
+// prueban cruzadas en test/data/fixtures.test.js: si una cambia sin las
+// otras, la prueba lo detecta.
+//
+// Ojo con la aritmética: son 13 ubicaciones sobre 7 puntos de mapa, no 7
+// sobre 7. Los siete pisos de consultorios comparten un punto (D80, ver
+// abajo). La prueba que impide olvidos es la de fase 02 en
+// test/data/fixtures.test.js: los locationId que usan las rutas deben
+// coincidir EXACTAMENTE con LOCATION_IDS, así que agregar una ubicación sin
+// darle rutas rompe la suite.
 //
 // El PRD §15 no trae ningún horario confirmado por el cliente para NINGÚN
 // punto del complejo — el ítem 4 lo dice explícito para Compass/Piso
@@ -1684,11 +1840,37 @@ function loc(id, nameEs, nameEn, kind, floor, mapPointId, options = {}) {
   };
 }
 
+// D80 — Los pisos de consultorios de la Torre Médica. Hasta la Etapa I aquí
+// solo existía el 27, y los itinerarios que escriben las coordinadoras mandan
+// al paciente también a los pisos 10, 11, 16, 22, 28 y 29. Como el <select>
+// del panel solo ofrecía siete ubicaciones, esas consultas se capturaban como
+// "Piso 27": el paciente subía al piso equivocado y el mapa se lo confirmaba.
+//
+// Los siete COMPARTEN mp_floor27, y eso es correcto, no una aproximación
+// perezosa: ese punto ya estaba etiquetado en genérico ("Consultorios" /
+// "Consultation offices") y D30 lo define como una aproximación de la Torre
+// Médica entera — "un piso interior de la Torre Médica, no una zona de planta
+// baja" —, no del piso 27 en particular. Físicamente es el mismo edificio y
+// el mismo elevador; lo único que cambia es el número al que sube.
+//
+// Compartir mapPointId entre ubicaciones distintas no es nuevo en el
+// proyecto: plaza.js lleva desde la fase 03 con Farmer's Table y The Park
+// Restaurante sobre mp_level1. Lo que sí se eliminó por esto es la aserción
+// de inyectividad de test/map/ids.test.js — ver el comentario de ahí.
+//
+// En orden ascendente a propósito: este arreglo es el que ordena el <select>
+// del panel de coordinadoras.
+const CONSULTORIO_FLOORS = [10, 11, 16, 22, 27, 28, 29];
+
+function locConsultorio(n) {
+  return loc(`piso${n}`, `Piso ${n} · Consultorios`, `Floor ${n} · Consultation Offices`, 'consultorios', String(n), 'mp_floor27');
+}
+
 const locations = [
   loc('estacionamiento', 'Estacionamiento', 'Parking', 'parking', 'P', 'mp_parking'),
   loc('lobby_torre', 'Lobby Torre Médica · Acceso general', 'Medical Tower Lobby · General Access', 'lobby', 'PB', 'mp_lobby'),
   loc('compass', 'Compass · Laboratorio e imagenología', 'Compass · Lab & Imaging', 'lab_imaging', 'N1', 'mp_compass'),
-  loc('piso27', 'Piso 27 · Consultorios', 'Floor 27 · Consultation Offices', 'consultorios', '27', 'mp_floor27'),
+  ...CONSULTORIO_FLOORS.map(locConsultorio),
   loc('quartz', 'Quartz Hotel & Spa', 'Quartz Hotel & Spa', 'hotel', 'N1', 'mp_quartz'),
   loc('nivel1', "Nivel 1 · Gastronomía (Farmer's Table, The Park Restaurante)", 'Level 1 · Dining (Farmer\'s Table, The Park Restaurante)', 'dining', 'N1', 'mp_level1'),
   // Nombre y ubicación exacta de la farmacia sin confirmar (PRD §15.6):
@@ -1906,6 +2088,39 @@ function renderHoursScreen(ctx) {
 
 
 
+// Etapa I — los tres campos que el itinerario de la coordinadora ya traía y
+// hasta ahora se perdían (D82). Son opcionales de verdad: ninguna cita
+// capturada a mano en las Etapas D–H los tiene, así que cada renglón se pinta
+// solo si hay algo que decir. Una etiqueta encima de un campo vacío es ruido
+// en la pantalla que más se consulta.
+//
+// `hideWhenCancelled` solo lo lleva `prep`, y la asimetría es intencional:
+// `prep` PIDE algo ("ayuna de 8 a 12 horas") y dejarlo visible en una cita
+// que ya no ocurre manda a alguien a ayunar doce horas para nada; `doctor` y
+// `details` DESCRIBEN la cita, que es justo lo que hace falta para reconocer
+// cuál se canceló y pedir que la reagenden.
+//
+// Nombre con prefijo porque build.py (fase 05) aplana todos los módulos de un
+// entry a un solo scope top-level y un nombre genérico chocaría con el
+// primero que se le parezca.
+const ITIN_EXTRA_ROWS = [
+  { field: 'prep', label: 'itinerary.prepLabel', cssClass: 'nc-itin-prep', hideWhenCancelled: true },
+  { field: 'doctor', label: 'itinerary.doctorLabel', cssClass: 'nc-itin-doctor' },
+  { field: 'details', label: 'itinerary.detailsLabel', cssClass: 'nc-itin-details' },
+];
+
+function renderAppointmentExtras(appointment, cancelled, t) {
+  return ITIN_EXTRA_ROWS
+    .filter((row) => !(cancelled && row.hideWhenCancelled))
+    // Se recorta antes de decidir: un campo con espacios es un campo vacío
+    // que el .docx trajo con formato, no contenido.
+    .map((row) => [row, typeof appointment[row.field] === 'string' ? appointment[row.field].trim() : ''])
+    .filter(([, valor]) => valor !== '')
+    .map(([row, valor]) => `<p class="nc-itin-extra ${row.cssClass}">`
+      + `<span class="nc-itin-extra-label">${escapeHtml(t(row.label))}</span> ${escapeHtml(valor)}</p>`)
+    .join('\n');
+}
+
 function renderAppointmentCard(appointment, ctx) {
   const { now, lang, t, lastViewedItineraryAt } = ctx;
   const cancelled = appointment.status === 'cancelled';
@@ -1920,6 +2135,7 @@ function renderAppointmentCard(appointment, ctx) {
   return renderCard(`
     <p class="nc-itin-when">${escapeHtml(formatTimeTijuana(appointment.startsAt, lang))} · ${escapeHtml(locationName(locations, appointment.locationId, lang))}</p>
     <p class="${classNames(['nc-itin-what', cancelled && 'nc-itin-what--cancelled'])}">${escapeHtml(appointment.serviceName)}</p>
+    ${renderAppointmentExtras(appointment, cancelled, t)}
     <p class="nc-itin-status">${!cancelled ? escapeHtml(statusLabel) : ''} ${badges}</p>
   `, { extraClass: cancelled ? 'nc-card--muted' : '' });
 }
@@ -1981,6 +2197,12 @@ const ITINERARY_CSS = `
 .nc-itin-when { margin: 0 0 2px; font-size: 12px; opacity: 0.7; }
 .nc-itin-what { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
 .nc-itin-what--cancelled { text-decoration: line-through; opacity: 0.6; }
+.nc-itin-extra { margin: 0 0 4px; font-size: 13px; line-height: 1.35; }
+.nc-itin-extra-label { font-weight: 700; opacity: 0.75; }
+/* La preparación se lee ANTES de venir y es la única de las tres que le pide
+   algo al paciente; por eso es la única con acento en vez de gris. */
+.nc-itin-prep { color: var(--nc-teal-ink); }
+.nc-itin-doctor, .nc-itin-details { opacity: 0.85; }
 .nc-itin-status { margin: 0; font-size: 12px; display: flex; gap: 6px; align-items: center; opacity: 0.8; }
 `;
 
@@ -2013,6 +2235,31 @@ function step(order, es, en, mapHighlightId) {
   return { order, instruction: { es: `[POR CONFIRMAR] ${es}`, en: `[TO CONFIRM] ${en}`, }, mapHighlightId };
 }
 
+// Los pisos de consultorios de la Torre Médica (D80). La lista se repite
+// aquí en vez de importarse de src/data/locations.js porque este archivo es
+// la capa de abajo — locations.js declara que sus id coinciden con los slugs
+// de este catálogo, no al revés — y porque routes.js no importa nada, a
+// propósito. La copia no puede derivar en silencio: test/data/fixtures.test.js
+// exige que los locationId usados por las rutas coincidan EXACTAMENTE con
+// LOCATION_IDS, así que agregar un piso en un archivo y no en el otro rompe
+// la suite de inmediato.
+//
+// Nombres distintos de los de locations.js (allá es CONSULTORIO_FLOORS) a
+// propósito: build.py aplana todos los módulos de un entry a un solo scope
+// top-level y dos declaraciones homónimas serían un error duro de build.
+const PISOS_CONSULTORIO = [10, 11, 16, 22, 27, 28, 29];
+
+function routesPisoConsultorio(n) {
+  return [
+    route(`r_lobby_torre_piso${n}`, 'lobby_torre', `piso${n}`, 3, [
+      step(1, `Desde el lobby, toma el elevador de la Torre Médica al piso ${n}.`, `From the lobby, take the Medical Tower elevator to floor ${n}.`, 'mp_floor27'),
+    ]),
+    route(`r_piso${n}_lobby_torre`, `piso${n}`, 'lobby_torre', 3, [
+      step(1, `Desde el piso ${n}, baja en el elevador de la Torre Médica hasta el lobby.`, `From floor ${n}, take the Medical Tower elevator down to the lobby.`, 'mp_lobby'),
+    ]),
+  ];
+}
+
 const routes = [
   route('r_estacionamiento_lobby_torre', 'estacionamiento', 'lobby_torre', 4, [
     step(1, 'Sal del estacionamiento hacia la entrada principal de la Torre Médica.', 'Exit the parking area toward the Medical Tower main entrance.', 'mp_parking'),
@@ -2026,10 +2273,6 @@ const routes = [
 
   route('r_lobby_torre_compass', 'lobby_torre', 'compass', 3, [
     step(1, 'Desde el lobby, dirígete a Compass en Nivel 1.', 'From the lobby, head to Compass on Level 1.', 'mp_compass'),
-  ]),
-
-  route('r_lobby_torre_piso27', 'lobby_torre', 'piso27', 3, [
-    step(1, 'Desde el lobby, toma el elevador de la Torre Médica al piso 27.', 'From the lobby, take the Medical Tower elevator to floor 27.', 'mp_floor27'),
   ]),
 
   route('r_compass_piso27', 'compass', 'piso27', 5, [
@@ -2062,11 +2305,12 @@ const routes = [
   ]),
 
   // --- Tramos contra el lobby (D41) ---
-  // Los 10 de arriba son los pares mínimos que redactó la fase 02. Estos 7
-  // completan la estrella alrededor de lobby_torre, de forma que TODA
-  // ubicación tenga ruta directa de ida y de vuelta al lobby. Eso es lo que
-  // le permite a resolveRoute() componer cualquiera de los 42 pares
-  // ordenados sin que haya que inventar 32 rutas más a mano.
+  // Arriba están los pares mínimos que redactó la fase 02 (menos los del
+  // piso 27, que se movieron al bloque generado del final). Estos completan
+  // la estrella alrededor de lobby_torre, de forma que TODA ubicación tenga
+  // ruta directa de ida y de vuelta al lobby. Eso es lo que le permite a
+  // resolveRoute() componer cualquier par restante sin que haya que inventar
+  // decenas de rutas más a mano.
   //
   // Faltaba, entre otros, estacionamiento → piso27: el origen por defecto de
   // la primera cita del día (R7) contra el destino más común (consultorios),
@@ -2079,10 +2323,6 @@ const routes = [
 
   route('r_compass_lobby_torre', 'compass', 'lobby_torre', 3, [
     step(1, 'Sal de Compass y regresa al lobby de acceso general.', 'Exit Compass and return to the general-access lobby.', 'mp_lobby'),
-  ]),
-
-  route('r_piso27_lobby_torre', 'piso27', 'lobby_torre', 3, [
-    step(1, 'Desde el piso 27, baja en el elevador de la Torre Médica hasta el lobby.', 'From floor 27, take the Medical Tower elevator down to the lobby.', 'mp_lobby'),
   ]),
 
   route('r_nivel1_lobby_torre', 'nivel1', 'lobby_torre', 4, [
@@ -2100,6 +2340,21 @@ const routes = [
   route('r_lobby_torre_farmacia', 'lobby_torre', 'farmacia', 2, [
     step(1, 'La farmacia está cerca del lobby de acceso general.', 'The pharmacy is near the general-access lobby.', 'mp_pharmacy'),
   ]),
+
+  // --- Pisos de consultorios de la Torre Médica (D80/D81) ---
+  // Los siete pisos, el 27 incluido, salen de UNA sola definición. El 27
+  // estaba escrito a mano aquí arriba y se movió a este bloque a propósito:
+  // con dos redacciones distintas para el mismo recorrido, el texto del 27 y
+  // el de los demás pisos se separan en cuanto alguien toque uno solo, y el
+  // paciente acaba leyendo instrucciones distintas para el mismo elevador.
+  // El resultado para el 27 es idéntico al que había, id y minutos incluidos.
+  //
+  // A cada piso le bastan sus dos tramos contra el lobby: resolveRoute()
+  // compone lo demás (compass → piso10 sale como compass → lobby → piso10,
+  // que además es como se camina de verdad). Escribir a mano los otros pares
+  // habría sido inventar contenido par por par — justo lo que D41 rechazó al
+  // preferir la composición.
+  ...PISOS_CONSULTORIO.flatMap(routesPisoConsultorio),
 ];
 
 // --- src/domain/routing.js ---

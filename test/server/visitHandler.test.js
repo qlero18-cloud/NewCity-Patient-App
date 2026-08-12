@@ -271,3 +271,55 @@ describe('handleVisitRequest — traslados llegan al paciente', () => {
     assert.deepEqual(body.transfers, []);
   });
 });
+
+// Etapa I — los tres campos nuevos de la cita (D82).
+//
+// HONESTIDAD SOBRE ESTA SUITE: nace en verde, no en rojo. `visitHandler`
+// manda `record.appointments` tal cual, así que los campos que la Etapa I le
+// agrega a la cita llegan solos. No sobra por eso: el día que alguien acote
+// la respuesta campo por campo —que es lo que ya se hace con `visit`, de
+// donde se quita el token— esta prueba es la que dice que se le olvidaron
+// tres. Sin ella, la preparación del paciente desaparecería en silencio y se
+// notaría con alguien en ayunas equivocado.
+describe('handleVisitRequest — preparación, médico y sub-estudios llegan al paciente', () => {
+  const CITA_IMPORTADA = {
+    id: 'a_1',
+    visitId: 'v_1',
+    startsAt: '2026-03-10T08:00-07:00',
+    durationMin: 30,
+    serviceName: 'BLOOD WORK',
+    locationId: 'compass',
+    status: 'scheduled',
+    prep: 'FASTING 8-12 HOURS',
+    doctor: 'DR. LUNA',
+    details: 'URINALYSIS · METABOLIC PANEL · LIPID PROFILE',
+  };
+
+  test('los tres campos viajan enteros al teléfono', async () => {
+    const { store, record, token } = await seeded();
+    record.appointments = [CITA_IMPORTADA];
+    await store.saveVisit(record);
+
+    const body = await (await handleVisitRequest(get(token), store, NOW)).json();
+    assert.equal(body.appointments.length, 1);
+    assert.equal(body.appointments[0].prep, 'FASTING 8-12 HOURS', 'el ayuno es el dato más útil del documento');
+    assert.equal(body.appointments[0].doctor, 'DR. LUNA');
+    assert.equal(body.appointments[0].details, 'URINALYSIS · METABOLIC PANEL · LIPID PROFILE');
+  });
+
+  test('una cita vieja, sin los campos nuevos, no rompe nada', async () => {
+    // Los expedientes guardados antes de esta etapa no traen las llaves.
+    // Mismo criterio que `transfers ?? []` de la Etapa G: desplegar no
+    // reescribe ni un registro de Blobs.
+    const { prep, doctor, details, ...vieja } = CITA_IMPORTADA;
+    const { store, record, token } = await seeded();
+    record.appointments = [vieja];
+    await store.saveVisit(record);
+
+    const res = await handleVisitRequest(get(token), store, NOW);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.appointments[0].serviceName, 'BLOOD WORK');
+    assert.equal(body.appointments[0].prep, undefined);
+  });
+});

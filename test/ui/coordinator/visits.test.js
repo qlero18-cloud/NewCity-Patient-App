@@ -157,6 +157,26 @@ describe('renderVisitsScreen — store poblado', () => {
   });
 });
 
+describe('renderVisitsScreen — la importación tiene por dónde entrarse (Etapa I)', () => {
+  test('ofrece "importar itinerario" junto a "nueva visita"', async () => {
+    const { store } = await panelCon(UNA);
+    const html = renderVisitsScreen(ctx(store, 'es'));
+
+    // Sin este botón la pantalla de importar existe en SCREENS pero solo se
+    // alcanza escribiendo #/import en la barra de direcciones, que es lo
+    // mismo que no existir para quien va a usarla.
+    const matches = html.match(/data-nav="import"/g) || [];
+    assert.strictEqual(matches.length, 1, 'debería haber exactamente un control para importar');
+    assert.ok(html.includes(translate('es', 'coordinator.visits.importItinerary')));
+  });
+
+  test('el alta manual sigue estando: importar es otro camino, no el único', async () => {
+    const { store } = await panelCon(UNA);
+    const html = renderVisitsScreen(ctx(store, 'es'));
+    assert.match(html, /data-nav="intake"/);
+  });
+});
+
 describe('renderVisitsScreen — convención data-nav (D28)', () => {
   test('nunca usa data-tab, data-route ni data-target para navegar', async () => {
     const { store } = await panelCon(UNA);

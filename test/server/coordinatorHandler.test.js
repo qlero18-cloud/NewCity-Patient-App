@@ -122,6 +122,7 @@ describe('el guardia de sesión', () => {
     ['PATCH', '/visits/v_1/passes/q_1'],
     ['POST', '/visits/v_1/transfers'],
     ['PATCH', '/visits/v_1/transfers/t_1'],
+    ['POST', '/import'],
   ];
 
   for (const [method, ruta] of RUTAS) {
@@ -704,5 +705,139 @@ describe('traslados', () => {
     const { record } = await res.json();
     assert.equal(record.transfers.length, 1);
     assert.equal(record.visit.id, visitId);
+  });
+});
+
+// ---------------------------------------------------------------------
+// Etapa I — POST /import: un itinerario de Word entero, de una vez (D83).
+// ---------------------------------------------------------------------
+
+describe('POST /import — la importación del itinerario', () => {
+  const CITAS = [
+    { startsAt: '2026-03-10T08:00:00.000-07:00', durationMin: 30, serviceName: 'BLOOD WORK', locationId: 'compass', prep: 'FASTING 8-12 HOURS', details: 'URINALYSIS, TSH' },
+    { startsAt: '2026-03-10T11:00:00.000-07:00', durationMin: 30, serviceName: 'OPHTHALMOLOGY CONSULTATION', locationId: 'piso11', doctor: 'DR. ORTEGA' },
+    { startsAt: '2026-03-10T14:00:00.000-07:00', durationMin: 120, serviceName: 'FULL-BODY MRI', locationId: 'compass' },
+  ];
+
+  const importar = (d, body) => handleCoordinatorRequest(pedir('/import', { method: 'POST', body }), d);
+
+  test('crea la visita y sus citas en una sola llamada y responde 201', async () => {
+    const { deps: d } = deps();
+    const res = await importar(d, { visit: VISITA, appointments: CITAS });
+
+    assert.equal(res.status, 201);
+    const { record } = await res.json();
+    assert.equal(record.visit.patientFirstName, 'Ana');
+    assert.deepEqual(record.appointments.map((a) => a.serviceName), ['BLOOD WORK', 'OPHTHALMOLOGY CONSULTATION', 'FULL-BODY MRI']);
+    assert.equal(record.appointments[0].prep, 'FASTING 8-12 HOURS');
+    assert.equal(record.appointments[1].doctor, 'DR. ORTEGA');
+  });
+
+  test('la respuesta trae el token, que es lo que arma el QR del paciente', async () => {
+    // Sin esto la coordinadora importaría el itinerario y se quedaría sin
+    // manera de entregárselo, que es la mitad del trabajo (Etapa E).
+    const { deps: d } = deps();
+    const { record } = await (await importar(d, { visit: VISITA, appointments: CITAS })).json();
+    assert.ok(record.visit.token, 'el token tiene que salir aquí');
+  });
+
+  test('lo importado queda guardado, no solo devuelto', async () => {
+    const { deps: d, store } = deps();
+    const { record } = await (await importar(d, { visit: VISITA, appointments: CITAS })).json();
+
+    const guardado = await store.getVisit(record.visit.id);
+    assert.equal(guardado.appointments.length, 3);
+  });
+
+  test('las citas quedan firmadas por la sesión, nunca por el cuerpo', async () => {
+    const { deps: d } = deps({ guardia: { cuenta: { username: 'beti.ramirez', name: 'Beatriz' } } });
+    const conMentira = CITAS.map((c) => ({ ...c, createdBy: 'alguien.más' }));
+    const { record } = await (await importar(d, { visit: VISITA, appointments: conMentira })).json();
+
+    for (const a of record.appointments) assert.equal(a.createdBy, 'beti.ramirez');
+  });
+
+  test('una fila mala da 422 diciendo CUÁL fila y por qué', async () => {
+    const { deps: d } = deps();
+    const citas = CITAS.map((c) => ({ ...c }));
+    citas[1].locationId = 'piso13';
+
+    const res = await importar(d, { visit: VISITA, appointments: citas });
+    assert.equal(res.status, 422);
+    const cuerpo = await res.json();
+    assert.equal(cuerpo.error, 'invalid');
+    assert.deepEqual(cuerpo.errors, { appointments: [{ index: 1, errors: { locationId: 'unknown' } }] });
+  });
+
+  test('si una fila falla, la visita NO se crea', async () => {
+    // Lo que de verdad importa de esta ruta. Si la visita quedara creada y
+    // vacía, la coordinadora corregiría la fila, volvería a importar, y
+    // tendría dos expedientes del mismo paciente sin saberlo.
+    const { deps: d, store } = deps();
+    const citas = CITAS.map((c) => ({ ...c }));
+    citas[2].serviceName = '';
+
+    const res = await importar(d, { visit: VISITA, appointments: citas });
+    assert.equal(res.status, 422);
+    assert.deepEqual(await store.listVisits(), [], 'no debe quedar ni la visita vacía');
+  });
+
+  test('una visita mal formada da 422 por campo, sin tocar el almacén', async () => {
+    const { deps: d, store } = deps();
+    const res = await importar(d, { visit: { ...VISITA, patientFirstName: '' }, appointments: CITAS });
+
+    assert.equal(res.status, 422);
+    assert.equal((await res.json()).errors.patientFirstName, 'required');
+    assert.deepEqual(await store.listVisits(), []);
+  });
+
+  test('los errores de la visita y de las filas se reportan JUNTOS', async () => {
+    // Corregir el nombre del paciente, reenviar, y recién entonces enterarse
+    // de que además había una fila mala es el viaje de ida y vuelta que
+    // hace abandonar una importación.
+    const { deps: d } = deps();
+    const citas = CITAS.map((c) => ({ ...c }));
+    citas[0].locationId = 'inventada';
+
+    const res = await importar(d, { visit: { ...VISITA, patientFirstName: '' }, appointments: citas });
+    const { errors } = await res.json();
+
+    assert.equal(errors.patientFirstName, 'required');
+    assert.deepEqual(errors.appointments, [{ index: 0, errors: { locationId: 'unknown' } }]);
+  });
+
+  test('sin citas es 422: importar un documento vacío no es un éxito', async () => {
+    const { deps: d, store } = deps();
+    const res = await importar(d, { visit: VISITA, appointments: [] });
+
+    assert.equal(res.status, 422);
+    assert.equal((await res.json()).errors.appointments, 'required');
+    assert.deepEqual(await store.listVisits(), []);
+  });
+
+  test('un cuerpo sin las dos llaves da 422, no 500', async () => {
+    const { deps: d } = deps();
+    for (const cuerpo of [{}, { visit: VISITA }, { appointments: CITAS }, { visit: null, appointments: null }]) {
+      const res = await importar(d, cuerpo);
+      assert.equal(res.status, 422, `${JSON.stringify(cuerpo)} debería ser 422`);
+    }
+  });
+
+  test('un JSON roto da 400', async () => {
+    const { deps: d } = deps();
+    const res = await handleCoordinatorRequest(
+      new Request(url('/import'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: `nc_session=${SESION}` },
+        body: '{esto no es json',
+      }),
+      d,
+    );
+    assert.equal(res.status, 400);
+  });
+
+  test('GET /import da 405, no 404', async () => {
+    const { deps: d } = deps();
+    assert.equal((await handleCoordinatorRequest(pedir('/import'), d)).status, 405);
   });
 });

@@ -15,6 +15,39 @@ import { escapeHtml, classNames, locationName, transferPointName } from '../util
 import { renderCard } from '../components/card.js';
 import { renderBadge } from '../components/badge.js';
 
+// Etapa I — los tres campos que el itinerario de la coordinadora ya traía y
+// hasta ahora se perdían (D82). Son opcionales de verdad: ninguna cita
+// capturada a mano en las Etapas D–H los tiene, así que cada renglón se pinta
+// solo si hay algo que decir. Una etiqueta encima de un campo vacío es ruido
+// en la pantalla que más se consulta.
+//
+// `hideWhenCancelled` solo lo lleva `prep`, y la asimetría es intencional:
+// `prep` PIDE algo ("ayuna de 8 a 12 horas") y dejarlo visible en una cita
+// que ya no ocurre manda a alguien a ayunar doce horas para nada; `doctor` y
+// `details` DESCRIBEN la cita, que es justo lo que hace falta para reconocer
+// cuál se canceló y pedir que la reagenden.
+//
+// Nombre con prefijo porque build.py (fase 05) aplana todos los módulos de un
+// entry a un solo scope top-level y un nombre genérico chocaría con el
+// primero que se le parezca.
+const ITIN_EXTRA_ROWS = [
+  { field: 'prep', label: 'itinerary.prepLabel', cssClass: 'nc-itin-prep', hideWhenCancelled: true },
+  { field: 'doctor', label: 'itinerary.doctorLabel', cssClass: 'nc-itin-doctor' },
+  { field: 'details', label: 'itinerary.detailsLabel', cssClass: 'nc-itin-details' },
+];
+
+function renderAppointmentExtras(appointment, cancelled, t) {
+  return ITIN_EXTRA_ROWS
+    .filter((row) => !(cancelled && row.hideWhenCancelled))
+    // Se recorta antes de decidir: un campo con espacios es un campo vacío
+    // que el .docx trajo con formato, no contenido.
+    .map((row) => [row, typeof appointment[row.field] === 'string' ? appointment[row.field].trim() : ''])
+    .filter(([, valor]) => valor !== '')
+    .map(([row, valor]) => `<p class="nc-itin-extra ${row.cssClass}">`
+      + `<span class="nc-itin-extra-label">${escapeHtml(t(row.label))}</span> ${escapeHtml(valor)}</p>`)
+    .join('\n');
+}
+
 function renderAppointmentCard(appointment, ctx) {
   const { now, lang, t, lastViewedItineraryAt } = ctx;
   const cancelled = appointment.status === 'cancelled';
@@ -29,6 +62,7 @@ function renderAppointmentCard(appointment, ctx) {
   return renderCard(`
     <p class="nc-itin-when">${escapeHtml(formatTimeTijuana(appointment.startsAt, lang))} · ${escapeHtml(locationName(locations, appointment.locationId, lang))}</p>
     <p class="${classNames(['nc-itin-what', cancelled && 'nc-itin-what--cancelled'])}">${escapeHtml(appointment.serviceName)}</p>
+    ${renderAppointmentExtras(appointment, cancelled, t)}
     <p class="nc-itin-status">${!cancelled ? escapeHtml(statusLabel) : ''} ${badges}</p>
   `, { extraClass: cancelled ? 'nc-card--muted' : '' });
 }
@@ -90,5 +124,11 @@ export const ITINERARY_CSS = `
 .nc-itin-when { margin: 0 0 2px; font-size: 12px; opacity: 0.7; }
 .nc-itin-what { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
 .nc-itin-what--cancelled { text-decoration: line-through; opacity: 0.6; }
+.nc-itin-extra { margin: 0 0 4px; font-size: 13px; line-height: 1.35; }
+.nc-itin-extra-label { font-weight: 700; opacity: 0.75; }
+/* La preparación se lee ANTES de venir y es la única de las tres que le pide
+   algo al paciente; por eso es la única con acento en vez de gris. */
+.nc-itin-prep { color: var(--nc-teal-ink); }
+.nc-itin-doctor, .nc-itin-details { opacity: 0.85; }
 .nc-itin-status { margin: 0; font-size: 12px; display: flex; gap: 6px; align-items: center; opacity: 0.8; }
 `;

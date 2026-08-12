@@ -41,6 +41,20 @@ export const MAX_DRIVER_NAME = 120;
 export const MAX_PLATE = 20;
 export const MAX_TRANSFER_NOTES = 280;
 
+// Etapa I (D82) — los tres campos que el documento de la coordinadora ya
+// trae y que hasta ahora se perdían al capturar. Cada uno con su tope, no
+// uno compartido: la lista de sub-estudios del laboratorio pasa de 200
+// caracteres y MAX_SERVICE_NAME son 120, así que con un solo número o se
+// parte la lista o se afloja el nombre del estudio.
+export const MAX_PREP = 280;
+export const MAX_DOCTOR = 120;
+export const MAX_DETAILS = 600;
+
+// El itinerario real más grande de los cinco medidos trae 19 citas. Como
+// MAX_DURATION_MIN, esto no es una regla clínica: es un cinturón contra un
+// cuerpo que nadie tecleó. 60 deja tres veces de margen.
+export const MAX_IMPORT_APPOINTMENTS = 60;
+
 // Formatos que sabe pintar src/ui/screens/pass.js. Coordinación solo emite
 // 'image' (D29), pero las fixtures traen los otros dos y el registro los
 // admite, así que el validador no los puede prohibir.
@@ -110,6 +124,13 @@ export function validateAppointmentInput(input) {
   if (loc === undefined || loc === null || loc === '') errors.locationId = 'required';
   else if (!LOCATION_IDS.includes(loc)) errors.locationId = 'unknown';
 
+  // Los tres de la Etapa I son OPCIONALES: el formulario de captura a mano
+  // no los manda y tiene que seguir sirviendo igual. Solo se acota el largo,
+  // sobre el texto ya recortado.
+  for (const [campo, tope] of [['prep', MAX_PREP], ['doctor', MAX_DOCTOR], ['details', MAX_DETAILS]]) {
+    if (trimmed(input[campo]).length > tope) errors[campo] = 'tooLong';
+  }
+
   return { ok: Object.keys(errors).length === 0, errors };
 }
 
@@ -117,14 +138,15 @@ function buscarCita(record, appointmentId) {
   return record.appointments.find((a) => a.id === appointmentId) ?? null;
 }
 
-export function addAppointment(record, input, { now, by, newId }) {
-  const { ok, errors } = validateAppointmentInput(input);
-  if (!ok) return { ok: false, errors };
-
-  // Se construye campo por campo en vez de esparcir `input`: un POST puede
-  // traer lo que quiera, y esparcirlo dejaría fijar `status: 'done'`,
-  // `createdBy: 'alguien más'` o un `id` a modo desde afuera.
-  const appointment = {
+// Se construye campo por campo en vez de esparcir `input`: un POST puede
+// traer lo que quiera, y esparcirlo dejaría fijar `status: 'done'`,
+// `createdBy: 'alguien más'` o un `id` a modo desde afuera.
+//
+// Una sola función para la captura a mano y para la importación: si cada
+// camino armara su propia cita, un campo agregado en uno y olvidado en el
+// otro daría expedientes con dos formas distintas según por dónde entraron.
+function nuevaCita(record, input, { now, by, newId }) {
+  return {
     id: newId('a'),
     visitId: record.visit.id,
     startsAt: trimmed(input.startsAt),
@@ -132,14 +154,57 @@ export function addAppointment(record, input, { now, by, newId }) {
     serviceName: trimmed(input.serviceName),
     locationId: input.locationId,
     status: 'scheduled',
+    prep: trimmed(input.prep),
+    doctor: trimmed(input.doctor),
+    details: trimmed(input.details),
     createdAt: now,
     createdBy: by,
     updatedAt: now,
     updatedBy: by,
   };
+}
 
+export function addAppointment(record, input, ctx) {
+  const { ok, errors } = validateAppointmentInput(input);
+  if (!ok) return { ok: false, errors };
+
+  const appointment = nuevaCita(record, input, ctx);
   record.appointments.push(appointment);
   return { ok: true, appointment };
+}
+
+// Etapa I (D83) — importar un itinerario completo en UNA escritura.
+//
+// No es una comodidad: `saveVisit` sobrescribe el expediente entero sin
+// compare-and-set, así que N ciclos leer-modificar-escribir multiplican por N
+// la ventana en la que dos coordinadoras se pisan los cambios.
+//
+// Y es TODO O NADA. Una importación a medias es peor que ninguna, porque la
+// coordinadora no puede distinguirla de una completa: ve citas en el
+// expediente, da por terminado el trabajo, y al paciente le faltan seis.
+// Por eso se valida la lista entera ANTES de tocar el registro.
+export function addAppointments(record, inputs, ctx) {
+  if (!Array.isArray(inputs) || inputs.length === 0) {
+    return { ok: false, errors: { appointments: 'required' } };
+  }
+  if (inputs.length > MAX_IMPORT_APPOINTMENTS) {
+    return { ok: false, errors: { appointments: 'tooLong' } };
+  }
+
+  // Se reportan TODAS las filas malas de una vez y con su índice, para que
+  // la pantalla de revisión pueda señalar cuáles. Devolver solo la primera
+  // obliga a un viaje al servidor por fila, que con 19 citas es como se
+  // abandona una importación a la mitad.
+  const fallas = [];
+  inputs.forEach((input, index) => {
+    const { ok, errors } = validateAppointmentInput(input);
+    if (!ok) fallas.push({ index, errors });
+  });
+  if (fallas.length > 0) return { ok: false, errors: { appointments: fallas } };
+
+  const appointments = inputs.map((input) => nuevaCita(record, input, ctx));
+  record.appointments.push(...appointments);
+  return { ok: true, appointments };
 }
 
 export function moveAppointment(record, appointmentId, startsAt, { now, by }) {
@@ -171,12 +236,26 @@ export function editAppointment(record, appointmentId, input, { now, by }) {
     serviceName: input?.serviceName,
     durationMin: input?.durationMin,
     locationId: input?.locationId,
+    prep: input?.prep,
+    doctor: input?.doctor,
+    details: input?.details,
   });
   if (!ok) return { ok: false, errors };
 
   appointment.serviceName = trimmed(input.serviceName);
   appointment.durationMin = input.durationMin;
   appointment.locationId = input.locationId;
+
+  // Etapa I: AUSENTE es "no lo toques"; PRESENTE, aunque venga vacío, sí
+  // manda. El formulario de edición que ya existe manda tres campos y nada
+  // más — si "ausente" significara "vacío", corregirle el nombre a una cita
+  // importada le borraría el ayuno, y nadie relacionaría una cosa con la
+  // otra. Con esta regla, una preparación equivocada sigue pudiéndose quitar
+  // mandando la cadena vacía a propósito.
+  for (const campo of ['prep', 'doctor', 'details']) {
+    if (input?.[campo] !== undefined) appointment[campo] = trimmed(input[campo]);
+  }
+
   appointment.updatedAt = now;
   appointment.updatedBy = by;
   return { ok: true, appointment };

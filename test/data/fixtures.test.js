@@ -34,8 +34,24 @@ function collectDateLikeStrings(value, out = []) {
 }
 
 describe('locations.js — ubicaciones del complejo', () => {
-  test('existen las 7 ubicaciones que corresponden a los 7 mapPointId de la fase 04', () => {
-    assert.deepStrictEqual([...LOCATION_IDS].sort(), ['compass', 'estacionamiento', 'farmacia', 'lobby_torre', 'nivel1', 'piso27', 'quartz'].sort());
+  // D80 — 13 ubicaciones sobre 7 puntos de mapa. Los itinerarios reales de
+  // las coordinadoras mandan al paciente a los pisos 10, 11, 16, 22, 27, 28 y
+  // 29; antes solo existía el 27, así que los demás se capturaban como "Piso
+  // 27" y el mapa le confirmaba al paciente un piso equivocado.
+  test('existen las 13 ubicaciones del complejo, incluidos los siete pisos de consultorios', () => {
+    assert.deepStrictEqual([...LOCATION_IDS].sort(), [
+      'compass', 'estacionamiento', 'farmacia', 'lobby_torre', 'nivel1', 'quartz',
+      'piso10', 'piso11', 'piso16', 'piso22', 'piso27', 'piso28', 'piso29',
+    ].sort());
+  });
+
+  test('los siete pisos de consultorios comparten mp_floor27 (D80: misma Torre Médica, distinto piso)', () => {
+    const consultorios = locations.filter((l) => l.kind === 'consultorios');
+    assert.strictEqual(consultorios.length, 7, 'deberían ser siete pisos de consultorios');
+    for (const l of consultorios) {
+      assert.strictEqual(l.mapPointId, 'mp_floor27', `${l.id}: los consultorios comparten el punto de la Torre Médica`);
+    }
+    assert.deepStrictEqual(consultorios.map((l) => l.floor), ['10', '11', '16', '22', '27', '28', '29'], 'los pisos deberían quedar en orden ascendente en el catálogo (es el orden del <select> del panel)');
   });
 
   test('todo mapPointId de locations.js existe en la lista fija de la fase 04', () => {
