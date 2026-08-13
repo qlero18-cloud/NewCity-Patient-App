@@ -57,6 +57,16 @@ describe('renderHelpScreen — los dos números van a donde deben (D95)', () => 
 });
 
 describe('renderHelpScreen — el horario por fin se lee (D97)', () => {
+  // El cliente pidió el nombre interno del hospital, no una paráfrasis. Se
+  // fija aquí porque "Case Manager" no se deduce de nada del código: quien
+  // lo vea suelto en i18n.js va a querer "traducirlo" a coordinación, y
+  // ésta es la prueba que le dice que no.
+  test('la tarjeta se llama Case Manager, en los dos idiomas', () => {
+    assert.match(renderHelpScreen(ctx(ABIERTO)), /Case Manager/);
+    assert.match(renderHelpScreen(ctx(ABIERTO, 'en')), /Case Manager/);
+    assert.ok(!renderHelpScreen(ctx(ABIERTO)).includes('coordinación'), 'quedó el nombre viejo en español');
+  });
+
   test('las tres líneas del horario están escritas, no solo el distintivo', () => {
     const html = renderHelpScreen(ctx(ABIERTO));
     assert.ok(html.includes('Lunes a viernes · 8:00 a.m.–6:00 p.m.'), 'falta el horario entre semana');

@@ -824,7 +824,10 @@ const STRINGS = {
       title: 'Ayuda',
       whatsappButton: 'Escribir por WhatsApp',
       callButton: 'Llamar',
-      hoursTitle: 'Horario de atención de coordinación',
+      // "Case Manager" es el nombre interno del hospital y el cliente lo
+      // pidió tal cual, en los dos idiomas: no se traduce ni se parafrasea
+      // a "coordinación" (test/ui/help.test.js lo fija).
+      hoursTitle: 'Horario de atención del Case Manager',
       // Etapa K (D95) — Con dos números distintos, un botón que solo dice
       // "Llamar" deja al paciente sin saber a cuál le marca. Las etiquetas
       // dicen el país porque es lo que decide si la llamada es local o
@@ -1229,7 +1232,7 @@ const STRINGS = {
       title: 'Help',
       whatsappButton: 'Message on WhatsApp',
       callButton: 'Call',
-      hoursTitle: 'Coordination support hours',
+      hoursTitle: 'Case Manager hours',
       contactTitle: 'Contact',
       whatsappLabel: 'WhatsApp (Mexico)',
       voiceLabel: 'Calls & text (US)',
