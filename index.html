@@ -228,10 +228,18 @@ function dayDiffTijuana(iso, referenceIso) {
 // producto.
 function formatTimeTijuana(iso, lang) {
   const { hour, minute } = tijuanaParts(new Date(iso));
+  return reloj12(hour, minute, lang);
+}
+
+// El reloj de 12 horas, aparte de quién le pase la hora: formatTimeTijuana
+// la saca de un instante, formatWeeklyHours de una cadena "HH:MM" de pared.
+// Las dos tienen que decir "1:30 p.m." igual, o la misma pantalla acabaría
+// con dos convenciones (el itinerario en 12 h y el horario en 24 h).
+function reloj12(hour, minute, lang) {
   const isAm = hour < 12;
   const period = lang === 'es' ? (isAm ? 'a.m.' : 'p.m.') : isAm ? 'AM' : 'PM';
   let hour12 = hour % 12;
-  if (hour12 === 0) hour12 = 12;
+  if (hour12 === 0) hour12 = 12; // medianoche y mediodía son las 12, no las 0
   return `${hour12}:${pad2(minute)} ${period}`;
 }
 
@@ -263,6 +271,68 @@ function isOpenNow(hours, now) {
   if (!today) return false;
   const hm = `${pad2(p.hour)}:${pad2(p.minute)}`;
   return hm >= today.open && hm <= today.close;
+}
+
+// La semana se lee de lunes a domingo, aunque `weekly[].day` numere
+// 0 = domingo (la convención de Date#getUTCDay que usa isOpenNow). Con el
+// orden crudo del arreglo, "Domingo · cerrado" saldría hasta arriba y el
+// domingo partiría el bloque de lunes a viernes por la mitad.
+const SEMANA_LUNES_PRIMERO = [1, 2, 3, 4, 5, 6, 0];
+
+function reloj12Pared(hm, lang) {
+  const [h, m] = String(hm).split(':');
+  return reloj12(Number(h), Number(m), lang);
+}
+
+function mayuscula(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// formatWeeklyHours(hours, lang) -> string[]
+//
+// D97 — Hasta la Etapa K la app NUNCA escribía un horario: help.js y
+// hours.js pasaban `lines: []` a la ficha, así que el paciente veía el
+// título y el distintivo "Abierto ahora / Cerrado ahora" pero ningún
+// horario. Con horarios de relleno (los mismos 7 días inventados en todas
+// las ubicaciones) daba lo mismo; con el horario real del hospital, no.
+//
+// Agrupa días consecutivos con el mismo tramo y nombra como CERRADO cada
+// día ausente de `weekly` — porque así es como se representa un día cerrado
+// (D96): se omite del arreglo, no se le pone un rango vacío. Es la misma
+// lectura que hace isOpenNow, que devuelve false para un día que no está.
+//
+// Pura (INV-1): no consulta el reloj ni la zona del proceso. `hours.tz` se
+// ignora a propósito — todo el contenido del proyecto está en Tijuana y
+// escribir la zona junto al horario sería ruido para el paciente.
+function formatWeeklyHours(hours, lang) {
+  if (!hours || !Array.isArray(hours.weekly)) return [];
+  const es = lang === 'es';
+  const nombres = es ? WEEKDAYS_ES : WEEKDAYS_EN;
+
+  const grupos = [];
+  for (const dow of SEMANA_LUNES_PRIMERO) {
+    // El primero que traiga la lista: no hay dato real con dos tramos el
+    // mismo día (comida de por medio) y el PRD no fija cómo se escribiría.
+    const tramo = hours.weekly.find((w) => w && w.day === dow);
+    const texto = tramo ? `${reloj12Pared(tramo.open, lang)}–${reloj12Pared(tramo.close, lang)}` : es ? 'cerrado' : 'closed';
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo && ultimo.texto === texto) ultimo.dias.push(dow);
+    else grupos.push({ dias: [dow], texto });
+  }
+
+  // Un solo grupo son los 7 días iguales: se dice en una línea, no en siete.
+  if (grupos.length === 1) return [`${es ? 'Todos los días' : 'Every day'} · ${grupos[0].texto}`];
+
+  return grupos.map(({ dias, texto }) => {
+    // Solo se capitaliza el primer día: en español los días van en
+    // minúscula, y "Lunes a Viernes" no es ortografía, es calco del inglés.
+    const primero = mayuscula(nombres[dias[0]]);
+    if (dias.length === 1) return `${primero} · ${texto}`;
+    // Dos días son un par, no un rango: "sábado y domingo", no "sábado a
+    // domingo", que suena a que hay algo en medio.
+    const nexo = dias.length === 2 ? (es ? 'y' : 'and') : es ? 'a' : 'to';
+    return `${primero} ${nexo} ${nombres[dias[dias.length - 1]]} · ${texto}`;
+  });
 }
 
 // formatDayLabel(iso, now, lang) -> { es, en }
@@ -1062,6 +1132,25 @@ const STRINGS = {
       whatsappButton: 'Escribir por WhatsApp',
       callButton: 'Llamar',
       hoursTitle: 'Horario de atención de coordinación',
+      // Etapa K (D95) — Con dos números distintos, un botón que solo dice
+      // "Llamar" deja al paciente sin saber a cuál le marca. Las etiquetas
+      // dicen el país porque es lo que decide si la llamada es local o
+      // internacional para él.
+      contactTitle: 'Contacto',
+      whatsappLabel: 'WhatsApp (México)',
+      voiceLabel: 'Llamadas y mensajes (EE.UU.)',
+      emailLabel: 'Correo',
+    },
+    // Etapa K (D98) — Bloque propio y no dentro de help.*: las redes se
+    // muestran hoy en Ayuda, pero son contenido del complejo, no de esa
+    // pantalla.
+    wifi: {
+      title: 'Wi-Fi',
+      network: 'Red',
+      password: 'Contraseña',
+      noPassword: 'Sin contraseña',
+      copyButton: 'Copiar contraseña',
+      copied: 'Copiado',
     },
     pass: {
       title: 'Mi pase',
@@ -1448,6 +1537,18 @@ const STRINGS = {
       whatsappButton: 'Message on WhatsApp',
       callButton: 'Call',
       hoursTitle: 'Coordination support hours',
+      contactTitle: 'Contact',
+      whatsappLabel: 'WhatsApp (Mexico)',
+      voiceLabel: 'Calls & text (US)',
+      emailLabel: 'Email',
+    },
+    wifi: {
+      title: 'Wi-Fi',
+      network: 'Network',
+      password: 'Password',
+      noPassword: 'No password',
+      copyButton: 'Copy password',
+      copied: 'Copied',
     },
     pass: {
       title: 'My pass',
@@ -1715,33 +1816,109 @@ function attachNav(root) {
 }
 
 // --- src/data/support.js ---
-// Canal de soporte (PRD §7 SupportChannel). El único dato real disponible
-// es un número sacado de los flyers del cliente: (619) 324.3116. El PRD
-// §15.5 deja explícito que no se sabe cuál número es WhatsApp y cuál
-// Google Voice — puede incluso ser el mismo número para ambos roles.
+// Canal de soporte (PRD §7 SupportChannel).
 //
-// Se usa ese número real en los dos campos en vez de inventar un segundo
-// número que no existe. `unconfirmed: true` cubre tanto esa ambigüedad de
-// rol como el horario de coordinación, que tampoco está confirmado
-// (PRD §15.4).
+// Hasta la Etapa K aquí no había dato real: los dos campos llevaban el
+// mismo número sacado de los flyers, (619) 324.3116, porque PRD §15.5 no
+// decía cuál rol tenía cada uno, y el horario era relleno inventado
+// (7 días, 07:00–20:00) marcado unconfirmed por PRD §15.4.
+//
+// D95 — El documento de información general del hospital resuelve los dos
+// puntos, y de paso descubre un error que estaba en vivo: el número de
+// Estados Unidos es de LLAMADAS Y TEXTO, y el de WhatsApp es el de México.
+// `whatsappNumber` apuntaba al de Estados Unidos, así que el botón
+// "Escribir por WhatsApp" del paciente llevaba a un número que no contesta
+// WhatsApp.
+//
+// D96 — El horario también sale de ese documento: Case Management abre de
+// lunes a viernes de 8:00 a 18:00 y el sábado hasta la 13:30. El DOMINGO
+// CERRADO se representa OMITIENDO el día del arreglo `weekly`, no con un
+// rango de cero: isOpenNow (src/domain/time.js) ya devuelve false para un
+// día que no está en la lista, y formatWeeklyHours lo escribe como
+// "Domingo · cerrado". Un rango vacío tendría que interpretarse en los dos
+// lugares y no significaría nada más.
+//
+// Con documento que los respalda, se quita `unconfirmed` de los dos
+// niveles: el paciente ya no ve [POR CONFIRMAR] en un dato que sí está
+// confirmado. Los pisos de consultorios NO los cubre el documento y siguen
+// con su horario de relleno y su distintivo (src/data/locations.js).
 
 const supportChannel = {
-  whatsappNumber: '+16193243116',
+  // México — el documento lo rotula "Llamadas y WhatsApp".
+  whatsappNumber: '+526631115360',
+  // Estados Unidos — el documento lo rotula "Calls & text", no WhatsApp.
   voiceNumber: '+16193243116',
+  email: 'info@newcityhospital.com',
   hours: {
     tz: 'America/Tijuana',
-    weekly: [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, open: '07:00', close: '20:00' })),
+    weekly: [
+      ...[1, 2, 3, 4, 5].map((day) => ({ day, open: '08:00', close: '18:00' })),
+      { day: 6, open: '08:00', close: '13:30' },
+      // day 0 (domingo) ausente a propósito: ver D96 arriba.
+    ],
     exceptions: [],
-    unconfirmed: true,
   },
-  unconfirmed: true,
 };
 
+// --- src/data/wifi.js ---
+// Redes de Wi-Fi del complejo, del documento de información general del
+// hospital (D98). Dato nuevo en la Etapa K: hasta aquí no había ninguna
+// mención de wifi en todo src/.
+//
+// Archivo propio y no dentro de src/data/locations.js porque una red no es
+// una ubicación a la que se pueda caminar: no tiene piso al que subir ni
+// punto en el mapa, y "FREE WIFI NewCity Plaza" cubre la plaza entera, que
+// ni siquiera es una de las 13 ubicaciones. Misma forma que plaza.js:
+// contenido real, plano, sin lógica.
+//
+// La contraseña se guarda tal cual, en claro. Es la contraseña de invitados
+// que el hospital reparte impresa a quien entra — no es un secreto, y
+// tratarla como tal (variable de entorno, backend) solo la volvería
+// imposible de mostrar en la pantalla que existe justamente para eso.
+//
+// `password: ''` en la red de la plaza significa ABIERTA, no "no sabemos":
+// se distingue a propósito de undefined para que la pantalla pueda decir
+// "sin contraseña" en vez de dejar el renglón en blanco.
+
+const wifiNetworks = [
+  {
+    id: 'piso27',
+    where: { es: 'Torre Médica · Consultorios', en: 'Medical Tower · Consultation Offices' },
+    ssid: 'Invitados NCH',
+    password: 'bienvenidos',
+  },
+  {
+    id: 'compass',
+    where: { es: 'Compass · Laboratorio e imagenología', en: 'Compass · Lab & Imaging' },
+    ssid: 'Invitados Compass',
+    password: 'bienvenidos',
+  },
+  {
+    id: 'plaza',
+    where: { es: 'Plaza NewCity', en: 'NewCity Plaza' },
+    ssid: 'FREE WIFI NewCity Plaza',
+    password: '',
+  },
+];
+
 // --- src/ui/screens/help.js ---
-// Ayuda — WhatsApp, llamada y horario de atención de coordinación (fase 05).
+// Ayuda — contacto, horario de coordinación y Wi-Fi (fase 05, ampliada en
+// la Etapa K con el documento de información general del hospital).
+//
 // wa.me exige solo dígitos (sin "+"); tel: sí conserva el "+" (E.164
-// estándar) — por eso hay dos formatos derivados del mismo número, no dos
-// números distintos.
+// estándar) — por eso hay dos formatos derivados del mismo número.
+//
+// D95 — Hasta la Etapa K los dos botones apuntaban al MISMO número, el de
+// Estados Unidos, porque el PRD §15.5 no decía cuál rol tenía cada uno. El
+// documento del hospital lo resuelve: WhatsApp es el de México y el de
+// Estados Unidos es de llamadas y texto. Ahora la pantalla además ESCRIBE
+// cuál es cuál: con dos números distintos, un botón que solo dice "Llamar"
+// deja al paciente sin saber a cuál le está marcando.
+//
+// D97 — La ficha del horario pasaba `lines: []`: salía el título y el
+// distintivo "Abierto ahora", pero ningún horario. Ahora lo escribe
+// formatWeeklyHours.
+
 
 
 
@@ -1753,8 +1930,54 @@ function digitsOnly(e164) {
   return e164.replace(/[^\d]/g, '');
 }
 
+// E.164 a algo que un paciente pueda leer o dictar por teléfono:
+// "+526631115360" -> "+52 663 111 5360".
+//
+// Los últimos 10 dígitos son el número nacional y lo de antes es la lada
+// del país — cierto para México y para Estados Unidos, que son los dos
+// únicos países en juego aquí. No se intenta un formateador universal: sin
+// la tabla de longitudes por país sería adivinar, y con ella sería una
+// dependencia entera para dos números.
+function telVisible(e164) {
+  const d = digitsOnly(e164);
+  if (d.length < 10) return e164; // no es un número que sepamos partir: se muestra tal cual
+  const lada = d.slice(0, d.length - 10);
+  const n = d.slice(-10);
+  return `+${lada} ${n.slice(0, 3)} ${n.slice(3, 6)} ${n.slice(6)}`;
+}
+
+function renglonContacto(etiqueta, texto, href) {
+  return `
+    <p class="nc-help-row">
+      <span class="nc-help-label">${escapeHtml(etiqueta)}</span>
+      <a class="nc-help-value" href="${escapeHtml(href)}">${escapeHtml(texto)}</a>
+    </p>
+  `;
+}
+
+function tarjetaWifi(red, lang, t) {
+  const tieneClave = red.password !== '';
+  return `
+    <div class="nc-wifi">
+      <p class="nc-wifi-where">${escapeHtml(red.where[lang] ?? red.where.en)}</p>
+      <p class="nc-help-row">
+        <span class="nc-help-label">${escapeHtml(t('wifi.network'))}</span>
+        <span class="nc-help-value nc-wifi-ssid">${escapeHtml(red.ssid)}</span>
+      </p>
+      <p class="nc-help-row">
+        <span class="nc-help-label">${escapeHtml(t('wifi.password'))}</span>
+        <span class="nc-help-value">${escapeHtml(tieneClave ? red.password : t('wifi.noPassword'))}</span>
+      </p>
+      ${tieneClave ? `
+        <button type="button" class="nc-button" data-role="copy-wifi" data-password="${escapeHtml(red.password)}" data-wifi-id="${escapeHtml(red.id)}">${escapeHtml(t('wifi.copyButton'))}</button>
+        <p class="nc-copy-feedback" data-role="copy-feedback" data-wifi-id="${escapeHtml(red.id)}" hidden>${escapeHtml(t('wifi.copied'))}</p>
+      ` : ''}
+    </div>
+  `;
+}
+
 function renderHelpScreen(ctx) {
-  const { now, t } = ctx;
+  const { now, lang, t } = ctx;
   const waHref = `https://wa.me/${digitsOnly(supportChannel.whatsappNumber)}`;
   const telHref = `tel:${supportChannel.voiceNumber}`;
   const open = isOpenNow(supportChannel.hours, now);
@@ -1767,19 +1990,58 @@ function renderHelpScreen(ctx) {
         <a class="nc-button nc-button--primary nc-button--block" href="${escapeHtml(waHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t('help.whatsappButton'))}</a>
         <a class="nc-button nc-button--block" href="${escapeHtml(telHref)}">${escapeHtml(t('help.callButton'))}</a>
       `, { variant: 'accent' })}
+      ${renderCard(`
+        <h2 class="nc-help-title">${escapeHtml(t('help.contactTitle'))}</h2>
+        ${renglonContacto(t('help.whatsappLabel'), telVisible(supportChannel.whatsappNumber), waHref)}
+        ${renglonContacto(t('help.voiceLabel'), telVisible(supportChannel.voiceNumber), telHref)}
+        ${renglonContacto(t('help.emailLabel'), supportChannel.email, `mailto:${supportChannel.email}`)}
+      `)}
       ${renderFicha({
         title: t('help.hoursTitle'),
-        lines: [],
+        lines: formatWeeklyHours(supportChannel.hours, lang),
         unconfirmed: supportChannel.hours?.unconfirmed === true,
         t,
         extra: statusBadge,
       })}
+      ${renderCard(`
+        <h2 class="nc-help-title">${escapeHtml(t('wifi.title'))}</h2>
+        ${wifiNetworks.map((red) => tarjetaWifi(red, lang, t)).join('\n')}
+      `)}
     </section>
   `;
 }
 
+// Copiar la contraseña del Wi-Fi. Mismo patrón que transfer.js: un botón
+// por red, así que la confirmación se busca por data-wifi-id — con un
+// querySelector suelto se encendería siempre la de la primera red.
+function attachHelpScreen(rootEl) {
+  rootEl.querySelectorAll('[data-role="copy-wifi"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.password);
+      } catch {
+        // La Clipboard API puede exigir permiso o gesto del usuario según
+        // el navegador. Si falla, no se rompe la pantalla.
+        return;
+      }
+      const feedback = rootEl.querySelector(`[data-role="copy-feedback"][data-wifi-id="${btn.dataset.wifiId}"]`);
+      if (!feedback) return;
+      feedback.hidden = false;
+      setTimeout(() => { feedback.hidden = true; }, 2000);
+    });
+  });
+}
+
 const HELP_CSS = `
 .nc-button--block { display: block; width: 100%; text-align: center; text-decoration: none; box-sizing: border-box; margin-bottom: 8px; }
+.nc-help-title { margin: 0 0 10px; font-size: 17px; font-weight: 700; }
+.nc-help-row { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; margin: 0 0 8px; font-size: 15px; }
+.nc-help-label { flex: 0 0 auto; opacity: 0.7; font-size: 13px; }
+.nc-help-value { font-weight: 600; word-break: break-word; }
+.nc-wifi { padding: 10px 0; border-top: 1px solid var(--nc-card-border); }
+.nc-wifi:first-of-type { padding-top: 0; border-top: 0; }
+.nc-wifi-where { margin: 0 0 8px; font-size: 15px; font-weight: 700; }
+.nc-wifi-ssid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 `;
 
 // --- src/data/locations.js ---
@@ -1800,12 +2062,17 @@ const HELP_CSS = `
 // coincidir EXACTAMENTE con LOCATION_IDS, así que agregar una ubicación sin
 // darle rutas rompe la suite.
 //
-// El PRD §15 no trae ningún horario confirmado por el cliente para NINGÚN
-// punto del complejo — el ítem 4 lo dice explícito para Compass/Piso
-// 27/coordinación, pero tampoco hay dato real para el resto. Por eso
-// `hours` va unconfirmed: true en las 7, con un horario placeholder
-// razonable (07:00–20:00 todos los días) que la UI debe mostrar con el
-// distintivo [POR CONFIRMAR], nunca como si fuera un dato real.
+// El PRD §15 no traía ningún horario confirmado por el cliente para NINGÚN
+// punto del complejo — el ítem 4 lo decía explícito para Compass/Piso
+// 27/coordinación, pero tampoco había dato real para el resto. Por eso
+// `hours` va unconfirmed: true con un horario placeholder razonable
+// (07:00–20:00 todos los días) que la UI muestra con el distintivo
+// [POR CONFIRMAR], nunca como si fuera un dato real.
+//
+// D96 (Etapa K) — La ÚNICA excepción es Compass: el documento de
+// información general del hospital sí trae su horario, así que lleva el
+// real y sin distintivo. Todo lo demás sigue igual de sin confirmar que
+// antes; solo cambia lo que el documento respalda.
 //
 // NOTA — hueco entre fases: phase-03-fixtures.md menciona "tienda de
 // conveniencia" como contenido confirmado, pero phase-04-map-svg.md fija
@@ -1869,7 +2136,18 @@ function locConsultorio(n) {
 const locations = [
   loc('estacionamiento', 'Estacionamiento', 'Parking', 'parking', 'P', 'mp_parking'),
   loc('lobby_torre', 'Lobby Torre Médica · Acceso general', 'Medical Tower Lobby · General Access', 'lobby', 'PB', 'mp_lobby'),
-  loc('compass', 'Compass · Laboratorio e imagenología', 'Compass · Lab & Imaging', 'lab_imaging', 'N1', 'mp_compass'),
+  // D96 — La única ubicación con horario real: el documento de información
+  // general del hospital dice lunes a sábado de 6:00 a 20:00. El domingo
+  // cerrado se representa OMITIENDO el día, igual que en support.js.
+  // `options` se esparce después de `hours` en loc() (:52-54), así que esto
+  // reemplaza el horario de relleno sin tocar la fábrica.
+  loc('compass', 'Compass · Laboratorio e imagenología', 'Compass · Lab & Imaging', 'lab_imaging', 'N1', 'mp_compass', {
+    hours: {
+      tz: 'America/Tijuana',
+      weekly: [1, 2, 3, 4, 5, 6].map((day) => ({ day, open: '06:00', close: '20:00' })),
+      exceptions: [],
+    },
+  }),
   ...CONSULTORIO_FLOORS.map(locConsultorio),
   loc('quartz', 'Quartz Hotel & Spa', 'Quartz Hotel & Spa', 'hotel', 'N1', 'mp_quartz'),
   loc('nivel1', "Nivel 1 · Gastronomía (Farmer's Table, The Park Restaurante)", 'Level 1 · Dining (Farmer\'s Table, The Park Restaurante)', 'dining', 'N1', 'mp_level1'),
@@ -2041,11 +2319,14 @@ function statusBadge(open, t) {
   return open ? renderBadge(t('hours.openNow'), 'updated') : renderBadge(t('hours.closedNow'), 'cancelled');
 }
 
-function entryHtml(name, hours, now, t) {
+// D97 — `lines` iba vacío: la pantalla se llamaba "Horarios" y no escribía
+// ni un horario. El distintivo dice si abre AHORA, que no es lo mismo que
+// a qué hora abre mañana — y es justo lo que un paciente viene a ver aquí.
+function entryHtml(name, hours, now, lang, t) {
   const open = isOpenNow(hours, now);
   return renderFicha({
     title: name,
-    lines: [],
+    lines: formatWeeklyHours(hours, lang),
     unconfirmed: hours?.unconfirmed === true,
     t,
     extra: statusBadge(open, t),
@@ -2058,9 +2339,9 @@ function renderHoursScreen(ctx) {
   const piso27 = getLocationById(locations, 'piso27');
 
   const entries = [
-    entryHtml(compass.name[lang], compass.hours, now, t),
-    entryHtml(piso27.name[lang], piso27.hours, now, t),
-    entryHtml(t('help.hoursTitle'), supportChannel.hours, now, t),
+    entryHtml(compass.name[lang], compass.hours, now, lang, t),
+    entryHtml(piso27.name[lang], piso27.hours, now, lang, t),
+    entryHtml(t('help.hoursTitle'), supportChannel.hours, now, lang, t),
   ].join('\n');
 
   return `
@@ -2516,6 +2797,7 @@ function resolveRoute(fromLocationId, toLocationId, routes) {
 
 
 
+
 const MAP_POINT_IDS = ['mp_parking', 'mp_lobby', 'mp_compass', 'mp_floor27', 'mp_quartz', 'mp_level1', 'mp_pharmacy'];
 
 const MAP_VIEWBOX = '0 0 700 676';
@@ -2730,13 +3012,22 @@ function renderFichaHtml(mapPointId, lang = 'es') {
   const fichaBadge = meta.unconfirmed ? ` <span class="nc-ficha-badge">[${confirmar}]</span>` : '';
   const horarioLabel = lang === 'en' ? 'Hours' : 'Horario';
   const directionsLabel = lang === 'en' ? 'Get directions' : 'Cómo llegar';
-  const weekly = meta.hours?.weekly?.[0];
-  const horarioText = weekly ? `${weekly.open}–${weekly.close}` : '—';
+  // D97 — Antes esto era `hours.weekly[0]`: UN solo rango, el del primer día
+  // de la lista, escrito en 24 horas. Salía bien de casualidad, porque los
+  // siete días del relleno eran idénticos. Compass abre de lunes a sábado y
+  // cierra el domingo, así que ese primer rango pasó a mentir por omisión.
+  // Un renglón por tramo, con el mismo formateador que Ayuda y Horarios.
+  const horarioLineas = formatWeeklyHours(meta.hours, lang).map(escapeXml);
+  if (horarioLineas.length === 0) horarioLineas.push('—');
+  // Un solo <p> con <br>, no un <p> por renglón: la ficha del mapa se inyecta
+  // con innerHTML en las dos pantallas que la usan, y así el margen que ya
+  // tiene .nc-ficha-hours sigue sirviendo sin CSS nuevo.
+  const horarioHtml = [`${escapeXml(horarioLabel)}:${horarioBadge}`, ...horarioLineas].join('<br>');
   return `
     <div class="nc-ficha" data-ficha-for="${escapeXml(mapPointId)}">
       <h3 class="nc-ficha-title">${escapeXml(meta.name)}${fichaBadge}</h3>
       <p class="nc-ficha-blurb">${escapeXml(meta.blurb)}</p>
-      <p class="nc-ficha-hours">${escapeXml(horarioLabel)}: ${escapeXml(horarioText)}${horarioBadge}</p>
+      <p class="nc-ficha-hours">${horarioHtml}</p>
       <button type="button" class="nc-ficha-directions" data-directions-for="${escapeXml(mapPointId)}">${escapeXml(directionsLabel)}</button>
     </div>`;
 }
@@ -4949,7 +5240,7 @@ const SCREENS = {
   // Etapa G — sin pestaña, como stay y hours: la barra de 5 la fija el PRD
   // §8. Se llega desde la tarjeta de Inicio o desde el itinerario.
   transfer: { render: renderTransferScreen, attach: attachTransferScreen, tab: null },
-  help: { render: renderHelpScreen, tab: 'help' },
+  help: { render: renderHelpScreen, attach: attachHelpScreen, tab: 'help' },
   pass: { render: renderPassScreen, attach: attachPassScreen, tab: null },
 };
 

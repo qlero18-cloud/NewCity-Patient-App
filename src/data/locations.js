@@ -15,12 +15,17 @@
 // coincidir EXACTAMENTE con LOCATION_IDS, así que agregar una ubicación sin
 // darle rutas rompe la suite.
 //
-// El PRD §15 no trae ningún horario confirmado por el cliente para NINGÚN
-// punto del complejo — el ítem 4 lo dice explícito para Compass/Piso
-// 27/coordinación, pero tampoco hay dato real para el resto. Por eso
-// `hours` va unconfirmed: true en las 7, con un horario placeholder
-// razonable (07:00–20:00 todos los días) que la UI debe mostrar con el
-// distintivo [POR CONFIRMAR], nunca como si fuera un dato real.
+// El PRD §15 no traía ningún horario confirmado por el cliente para NINGÚN
+// punto del complejo — el ítem 4 lo decía explícito para Compass/Piso
+// 27/coordinación, pero tampoco había dato real para el resto. Por eso
+// `hours` va unconfirmed: true con un horario placeholder razonable
+// (07:00–20:00 todos los días) que la UI muestra con el distintivo
+// [POR CONFIRMAR], nunca como si fuera un dato real.
+//
+// D96 (Etapa K) — La ÚNICA excepción es Compass: el documento de
+// información general del hospital sí trae su horario, así que lleva el
+// real y sin distintivo. Todo lo demás sigue igual de sin confirmar que
+// antes; solo cambia lo que el documento respalda.
 //
 // NOTA — hueco entre fases: phase-03-fixtures.md menciona "tienda de
 // conveniencia" como contenido confirmado, pero phase-04-map-svg.md fija
@@ -84,7 +89,18 @@ function locConsultorio(n) {
 export const locations = [
   loc('estacionamiento', 'Estacionamiento', 'Parking', 'parking', 'P', 'mp_parking'),
   loc('lobby_torre', 'Lobby Torre Médica · Acceso general', 'Medical Tower Lobby · General Access', 'lobby', 'PB', 'mp_lobby'),
-  loc('compass', 'Compass · Laboratorio e imagenología', 'Compass · Lab & Imaging', 'lab_imaging', 'N1', 'mp_compass'),
+  // D96 — La única ubicación con horario real: el documento de información
+  // general del hospital dice lunes a sábado de 6:00 a 20:00. El domingo
+  // cerrado se representa OMITIENDO el día, igual que en support.js.
+  // `options` se esparce después de `hours` en loc() (:52-54), así que esto
+  // reemplaza el horario de relleno sin tocar la fábrica.
+  loc('compass', 'Compass · Laboratorio e imagenología', 'Compass · Lab & Imaging', 'lab_imaging', 'N1', 'mp_compass', {
+    hours: {
+      tz: 'America/Tijuana',
+      weekly: [1, 2, 3, 4, 5, 6].map((day) => ({ day, open: '06:00', close: '20:00' })),
+      exceptions: [],
+    },
+  }),
   ...CONSULTORIO_FLOORS.map(locConsultorio),
   loc('quartz', 'Quartz Hotel & Spa', 'Quartz Hotel & Spa', 'hotel', 'N1', 'mp_quartz'),
   loc('nivel1', "Nivel 1 · Gastronomía (Farmer's Table, The Park Restaurante)", 'Level 1 · Dining (Farmer\'s Table, The Park Restaurante)', 'dining', 'N1', 'mp_level1'),

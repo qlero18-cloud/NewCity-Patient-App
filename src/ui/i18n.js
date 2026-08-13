@@ -159,6 +159,25 @@ export const STRINGS = {
       whatsappButton: 'Escribir por WhatsApp',
       callButton: 'Llamar',
       hoursTitle: 'Horario de atención de coordinación',
+      // Etapa K (D95) — Con dos números distintos, un botón que solo dice
+      // "Llamar" deja al paciente sin saber a cuál le marca. Las etiquetas
+      // dicen el país porque es lo que decide si la llamada es local o
+      // internacional para él.
+      contactTitle: 'Contacto',
+      whatsappLabel: 'WhatsApp (México)',
+      voiceLabel: 'Llamadas y mensajes (EE.UU.)',
+      emailLabel: 'Correo',
+    },
+    // Etapa K (D98) — Bloque propio y no dentro de help.*: las redes se
+    // muestran hoy en Ayuda, pero son contenido del complejo, no de esa
+    // pantalla.
+    wifi: {
+      title: 'Wi-Fi',
+      network: 'Red',
+      password: 'Contraseña',
+      noPassword: 'Sin contraseña',
+      copyButton: 'Copiar contraseña',
+      copied: 'Copiado',
     },
     pass: {
       title: 'Mi pase',
@@ -545,6 +564,18 @@ export const STRINGS = {
       whatsappButton: 'Message on WhatsApp',
       callButton: 'Call',
       hoursTitle: 'Coordination support hours',
+      contactTitle: 'Contact',
+      whatsappLabel: 'WhatsApp (Mexico)',
+      voiceLabel: 'Calls & text (US)',
+      emailLabel: 'Email',
+    },
+    wifi: {
+      title: 'Wi-Fi',
+      network: 'Network',
+      password: 'Password',
+      noPassword: 'No password',
+      copyButton: 'Copy password',
+      copied: 'Copied',
     },
     pass: {
       title: 'My pass',

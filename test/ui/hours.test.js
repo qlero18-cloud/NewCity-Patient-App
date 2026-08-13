@@ -14,6 +14,15 @@
 //
 // Sin DOM falso, como en plaza.test.js: aserciones sobre el HTML que
 // devuelve el render.
+//
+// ETAPA K — Este archivo se rehízo casi entero. Antes las tres entradas
+// traían el MISMO horario de relleno (07:00–20:00 los 7 días), así que
+// bastaba contar tres distintivos iguales; el propio encabezado avisaba
+// que "si algún día hay horario real, este archivo falla y hay que
+// releerlo". Eso pasó: Compass y coordinación tienen horario del
+// documento del hospital, cada uno distinto, y el Piso 27 sigue con el
+// relleno. Ahora las horas de prueba se eligen sabiendo cuál entrada
+// contesta qué.
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,10 +38,13 @@ const ctx = (now, lang = 'es') => ({ now, lang, t: (path) => translate(lang, pat
 // escapar metacaracteres para contar apariciones literales.
 const cuenta = (html, texto) => html.split(texto).length - 1;
 
-// Las 7 ubicaciones y el canal de soporte traen el mismo horario
-// placeholder 07:00–20:00 los 7 días (locations.js, support.js). Estas
-// horas se eligen contra ese dato; si algún día hay horario real, este
-// archivo falla y hay que releerlo, que es justo lo que debe pasar.
+// Los tres horarios de la pantalla, después de la Etapa K:
+//   Compass          L–S 06:00–20:00   (documento del hospital, D96)
+//   Piso 27          todos 07:00–20:00 (relleno, sigue sin confirmar)
+//   Coordinación     L–V 08:00–18:00, Sáb hasta 13:30, domingo cerrado
+//
+// La única franja donde los tres coinciden es de lunes a viernes entre las
+// 08:00 y las 18:00. Estas dos horas se eligen por eso.
 const ABIERTO = '2026-08-07T10:00:00-07:00'; // viernes, 10:00 en Tijuana (PDT)
 const CERRADO = '2026-08-07T23:30:00-07:00'; // el mismo viernes, ya cerrado
 
@@ -53,19 +65,44 @@ describe('renderHoursScreen — las tres entradas', () => {
     assert.ok(!html.includes('Consultorios'), 'se coló el nombre en español');
   });
 
-  test('las tres traen [POR CONFIRMAR]: ningún horario del proyecto está confirmado todavía', () => {
+  // D96 — El distintivo sale de los datos, no de la pantalla.
+  test('solo el Piso 27 trae [POR CONFIRMAR]: los otros dos ya tienen horario del hospital', () => {
     const html = renderHoursScreen(ctx(ABIERTO));
-    assert.strictEqual(cuenta(html, translate('es', 'common.unconfirmedBadge')), 3);
-    // El distintivo sale de los datos, no de la pantalla: si mañana se
-    // confirma un horario, el que tiene que cambiar es locations.js.
-    assert.strictEqual(getLocationById(locations, 'compass').hours.unconfirmed, true);
+    assert.strictEqual(cuenta(html, translate('es', 'common.unconfirmedBadge')), 1);
+    assert.strictEqual(getLocationById(locations, 'compass').hours.unconfirmed, undefined);
     assert.strictEqual(getLocationById(locations, 'piso27').hours.unconfirmed, true);
-    assert.strictEqual(supportChannel.hours.unconfirmed, true);
+    assert.strictEqual(supportChannel.hours.unconfirmed, undefined);
+  });
+});
+
+// D97 — Lo que motiva media Etapa K: hasta aquí esta pantalla se llamaba
+// "Horarios" y no escribía ni un horario. Solo tenía el distintivo
+// "Abierto ahora / Cerrado ahora", que dice si abre AHORA pero no a qué
+// hora abre mañana.
+describe('el horario escrito, no solo el distintivo', () => {
+  test('cada entrada escribe su propio horario, y son tres horarios distintos', () => {
+    const html = renderHoursScreen(ctx(ABIERTO));
+    assert.ok(html.includes('Lunes a sábado · 6:00 a.m.–8:00 p.m.'), 'falta el horario de Compass');
+    assert.ok(html.includes('Todos los días · 7:00 a.m.–8:00 p.m.'), 'falta el horario de relleno del Piso 27');
+    assert.ok(html.includes('Lunes a viernes · 8:00 a.m.–6:00 p.m.'), 'falta el horario de coordinación');
+    assert.ok(html.includes('Sábado · 8:00 a.m.–1:30 p.m.'), 'falta el sábado corto de coordinación');
+  });
+
+  test('el domingo cerrado se dice con todas sus letras, dos veces (Compass y coordinación)', () => {
+    assert.strictEqual(cuenta(renderHoursScreen(ctx(ABIERTO)), 'Domingo · cerrado'), 2);
+  });
+
+  test('en inglés', () => {
+    const html = renderHoursScreen(ctx(ABIERTO, 'en'));
+    assert.ok(html.includes('Monday to Saturday · 6:00 AM–8:00 PM'));
+    assert.ok(html.includes('Every day · 7:00 AM–8:00 PM'));
+    assert.ok(html.includes('Monday to Friday · 8:00 AM–6:00 PM'));
+    assert.strictEqual(cuenta(html, 'Sunday · closed'), 2);
   });
 });
 
 describe('el estado abierto/cerrado sale de `now`, no del reloj', () => {
-  test('a las 10:00 las tres dicen "Abierto ahora"', () => {
+  test('un viernes a las 10:00 las tres dicen "Abierto ahora"', () => {
     const html = renderHoursScreen(ctx(ABIERTO));
     assert.strictEqual(cuenta(html, translate('es', 'hours.openNow')), 3);
     assert.strictEqual(cuenta(html, translate('es', 'hours.closedNow')), 0);
@@ -77,39 +114,61 @@ describe('el estado abierto/cerrado sale de `now`, no del reloj', () => {
     assert.strictEqual(cuenta(html, translate('es', 'hours.openNow')), 0);
   });
 
-  test('los bordes del horario: 07:00 y 20:00 cuentan como abierto, un minuto afuera no', () => {
+  // Con tres horarios distintos, las horas de apertura escalonadas son la
+  // prueba de que cada ficha consulta SU horario y no el de la primera.
+  test('las tres no abren a la misma hora, y la pantalla lo refleja', () => {
     const casos = [
-      ['2026-08-07T06:59:00-07:00', false],
-      ['2026-08-07T07:00:00-07:00', true],
-      ['2026-08-07T20:00:00-07:00', true],
-      ['2026-08-07T20:01:00-07:00', false],
+      ['2026-08-07T05:59:00-07:00', 0], // nadie abrió
+      ['2026-08-07T06:00:00-07:00', 1], // abre Compass
+      ['2026-08-07T07:00:00-07:00', 2], // abre el Piso 27
+      ['2026-08-07T08:00:00-07:00', 3], // abre coordinación
+      ['2026-08-07T18:00:00-07:00', 3], // coordinación todavía alcanza su último minuto
+      ['2026-08-07T18:01:00-07:00', 2], // cierra coordinación
+      ['2026-08-07T20:00:00-07:00', 2], // Compass y Piso 27 alcanzan el suyo
+      ['2026-08-07T20:01:00-07:00', 0], // cierra todo
     ];
-    for (const [now, abierto] of casos) {
+    for (const [now, abiertas] of casos) {
       const html = renderHoursScreen(ctx(now));
-      const clave = abierto ? 'hours.openNow' : 'hours.closedNow';
-      assert.strictEqual(cuenta(html, translate('es', clave)), 3, `${now} debería dar ${abierto ? 'abierto' : 'cerrado'}`);
+      assert.strictEqual(cuenta(html, translate('es', 'hours.openNow')), abiertas, `${now}: deberían estar abiertas ${abiertas}`);
+      assert.strictEqual(cuenta(html, translate('es', 'hours.closedNow')), 3 - abiertas, `${now}: deberían estar cerradas ${3 - abiertas}`);
     }
+  });
+
+  test('el domingo solo abre el Piso 27, que es el que sigue con horario de relleno', () => {
+    // Domingo 9 de agosto de 2026, mediodía. Compass y coordinación no
+    // tienen el día 0 en su `weekly`: isOpenNow devuelve false sin que
+    // nadie tenga que escribir un rango vacío (D96).
+    const html = renderHoursScreen(ctx('2026-08-09T12:00:00-07:00'));
+    assert.strictEqual(cuenta(html, translate('es', 'hours.openNow')), 1);
+    assert.strictEqual(cuenta(html, translate('es', 'hours.closedNow')), 2);
+  });
+
+  test('el sábado por la tarde coordinación ya cerró y Compass no', () => {
+    // Sábado 8 de agosto, 14:00: coordinación cierra a la 13:30.
+    const html = renderHoursScreen(ctx('2026-08-08T14:00:00-07:00'));
+    assert.strictEqual(cuenta(html, translate('es', 'hours.openNow')), 2);
+    assert.strictEqual(cuenta(html, translate('es', 'hours.closedNow')), 1);
   });
 
   test('la hora es la de Tijuana, no la de la máquina que corre esto', () => {
     // El mismo instante escrito en UTC. En agosto Tijuana va en -07:00, así
-    // que 13:00Z son las 06:00 de allá (cerrado) y 14:00Z las 07:00
-    // (abierto). Una implementación que leyera la zona local del proceso
-    // contestaría al revés en un servidor en UTC — y en CI casi siempre lo
-    // es. Esta prueba es la que separa "pasa en mi máquina" de "es correcto".
-    const seisDeLaManana = renderHoursScreen(ctx('2026-08-07T13:00:00Z'));
-    const sieteDeLaManana = renderHoursScreen(ctx('2026-08-07T14:00:00Z'));
-    assert.strictEqual(cuenta(seisDeLaManana, translate('es', 'hours.closedNow')), 3, '13:00Z son las 06:00 en Tijuana: cerrado');
-    assert.strictEqual(cuenta(sieteDeLaManana, translate('es', 'hours.openNow')), 3, '14:00Z son las 07:00 en Tijuana: abierto');
+    // que 12:00Z son las 05:00 de allá (las tres cerradas) y 16:00Z las
+    // 09:00 (las tres abiertas). Una implementación que leyera la zona
+    // local del proceso contestaría al revés en un servidor en UTC — y en
+    // CI casi siempre lo es. Esta prueba es la que separa "pasa en mi
+    // máquina" de "es correcto".
+    const cincoDeLaManana = renderHoursScreen(ctx('2026-08-07T12:00:00Z'));
+    const nueveDeLaManana = renderHoursScreen(ctx('2026-08-07T16:00:00Z'));
+    assert.strictEqual(cuenta(cincoDeLaManana, translate('es', 'hours.closedNow')), 3, '12:00Z son las 05:00 en Tijuana: cerrado');
+    assert.strictEqual(cuenta(nueveDeLaManana, translate('es', 'hours.openNow')), 3, '16:00Z son las 09:00 en Tijuana: abierto');
   });
 
   test('el horario de verano no corre la frontera: en enero manda -08:00', () => {
-    // Mismo 07:00 local, del otro lado del cambio de horario. Si algo
-    // asumiera un desplazamiento fijo, uno de los dos daría cerrado.
-    const invierno = renderHoursScreen(ctx('2026-01-16T07:00:00-08:00'));
-    assert.strictEqual(cuenta(invierno, translate('es', 'hours.openNow')), 3);
-    const invirnoAntes = renderHoursScreen(ctx('2026-01-16T06:59:00-08:00'));
-    assert.strictEqual(cuenta(invirnoAntes, translate('es', 'hours.closedNow')), 3);
+    // Mismo 09:00 local, del otro lado del cambio de horario (viernes 16 de
+    // enero). Si algo asumiera un desplazamiento fijo, uno de los dos daría
+    // lo contrario.
+    assert.strictEqual(cuenta(renderHoursScreen(ctx('2026-01-16T09:00:00-08:00')), translate('es', 'hours.openNow')), 3);
+    assert.strictEqual(cuenta(renderHoursScreen(ctx('2026-01-16T05:00:00-08:00')), translate('es', 'hours.closedNow')), 3);
   });
 });
 

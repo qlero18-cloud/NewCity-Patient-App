@@ -6,7 +6,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { locations, LOCATION_IDS } from '../../src/data/locations.js';
 import { plazaVenues } from '../../src/data/plaza.js';
-import { supportChannel } from '../../src/data/support.js';
+
 import { fixtures } from '../../src/data/fixtures.js';
 import { routes, MAP_HIGHLIGHT_IDS } from '../../src/data/routes.js';
 import { TRANSFER_POINT_IDS, TRANSFER_KINDS, VEHICLE_TYPES } from '../../src/data/transferPoints.js';
@@ -65,10 +65,17 @@ describe('locations.js — ubicaciones del complejo', () => {
     assert.deepStrictEqual([...usedByRoutes].sort(), [...LOCATION_IDS].sort());
   });
 
-  test('cada ubicación con horario sin confirmar lleva unconfirmed: true en hours', () => {
+  // D96 (Etapa K) — Compass es la única ubicación con horario respaldado
+  // por el documento del hospital. Se nombra aquí en vez de aflojar la
+  // aserción a "las que tengan unconfirmed lo tienen en true", que no
+  // detectaría que alguien le quite el distintivo a otra ubicación.
+  test('toda ubicación salvo Compass lleva unconfirmed: true en hours (su horario sigue sin confirmar)', () => {
     for (const loc of locations) {
+      if (loc.id === 'compass') continue;
       assert.strictEqual(loc.hours.unconfirmed, true, `${loc.id}: hours debería estar marcado unconfirmed`);
     }
+    const compass = locations.find((l) => l.id === 'compass');
+    assert.strictEqual(compass.hours.unconfirmed, undefined, 'Compass sí tiene horario real (ver test/data/support.test.js)');
   });
 });
 
@@ -93,13 +100,10 @@ describe('plaza.js — restaurantes (PRD §15.2: tipo de comida y horarios sin c
   });
 });
 
-describe('support.js — WhatsApp, voz y horario de coordinación', () => {
-  test('el número real de los flyers está presente y el canal está marcado unconfirmed (no se sabe cuál rol tiene)', () => {
-    assert.strictEqual(supportChannel.whatsappNumber, '+16193243116');
-    assert.strictEqual(supportChannel.voiceNumber, '+16193243116');
-    assert.strictEqual(supportChannel.unconfirmed, true);
-  });
-});
+// support.js se prueba en test/data/support.test.js desde la Etapa K: con
+// el documento del hospital de por medio el contrato dejó de ser "está el
+// número de los flyers y todo va unconfirmed" y creció lo suficiente para
+// tener archivo propio (D95, D96).
 
 describe('fixtures.js — declaración de datos ficticios', () => {
   test('el archivo declara explícitamente que los pacientes son ficticios', async () => {

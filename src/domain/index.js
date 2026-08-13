@@ -7,4 +7,4 @@ export { nextStep } from './nextStep.js';
 export { visiblePasses } from './passes.js';
 export { groupByDay, isUpdated } from './itinerary.js';
 export { timelineItems, nextTransfer } from './timeline.js';
-export { formatTimeTijuana, formatDayLabel, isOpenNow } from './time.js';
+export { formatTimeTijuana, formatDayLabel, isOpenNow, formatWeeklyHours } from './time.js';

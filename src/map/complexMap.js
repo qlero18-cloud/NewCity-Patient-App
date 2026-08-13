@@ -64,6 +64,7 @@
 // (src/data/routes.js, fase 02) — probado de forma cruzada y genérica en
 // test/map/ids.test.js.
 
+import { formatWeeklyHours } from '../domain/time.js';
 import { locations } from '../data/locations.js';
 import { routes } from '../data/routes.js';
 
@@ -281,13 +282,22 @@ export function renderFichaHtml(mapPointId, lang = 'es') {
   const fichaBadge = meta.unconfirmed ? ` <span class="nc-ficha-badge">[${confirmar}]</span>` : '';
   const horarioLabel = lang === 'en' ? 'Hours' : 'Horario';
   const directionsLabel = lang === 'en' ? 'Get directions' : 'Cómo llegar';
-  const weekly = meta.hours?.weekly?.[0];
-  const horarioText = weekly ? `${weekly.open}–${weekly.close}` : '—';
+  // D97 — Antes esto era `hours.weekly[0]`: UN solo rango, el del primer día
+  // de la lista, escrito en 24 horas. Salía bien de casualidad, porque los
+  // siete días del relleno eran idénticos. Compass abre de lunes a sábado y
+  // cierra el domingo, así que ese primer rango pasó a mentir por omisión.
+  // Un renglón por tramo, con el mismo formateador que Ayuda y Horarios.
+  const horarioLineas = formatWeeklyHours(meta.hours, lang).map(escapeXml);
+  if (horarioLineas.length === 0) horarioLineas.push('—');
+  // Un solo <p> con <br>, no un <p> por renglón: la ficha del mapa se inyecta
+  // con innerHTML en las dos pantallas que la usan, y así el margen que ya
+  // tiene .nc-ficha-hours sigue sirviendo sin CSS nuevo.
+  const horarioHtml = [`${escapeXml(horarioLabel)}:${horarioBadge}`, ...horarioLineas].join('<br>');
   return `
     <div class="nc-ficha" data-ficha-for="${escapeXml(mapPointId)}">
       <h3 class="nc-ficha-title">${escapeXml(meta.name)}${fichaBadge}</h3>
       <p class="nc-ficha-blurb">${escapeXml(meta.blurb)}</p>
-      <p class="nc-ficha-hours">${escapeXml(horarioLabel)}: ${escapeXml(horarioText)}${horarioBadge}</p>
+      <p class="nc-ficha-hours">${horarioHtml}</p>
       <button type="button" class="nc-ficha-directions" data-directions-for="${escapeXml(mapPointId)}">${escapeXml(directionsLabel)}</button>
     </div>`;
 }

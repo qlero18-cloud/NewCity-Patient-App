@@ -48,7 +48,7 @@ import { renderPlazaScreen, attachPlazaScreen, PLAZA_CSS } from './screens/plaza
 import { renderHoursScreen } from './screens/hours.js';
 import { renderStayScreen, attachStayScreen, STAY_CSS } from './screens/stay.js';
 import { renderTransferScreen, attachTransferScreen, TRANSFER_CSS } from './screens/transfer.js';
-import { renderHelpScreen, HELP_CSS } from './screens/help.js';
+import { renderHelpScreen, attachHelpScreen, HELP_CSS } from './screens/help.js';
 import { renderPassScreen, attachPassScreen, PASS_SCREEN_CSS } from './screens/pass.js';
 
 const ALL_CSS = [THEME_CSS, TABS_CSS, CARD_CSS, BADGE_CSS, FICHA_CSS, HOME_CSS, ITINERARY_CSS, MAP_SCREEN_CSS, PLAZA_CSS, STAY_CSS, TRANSFER_CSS, HELP_CSS, PASS_SCREEN_CSS].join('\n');
@@ -75,7 +75,7 @@ const SCREENS = {
   // Etapa G — sin pestaña, como stay y hours: la barra de 5 la fija el PRD
   // §8. Se llega desde la tarjeta de Inicio o desde el itinerario.
   transfer: { render: renderTransferScreen, attach: attachTransferScreen, tab: null },
-  help: { render: renderHelpScreen, tab: 'help' },
+  help: { render: renderHelpScreen, attach: attachHelpScreen, tab: 'help' },
   pass: { render: renderPassScreen, attach: attachPassScreen, tab: null },
 };
 

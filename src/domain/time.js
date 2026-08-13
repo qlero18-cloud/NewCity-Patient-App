@@ -209,10 +209,18 @@ function dayDiffTijuana(iso, referenceIso) {
 // producto.
 export function formatTimeTijuana(iso, lang) {
   const { hour, minute } = tijuanaParts(new Date(iso));
+  return reloj12(hour, minute, lang);
+}
+
+// El reloj de 12 horas, aparte de quién le pase la hora: formatTimeTijuana
+// la saca de un instante, formatWeeklyHours de una cadena "HH:MM" de pared.
+// Las dos tienen que decir "1:30 p.m." igual, o la misma pantalla acabaría
+// con dos convenciones (el itinerario en 12 h y el horario en 24 h).
+function reloj12(hour, minute, lang) {
   const isAm = hour < 12;
   const period = lang === 'es' ? (isAm ? 'a.m.' : 'p.m.') : isAm ? 'AM' : 'PM';
   let hour12 = hour % 12;
-  if (hour12 === 0) hour12 = 12;
+  if (hour12 === 0) hour12 = 12; // medianoche y mediodía son las 12, no las 0
   return `${hour12}:${pad2(minute)} ${period}`;
 }
 
@@ -244,6 +252,68 @@ export function isOpenNow(hours, now) {
   if (!today) return false;
   const hm = `${pad2(p.hour)}:${pad2(p.minute)}`;
   return hm >= today.open && hm <= today.close;
+}
+
+// La semana se lee de lunes a domingo, aunque `weekly[].day` numere
+// 0 = domingo (la convención de Date#getUTCDay que usa isOpenNow). Con el
+// orden crudo del arreglo, "Domingo · cerrado" saldría hasta arriba y el
+// domingo partiría el bloque de lunes a viernes por la mitad.
+const SEMANA_LUNES_PRIMERO = [1, 2, 3, 4, 5, 6, 0];
+
+function reloj12Pared(hm, lang) {
+  const [h, m] = String(hm).split(':');
+  return reloj12(Number(h), Number(m), lang);
+}
+
+function mayuscula(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// formatWeeklyHours(hours, lang) -> string[]
+//
+// D97 — Hasta la Etapa K la app NUNCA escribía un horario: help.js y
+// hours.js pasaban `lines: []` a la ficha, así que el paciente veía el
+// título y el distintivo "Abierto ahora / Cerrado ahora" pero ningún
+// horario. Con horarios de relleno (los mismos 7 días inventados en todas
+// las ubicaciones) daba lo mismo; con el horario real del hospital, no.
+//
+// Agrupa días consecutivos con el mismo tramo y nombra como CERRADO cada
+// día ausente de `weekly` — porque así es como se representa un día cerrado
+// (D96): se omite del arreglo, no se le pone un rango vacío. Es la misma
+// lectura que hace isOpenNow, que devuelve false para un día que no está.
+//
+// Pura (INV-1): no consulta el reloj ni la zona del proceso. `hours.tz` se
+// ignora a propósito — todo el contenido del proyecto está en Tijuana y
+// escribir la zona junto al horario sería ruido para el paciente.
+export function formatWeeklyHours(hours, lang) {
+  if (!hours || !Array.isArray(hours.weekly)) return [];
+  const es = lang === 'es';
+  const nombres = es ? WEEKDAYS_ES : WEEKDAYS_EN;
+
+  const grupos = [];
+  for (const dow of SEMANA_LUNES_PRIMERO) {
+    // El primero que traiga la lista: no hay dato real con dos tramos el
+    // mismo día (comida de por medio) y el PRD no fija cómo se escribiría.
+    const tramo = hours.weekly.find((w) => w && w.day === dow);
+    const texto = tramo ? `${reloj12Pared(tramo.open, lang)}–${reloj12Pared(tramo.close, lang)}` : es ? 'cerrado' : 'closed';
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo && ultimo.texto === texto) ultimo.dias.push(dow);
+    else grupos.push({ dias: [dow], texto });
+  }
+
+  // Un solo grupo son los 7 días iguales: se dice en una línea, no en siete.
+  if (grupos.length === 1) return [`${es ? 'Todos los días' : 'Every day'} · ${grupos[0].texto}`];
+
+  return grupos.map(({ dias, texto }) => {
+    // Solo se capitaliza el primer día: en español los días van en
+    // minúscula, y "Lunes a Viernes" no es ortografía, es calco del inglés.
+    const primero = mayuscula(nombres[dias[0]]);
+    if (dias.length === 1) return `${primero} · ${texto}`;
+    // Dos días son un par, no un rango: "sábado y domingo", no "sábado a
+    // domingo", que suena a que hay algo en medio.
+    const nexo = dias.length === 2 ? (es ? 'y' : 'and') : es ? 'a' : 'to';
+    return `${primero} ${nexo} ${nombres[dias[dias.length - 1]]} · ${texto}`;
+  });
 }
 
 // formatDayLabel(iso, now, lang) -> { es, en }

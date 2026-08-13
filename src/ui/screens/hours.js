@@ -2,7 +2,7 @@
 // calculado con `now` inyectado (isOpenNow, src/domain/time.js) — nunca
 // leyendo el reloj aquí, tal como pide la fase 05 de forma literal.
 
-import { isOpenNow } from '../../domain/index.js';
+import { isOpenNow, formatWeeklyHours } from '../../domain/index.js';
 import { locations } from '../../data/locations.js';
 import { supportChannel } from '../../data/support.js';
 import { escapeHtml, getLocationById } from '../util.js';
@@ -14,11 +14,14 @@ function statusBadge(open, t) {
   return open ? renderBadge(t('hours.openNow'), 'updated') : renderBadge(t('hours.closedNow'), 'cancelled');
 }
 
-function entryHtml(name, hours, now, t) {
+// D97 — `lines` iba vacío: la pantalla se llamaba "Horarios" y no escribía
+// ni un horario. El distintivo dice si abre AHORA, que no es lo mismo que
+// a qué hora abre mañana — y es justo lo que un paciente viene a ver aquí.
+function entryHtml(name, hours, now, lang, t) {
   const open = isOpenNow(hours, now);
   return renderFicha({
     title: name,
-    lines: [],
+    lines: formatWeeklyHours(hours, lang),
     unconfirmed: hours?.unconfirmed === true,
     t,
     extra: statusBadge(open, t),
@@ -31,9 +34,9 @@ export function renderHoursScreen(ctx) {
   const piso27 = getLocationById(locations, 'piso27');
 
   const entries = [
-    entryHtml(compass.name[lang], compass.hours, now, t),
-    entryHtml(piso27.name[lang], piso27.hours, now, t),
-    entryHtml(t('help.hoursTitle'), supportChannel.hours, now, t),
+    entryHtml(compass.name[lang], compass.hours, now, lang, t),
+    entryHtml(piso27.name[lang], piso27.hours, now, lang, t),
+    entryHtml(t('help.hoursTitle'), supportChannel.hours, now, lang, t),
   ].join('\n');
 
   return `

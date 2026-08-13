@@ -155,13 +155,39 @@ describe('renderFichaHtml', () => {
     }
   });
 
-  test('todo horario se muestra con el distintivo [POR CONFIRMAR] (o [TO CONFIRM] en inglés) mientras locations.js lo marque unconfirmed', () => {
+  // D96 (Etapa K) — Compass dejó de ser unconfirmed: el documento del
+  // hospital trae su horario. Es el único; el resto sigue con relleno.
+  test('el distintivo [POR CONFIRMAR] sale de locations.js, punto por punto', () => {
     for (const id of MAP_POINT_IDS) {
       const loc = locations.find((l) => l.mapPointId === id);
-      assert.ok(loc.hours.unconfirmed, `fixture inesperada: ${id} ya no tiene horario unconfirmed — revisar esta prueba`);
-      assert.match(renderFichaHtml(id, 'es'), /POR CONFIRMAR/);
-      assert.match(renderFichaHtml(id, 'en'), /TO CONFIRM/);
+      const esperado = loc.hours.unconfirmed === true;
+      assert.strictEqual(esperado, id !== 'mp_compass', `fixture inesperada en ${id} — revisar esta prueba`);
+      assert.strictEqual(/POR CONFIRMAR/.test(renderFichaHtml(id, 'es')), esperado, `${id} en español`);
+      assert.strictEqual(/TO CONFIRM/.test(renderFichaHtml(id, 'en')), esperado, `${id} en inglés`);
     }
+  });
+
+  // D97 — La ficha del mapa armaba el texto con `hours.weekly[0]`: UN solo
+  // rango, el del primer día de la lista, escrito en 24 horas ("06:00–
+  // 20:00"). Funcionaba de casualidad porque los 7 días eran idénticos.
+  // Con Compass en L–S daba a entender "todos los días", que ya es falso.
+  test('el horario se escribe completo, agrupado, y no como el rango del primer día', () => {
+    const compass = renderFichaHtml('mp_compass', 'es');
+    assert.ok(compass.includes('Lunes a sábado · 6:00 a.m.–8:00 p.m.'), 'falta el horario agrupado de Compass');
+    assert.ok(compass.includes('Domingo · cerrado'), 'la ficha debería decir que el domingo cierra');
+    assert.ok(!compass.includes('06:00–20:00'), 'quedó el rango crudo de 24 horas de weekly[0]');
+  });
+
+  test('los puntos que siguen con relleno lo dicen en una línea, no en siete', () => {
+    const lobby = renderFichaHtml('mp_lobby', 'es');
+    assert.ok(lobby.includes('Todos los días · 7:00 a.m.–8:00 p.m.'), 'falta el horario de relleno agrupado');
+    assert.ok(!lobby.includes('07:00–20:00'), 'quedó el rango crudo de 24 horas');
+  });
+
+  test('en inglés, con el mismo reloj de 12 horas que el resto de la app', () => {
+    const compass = renderFichaHtml('mp_compass', 'en');
+    assert.ok(compass.includes('Monday to Saturday · 6:00 AM–8:00 PM'));
+    assert.ok(compass.includes('Sunday · closed'));
   });
 
   test('id desconocido devuelve null, no lanza excepción', () => {
