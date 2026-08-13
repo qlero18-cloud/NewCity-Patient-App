@@ -55,6 +55,26 @@ export const MAX_DETAILS = 600;
 // cuerpo que nadie tecleó. 60 deja tres veces de margen.
 export const MAX_IMPORT_APPOINTMENTS = 60;
 
+// Etapa L (D101) — El hospedaje no tenía NINGÚN tope, a diferencia de los
+// traslados: mientras se capturaba a mano campo por campo daba igual, pero
+// ahora lo llena un documento de Word y lo que salga de ahí entra completo.
+// Se rechaza, no se recorta: un total recortado a la mitad de una cifra se
+// ve como un precio perfectamente válido, y el paciente lo lee en su
+// teléfono. `total` es texto y no número a propósito — "$1,234.00 MXN"
+// lleva moneda y convertirlo la pierde.
+export const MAX_HOTEL = 120;
+export const MAX_RESERVATION_CODE = 40;
+export const MAX_ROOM_TYPE = 120;
+export const MAX_OCCUPANCY = 120;
+export const MAX_TOTAL = 40;
+
+// Como MAX_DURATION_MIN: cinturón contra un dedazo, no una regla del hotel.
+export const MAX_NIGHTS = 365;
+
+// Un viaje redondo son dos. Diez deja margen para una estancia con varios
+// traslados internos sin dejar pasar un cuerpo que nadie tecleó.
+export const MAX_IMPORT_TRANSFERS = 10;
+
 // Formatos que sabe pintar src/ui/screens/pass.js. Coordinación solo emite
 // 'image' (D29), pero las fixtures traen los otros dos y el registro los
 // admite, así que el validador no los puede prohibir.
@@ -298,7 +318,36 @@ export function validateLodgingInput(input) {
     errors.checkOut = 'order';
   }
 
+  // Los cuatro campos de la Etapa L y los dos que ya existían sin tope. Se
+  // rechaza en vez de recortar: ver el comentario de MAX_TOTAL.
+  for (const [campo, tope] of [
+    ['hotel', MAX_HOTEL], ['reservationCode', MAX_RESERVATION_CODE],
+    ['roomType', MAX_ROOM_TYPE], ['occupancy', MAX_OCCUPANCY], ['total', MAX_TOTAL],
+  ]) {
+    if (!errors[campo] && trimmed(input[campo]).length > tope) errors[campo] = 'tooLong';
+  }
+
+  const noches = checkNoches(input.nights);
+  if (noches) errors.nights = noches;
+
   return { ok: Object.keys(errors).length === 0, errors };
+}
+
+// `nights` es opcional (el hotel se aparta antes de saber la tarifa) pero si
+// viene tiene que ser un entero: un formulario manda "2" y un POST puede
+// mandar 2.5, y guardar cualquiera de los dos como está deja el expediente
+// diciendo "2.5 noches".
+function checkNoches(crudo) {
+  if (crudo === undefined || crudo === null || crudo === '') return null;
+  if (typeof crudo !== 'number' && typeof crudo !== 'string') return 'invalid';
+  const n = Number(crudo);
+  if (!Number.isInteger(n) || n < 0) return 'invalid';
+  if (n > MAX_NIGHTS) return 'tooLong';
+  return null;
+}
+
+function nochesGuardadas(crudo) {
+  return crudo === undefined || crudo === null || crudo === '' ? null : Number(crudo);
 }
 
 export function setLodging(record, input, { now, by }) {
@@ -317,6 +366,11 @@ export function setLodging(record, input, { now, by }) {
     // vería como "no" mientras el registro dice ''.
     breakfastIncluded: !!input.breakfastIncluded,
     recoveryRoom: !!input.recoveryRoom,
+    // Etapa L (D101). `total` como TEXTO: ver MAX_TOTAL.
+    roomType: trimmed(input.roomType),
+    nights: nochesGuardadas(input.nights),
+    occupancy: trimmed(input.occupancy),
+    total: trimmed(input.total),
     updatedAt: now,
     updatedBy: by,
   };
@@ -461,11 +515,8 @@ function buscarTraslado(record, transferId) {
   return (record.transfers ?? []).find((t) => t.id === transferId) ?? null;
 }
 
-export function addTransfer(record, input, { now, by, newId }) {
-  const { ok, errors } = validateTransferInput(input);
-  if (!ok) return { ok: false, errors };
-
-  const transfer = {
+function nuevoTraslado(record, input, { now, by, newId }) {
+  return {
     id: newId('t'),
     visitId: record.visit.id,
     ...camposTraslado(input),
@@ -475,10 +526,47 @@ export function addTransfer(record, input, { now, by, newId }) {
     updatedAt: now,
     updatedBy: by,
   };
+}
 
+export function addTransfer(record, input, ctx) {
+  const { ok, errors } = validateTransferInput(input);
+  if (!ok) return { ok: false, errors };
+
+  const transfer = nuevoTraslado(record, input, ctx);
   if (!record.transfers) record.transfers = [];
   record.transfers.push(transfer);
   return { ok: true, transfer };
+}
+
+/**
+ * Etapa L (D107) — Los traslados de una importación, en una sola escritura.
+ *
+ * Hermano de `addAppointments` y por el mismo motivo (D83): llamar
+ * `addTransfer` dos veces serían dos ciclos leer-modificar-escribir sobre un
+ * `saveVisit` sin compare-and-set, y si el segundo falla queda medio
+ * itinerario guardado. Una importación a medias es peor que ninguna: la
+ * coordinadora ve el traslado de llegada, supone que terminó, y al paciente
+ * le falta el de regreso.
+ */
+export function addTransfers(record, inputs, ctx) {
+  if (!Array.isArray(inputs) || inputs.length === 0) {
+    return { ok: false, errors: { transfers: 'required' } };
+  }
+  if (inputs.length > MAX_IMPORT_TRANSFERS) {
+    return { ok: false, errors: { transfers: 'tooLong' } };
+  }
+
+  const fallas = [];
+  inputs.forEach((input, index) => {
+    const { ok, errors } = validateTransferInput(input);
+    if (!ok) fallas.push({ index, errors });
+  });
+  if (fallas.length > 0) return { ok: false, errors: { transfers: fallas } };
+
+  const transfers = inputs.map((input) => nuevoTraslado(record, input, ctx));
+  if (!record.transfers) record.transfers = [];
+  record.transfers.push(...transfers);
+  return { ok: true, transfers };
 }
 
 export function editTransfer(record, transferId, input, { now, by }) {

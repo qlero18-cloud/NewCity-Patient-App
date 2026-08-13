@@ -27,6 +27,10 @@
 // error duro de empaquetado.
 
 import { toIsoTijuana } from './time.js';
+// En un solo sentido: itineraryBooking.js NO importa de aquí. Un ciclo entre
+// los dos rompería el empaquetado plano de build.py, y por eso allá los doce
+// meses están repetidos en vez de compartidos.
+import { parseBooking } from './itineraryBooking.js';
 
 const ITIN_MONTHS = 'JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER';
 const ITIN_MONTH_INDEX = new Map(ITIN_MONTHS.split('|').map((m, i) => [m, i]));
@@ -351,6 +355,37 @@ function itinReadHeadings(headings, warnings) {
   return out;
 }
 
+// --- Reparto de tablas -------------------------------------------------
+//
+// D100 — El .docx de un check-up trae varias tablas y cada una es de un
+// tipo distinto. El reparto se decide por el TÍTULO de la primera fila y
+// ocurre antes de clasificar renglones, que es lo único que garantiza que
+// una fila de hotel no llegue nunca a `itinClassify`: ahí adentro ya no se
+// sabe de qué tabla venía la fila, y una de dos celdas con la primera vacía
+// se pega a los `details` de la cita anterior sin dejar rastro.
+//
+// Se piden las dos redacciones: los documentos de hoy están en inglés, pero
+// las coordinadoras escriben en los dos idiomas y el precio de no reconocer
+// el título son diecinueve citas basura.
+const ITIN_TBL_LODGING_RE = /\b(?:ACCOMMODATION|LODGING|HOSPEDAJE|ALOJAMIENTO)\b/i;
+const ITIN_TBL_TRANSPORT_RE = /\b(?:TRANSPORTATION|TRANSPORT|TRANSPORTE|TRASLADOS?)\b/i;
+
+function itinTableKind(tabla) {
+  const filas = tabla.filter((f) => Array.isArray(f));
+  // La tabla vacía del final del documento es un resto de formato de Word,
+  // no contenido: no se cuenta como leída ni deja una fila ignorada.
+  if (!filas.some((f) => f.some((c) => itinText(c) !== ''))) return 'empty';
+
+  // El título es una fila de una sola celda con texto. Exigirlo es lo que
+  // impide que una fila de itinerario cualquiera que mencione un traslado
+  // se lleve la tabla entera al intérprete equivocado.
+  const primera = (filas[0] ?? []).map((c) => itinText(c)).filter((c) => c !== '');
+  if (primera.length !== 1) return 'itinerary';
+  if (ITIN_TBL_LODGING_RE.test(primera[0])) return 'lodging';
+  if (ITIN_TBL_TRANSPORT_RE.test(primera[0])) return 'transport';
+  return 'itinerary';
+}
+
 // --- Clasificación de filas -------------------------------------------
 
 function itinBlankRow(index, raw, kind, notes) {
@@ -428,15 +463,28 @@ function itinClassify(index, raw, cells, notes, contexto) {
  * @param {object[]} entrada.locations   catálogo de ubicaciones; se inyecta,
  *   no se importa, igual que routing.js recibe sus rutas — así la prueba
  *   puede acotar el catálogo y este módulo no depende de src/data/.
+ * @param {object[]} entrada.transferPoints catálogo de puntos de encuentro,
+ *   inyectado por la misma razón; sin él, el punto se queda vacío en vez de
+ *   inventarse.
  * @returns {{patientName: string, packageName: string, days: string[],
- *   discarded: string[], warnings: object[], rows: object[], counts: object}}
+ *   discarded: string[], warnings: object[], rows: object[], counts: object,
+ *   lodging: object|null, transfers: object[]}}
  */
-export function parseItinerary({ rows, headings, locations } = {}) {
+export function parseItinerary({ tables, rows, headings, locations, transferPoints } = {}) {
   const warnings = [];
   const catalogo = Array.isArray(locations) ? locations : [];
   const cabecera = itinReadHeadings(headings, warnings);
 
+  // Sin `tables` se lee `rows` como una sola tabla: es la firma con la que
+  // ya llaman la pantalla de importación y el e2e, y sigue valiendo.
+  const lista = Array.isArray(tables) ? tables : [Array.isArray(rows) ? rows : []];
+
   const filas = [];
+  // `read` cuenta TODAS las filas de reserva, título incluido: es una fila
+  // del documento y la pantalla dice cuántas se leyeron. Las listas, en
+  // cambio, van sin el título — no es una etiqueta y saldría marcada como
+  // desconocida en cada importación.
+  const reservas = { lodging: [], transport: [], read: 0 };
   const usados = new Set(cabecera.days);
   let dayKey = cabecera.days[0] ?? null;
   let ultima = null;
@@ -453,20 +501,47 @@ export function parseItinerary({ rows, headings, locations } = {}) {
     },
   };
 
-  for (const [index, bruto] of (Array.isArray(rows) ? rows : []).entries()) {
-    const raw = Array.isArray(bruto) ? bruto : [];
-    const notes = [];
-    const cells = raw.map((c) => itinApplyTypos(itinText(c), notes));
-    const fila = itinClassify(index, raw, cells, notes, contexto);
-    if (fila.kind === 'appointment' || fila.kind === 'meal') {
-      fila.dayKey = dayKey;
-      if (fila.kind === 'appointment') ultima = fila;
+  for (const cruda of lista) {
+    const tabla = Array.isArray(cruda) ? cruda : [];
+    const tipo = itinTableKind(tabla);
+    if (tipo === 'empty') continue;
+    if (tipo !== 'itinerary') {
+      const filasTabla = tabla.filter((f) => Array.isArray(f));
+      reservas.read += filasTabla.length;
+      reservas[tipo].push(...filasTabla.slice(1));
+      continue;
     }
-    filas.push(fila);
+
+    for (const bruto of tabla) {
+      const raw = Array.isArray(bruto) ? bruto : [];
+      const notes = [];
+      const cells = raw.map((c) => itinApplyTypos(itinText(c), notes));
+      // El índice es la posición dentro de las filas DEVUELTAS, no dentro del
+      // documento: la pantalla de revisión lo usa de `data-index` y el
+      // servidor devuelve sus errores por posición. Un hueco donde iba una
+      // tabla de hotel mandaría el error a la fila equivocada.
+      const fila = itinClassify(filas.length, raw, cells, notes, contexto);
+      if (fila.kind === 'appointment' || fila.kind === 'meal') {
+        fila.dayKey = dayKey;
+        if (fila.kind === 'appointment') ultima = fila;
+      }
+      filas.push(fila);
+    }
   }
 
   itinResolveTimes(filas, warnings);
   itinFinish(filas);
+
+  // El año y el nombre viven en el ENCABEZADO, fuera de las tablas: el
+  // intérprete de reservas no tiene forma de sacarlos por su cuenta, y sin
+  // el año no hay fecha (INV-1: aquí nadie lee el reloj).
+  const { lodging, transfers } = parseBooking({
+    lodgingRows: reservas.lodging,
+    transportRows: reservas.transport,
+    year: cabecera.year,
+    patientName: cabecera.patientName,
+    transferPoints,
+  });
 
   return {
     patientName: cabecera.patientName,
@@ -475,7 +550,9 @@ export function parseItinerary({ rows, headings, locations } = {}) {
     discarded: cabecera.discarded,
     warnings,
     rows: filas.map(({ dayKey: _d, minutes: _m, rawTime: _r, ...resto }) => resto),
-    counts: itinCounts(filas),
+    counts: itinCounts(filas, reservas, lodging, transfers),
+    lodging,
+    transfers,
   };
 }
 
@@ -553,12 +630,23 @@ function itinFinish(filas) {
   }
 }
 
-function itinCounts(filas) {
+function itinCounts(filas, reservas, lodging, transfers) {
   const citas = filas.filter((f) => f.kind === 'appointment');
+  // `booking` va aparte y `read` las suma: las filas de hotel y transporte
+  // se leyeron de verdad, y desaparecerlas del conteo dejaría a la pantalla
+  // de revisión diciendo "31 filas leídas" sobre un documento de 52.
+  const booking = reservas.read;
+  // El hotel cuenta como UNO y cada traslado como UNO: son los bloques que
+  // la coordinadora revisa, no sus renglones. Si el conteo solo mirara las
+  // citas, la pantalla diría "0 necesitan tu atención" con una recogida un
+  // día antes del check-in y un teléfono al que le pusimos la lada nosotros.
+  const reservado = (lodging?.needsAttention ? 1 : 0)
+    + (transfers ?? []).filter((t) => t.needsAttention).length;
   return {
-    read: filas.length,
+    read: filas.length + booking,
     importable: citas.length,
+    booking,
     meals: filas.filter((f) => f.kind === 'meal').length,
-    needsAttention: citas.filter((f) => f.notes.some((n) => ITIN_ATTENTION_CODES.has(n.code))).length,
+    needsAttention: citas.filter((f) => f.notes.some((n) => ITIN_ATTENTION_CODES.has(n.code))).length + reservado,
   };
 }

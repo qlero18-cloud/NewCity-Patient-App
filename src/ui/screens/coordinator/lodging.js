@@ -38,6 +38,10 @@ const CAMPOS_HOSPEDAJE = {
   reservationCode: 'coordinator.lodging.reservationCodeLabel',
   checkIn: 'coordinator.lodging.checkInLabel',
   checkOut: 'coordinator.lodging.checkOutLabel',
+  roomType: 'coordinator.lodging.roomTypeLabel',
+  nights: 'coordinator.lodging.nightsLabel',
+  occupancy: 'coordinator.lodging.occupancyLabel',
+  total: 'coordinator.lodging.totalLabel',
 };
 
 // Puro y exportado: bajo la restricción de no simular DOM en node:test,
@@ -157,6 +161,10 @@ export function renderLodgingScreen(ctx) {
           ${textField('reservationCode', lodging?.reservationCode, t('coordinator.lodging.reservationCodeLabel'))}
           ${dateTimeField('checkIn', lodging?.checkIn, t('coordinator.lodging.checkInLabel'), ventana)}
           ${dateTimeField('checkOut', lodging?.checkOut, t('coordinator.lodging.checkOutLabel'), ventana)}
+          ${textField('roomType', lodging?.roomType, t('coordinator.lodging.roomTypeLabel'))}
+          ${textField('nights', lodging?.nights, t('coordinator.lodging.nightsLabel'))}
+          ${textField('occupancy', lodging?.occupancy, t('coordinator.lodging.occupancyLabel'))}
+          ${textField('total', lodging?.total, t('coordinator.lodging.totalLabel'))}
           ${checkboxField('breakfastIncluded', !!lodging?.breakfastIncluded, t('coordinator.lodging.breakfastLabel'))}
           ${checkboxField('recoveryRoom', !!lodging?.recoveryRoom, t('coordinator.lodging.recoveryLabel'))}
         `)}
@@ -211,6 +219,13 @@ export function attachLodgingScreen(rootEl, ctx) {
       reservationCode: fields.reservationCode.value,
       checkIn: fecha(fields.checkIn.value),
       checkOut: fecha(fields.checkOut.value),
+      // Etapa L (D101) — los cuatro del Word van SIEMPRE, aunque esta
+      // pantalla no los haya tocado: setLodging reescribe el registro
+      // entero y omitirlos aquí los borraría en silencio.
+      roomType: fields.roomType.value,
+      nights: fields.nights.value,
+      occupancy: fields.occupancy.value,
+      total: fields.total.value,
       breakfastIncluded: fields.breakfastIncluded.checked,
       recoveryRoom: fields.recoveryRoom.checked,
     };

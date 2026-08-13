@@ -8,6 +8,19 @@ import { formatTimeTijuana, formatDayLabel } from '../../domain/index.js';
 import { escapeHtml } from '../util.js';
 import { renderCard } from '../components/card.js';
 
+// Etapa L (D101). Los cuatro campos que trae el Word son opcionales: el
+// hotel se aparta antes de saber la tarifa, y un expediente guardado antes
+// de esta etapa no tiene ninguna de las cuatro llaves. Un renglón con la
+// etiqueta y nada al lado se lee como un error de la app, así que se omite
+// entero — mismo criterio que renglonTraslado en transfer.js.
+//
+// La prueba es contra vacío/nulo y NO contra "falsy" a propósito: `nights:
+// 0` es un número que alguien capturó, no un hueco.
+function renglonEstancia(label, valor) {
+  if (valor === '' || valor === null || valor === undefined) return '';
+  return `<p class="nc-stay-row"><span>${escapeHtml(label)}</span> ${escapeHtml(String(valor))}</p>`;
+}
+
 export function renderStayScreen(ctx) {
   const { lodging, now, lang, t } = ctx;
   if (!lodging) return '';
@@ -28,8 +41,12 @@ export function renderStayScreen(ctx) {
       ${renderCard(`
         <p class="nc-stay-row"><span>${escapeHtml(t('stay.checkIn'))}</span> ${escapeHtml(checkInLabel)}</p>
         <p class="nc-stay-row"><span>${escapeHtml(t('stay.checkOut'))}</span> ${escapeHtml(checkOutLabel)}</p>
+        ${renglonEstancia(t('stay.nights'), lodging.nights)}
+        ${renglonEstancia(t('stay.roomType'), lodging.roomType)}
+        ${renglonEstancia(t('stay.occupancy'), lodging.occupancy)}
         <p class="nc-stay-row"><span>${escapeHtml(t('stay.breakfastIncluded'))}</span> ${escapeHtml(yesNo(lodging.breakfastIncluded))}</p>
         <p class="nc-stay-row"><span>${escapeHtml(t('stay.recoveryRoom'))}</span> ${escapeHtml(yesNo(lodging.recoveryRoom))}</p>
+        ${renglonEstancia(t('stay.total'), lodging.total)}
       `)}
     </section>
   `;

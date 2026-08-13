@@ -26,6 +26,7 @@ import {
 } from '../../../src/ui/screens/coordinator/import.js';
 import { parseItinerary } from '../../../src/domain/itineraryParse.js';
 import { locations } from '../../../src/data/locations.js';
+import { transferPoints, VEHICLE_TYPES } from '../../../src/data/transferPoints.js';
 import { translate } from '../../../src/ui/i18n.js';
 
 const LANGS = ['es', 'en'];
@@ -62,6 +63,43 @@ function leido(rows = FILAS, headings = ENCABEZADOS) {
 
 function veces(html, sub) {
   return html.split(sub).length - 1;
+}
+
+// Etapa L — las dos tablas de reserva que el Word real trae antes de los
+// días. Los datos son inventados (D88), pero la FORMA es la del documento:
+// etiqueta en la primera celda, valor en la segunda, una casilla de
+// plantilla sin llenar, un teléfono sin lada, una marca comercial donde el
+// modelo espera una carrocería, y una recogida un día antes del check-in.
+const HOTEL = [
+  ['ACCOMMODATION DETAILS'],
+  ['Hotel', 'Quartz Hotel & Spa'],
+  ['Reservation code', 'QZ-99871'],
+  ['Check-in', 'July 30th'],
+  ['Check-out', 'August 1st'],
+  ['Room type', 'Junior suite'],
+  ['Nights', '2'],
+  ['Occupancy', '2 adults, 1 child'],
+  ['Total', '$3,164.00 MXN'],
+  ['Breakfast included', '[Yes / No]'],
+  ['Guest', 'Paula Rivera'],
+];
+
+const TRANSPORTE = [
+  ['TRANSPORTATION'],
+  ['Transfer type', 'Round-trip'],
+  ['Pickup date and time', 'July 29th 9:00AM'],
+  ['Return date and time', 'August 1st 2:00PM'],
+  ['Meeting point', 'San Diego Airport'],
+  ['Flight (optional)', 'am 672'],
+  ['Driver name', 'Juan Ibarra'],
+  ['Driver phone', '664 163 1965'],
+  ['Vehicle type', 'Kia Seltos'],
+  ['License plate', 'aue105a'],
+  ['Additional notes', 'Llega media hora antes.'],
+];
+
+function leidoConReservas(tables = [HOTEL, TRANSPORTE, FILAS]) {
+  return parseItinerary({ tables, headings: ENCABEZADOS, locations, transferPoints });
 }
 
 describe('renderImportScreen — el estado inicial, antes de subir nada', () => {
@@ -133,7 +171,11 @@ describe('renderImportReview — los conteos, honestos', () => {
   for (const lang of LANGS) {
     test(`[${lang}] dice cuántas leyó, cuántas importará y cuántas necesitan atención`, () => {
       const res = leido();
-      assert.deepStrictEqual(res.counts, { read: 9, importable: 4, meals: 1, needsAttention: 2 });
+      // `booking` en cero: este documento de prueba no trae tablas de hotel
+      // ni de transporte, que es como son cuatro de los cinco itinerarios
+      // reales. La llave existe siempre para que la pantalla no tenga que
+      // preguntar si el documento traía reservas.
+      assert.deepStrictEqual(res.counts, { read: 9, importable: 4, booking: 0, meals: 1, needsAttention: 2 });
 
       const html = renderImportReview(res, ctx(lang));
       assert.ok(html.includes(translate(lang, 'coordinator.import.counts')(9, 4, 2)));
@@ -250,11 +292,22 @@ describe('renderImportReview — ningún código del intérprete se queda sin te
     'orphanDetail',
   ];
   const CODIGOS_AVISO = ['dateUnreadable', 'dateRangeTooLong', 'dayNotInHeader', 'noDate'];
+  // Etapa L — los del intérprete de reservas (src/domain/itineraryBooking.js).
+  // Van en su propia lista y no revueltos con los de arriba porque son el
+  // contrato con OTRO módulo: cuando uno de los dos gane un código, se ve
+  // de inmediato a cuál pertenece.
+  const CODIGOS_RESERVA = [
+    'templateBlank', 'unknownLabel', 'valueTooLong', 'valueUnreadable', 'noYear',
+    'dateUnreadable', 'timeAssumed', 'timeMissing', 'dateMissing', 'nightsMismatch',
+    'guestMismatch', 'roundTrip', 'roundTripIncomplete', 'transferTypeUnknown',
+    'meetingPointUnknown', 'meetingPointMissing', 'countryCodeAssumed', 'phoneUnreadable',
+    'vehicleSplit', 'vehicleTypeMissing', 'pickupBeforeCheckIn',
+  ];
   const EJEMPLO = { from: 'A', to: 'B', text: 'X', day: '2026-07-30', days: 40 };
 
   for (const lang of LANGS) {
     test(`[${lang}] cada nota y cada aviso tienen texto propio`, () => {
-      for (const code of CODIGOS_NOTA) {
+      for (const code of [...CODIGOS_NOTA, ...CODIGOS_RESERVA]) {
         const valor = translate(lang, `coordinator.import.note.${code}`);
         const texto = typeof valor === 'function' ? valor({ code, ...EJEMPLO }) : valor;
         assert.ok(typeof texto === 'string' && texto.length > 0, `note.${code}`);
@@ -440,6 +493,218 @@ describe('buildImportPayload — lo revisado se vuelve cuerpo de la petición', 
 
     assert.deepStrictEqual(appointments, []);
     assert.strictEqual(visit.startsAt, null);
+  });
+});
+
+describe('renderImportReview — el hospedaje del Word se ve, se marca y se corrige', () => {
+  for (const lang of LANGS) {
+    test(`[${lang}] los campos del hotel llegan a controles editables`, () => {
+      const html = renderImportReview(leidoConReservas(), ctx(lang));
+
+      assert.ok(html.includes('data-role="import-lodging"'), 'la sección existe');
+      assert.ok(html.includes('value="Quartz Hotel &amp; Spa"'), 'hotel');
+      assert.ok(html.includes('value="QZ-99871"'), 'código de reservación');
+      assert.ok(html.includes('value="Junior suite"'), 'tipo de habitación');
+      assert.ok(html.includes('value="2 adults, 1 child"'), 'ocupación');
+      assert.ok(html.includes('value="$3,164.00 MXN"'), 'el total, verbatim y con moneda (D101)');
+      assert.ok(html.includes('name="nights"'), 'noches');
+      assert.ok(html.includes(translate(lang, 'coordinator.lodging.hotelLabel')), 'las etiquetas se traducen');
+    });
+  }
+
+  test('el check-in y el check-out salen en un control nativo, con la hora supuesta a la vista', () => {
+    const html = renderImportReview(leidoConReservas(), ctx('es'));
+
+    assert.ok(html.includes('value="2026-07-30T15:00"'), 'entrada a las 15:00');
+    assert.ok(html.includes('value="2026-08-01T12:00"'), 'salida a las 12:00');
+    assert.ok(veces(html, 'type="datetime-local" name="checkIn"') === 1);
+    assert.ok(
+      html.includes(translate('es', 'coordinator.import.note.timeAssumed')(
+        { code: 'timeAssumed', from: 'Check-in', to: '3:00 PM' },
+      )),
+      'la hora que nadie escribió se dice, no se guarda en silencio (D106)',
+    );
+  });
+
+  test('una casilla de plantilla sin llenar no llega marcada, y se explica por qué', () => {
+    const html = renderImportReview(leidoConReservas(), ctx('es'));
+    const casilla = html.slice(html.indexOf('name="breakfastIncluded"') - 60, html.indexOf('name="breakfastIncluded"') + 40);
+
+    assert.ok(!casilla.includes('checked'), '[Yes / No] jamás se importa como sí (D103)');
+    assert.ok(html.includes(translate('es', 'coordinator.import.note.templateBlank')(
+      { code: 'templateBlank', text: 'Breakfast included' },
+    )));
+  });
+
+  test('un documento sin tabla de hotel no pinta la sección vacía', () => {
+    const html = renderImportReview(leido(), ctx('es'));
+
+    assert.ok(!html.includes('data-role="import-lodging"'), 'lo que el documento no trae, no se inventa');
+  });
+
+  test('el bloque que necesita atención se resalta, como las filas de citas', () => {
+    const html = renderImportReview(leidoConReservas(), ctx('es'));
+
+    assert.ok(html.includes('nc-coord-import-block--attention'));
+    assert.ok(IMPORT_CSS.includes('.nc-coord-import-block--attention'), 'la clase tiene estilo, no es decorativa');
+  });
+});
+
+describe('renderImportReview — un viaje redondo son dos traslados en pantalla', () => {
+  test('el round-trip del documento pinta DOS bloques, ida y regreso (D104)', () => {
+    const html = renderImportReview(leidoConReservas(), ctx('es'));
+
+    assert.strictEqual(veces(html, 'data-role="import-transfer"'), 2);
+    assert.ok(html.includes('value="2026-07-29T09:00"'), 'la recogida');
+    assert.ok(html.includes('value="2026-08-01T14:00"'), 'el regreso');
+  });
+
+  test('el punto de encuentro sale del catálogo; el del regreso se queda por elegir', () => {
+    const html = renderImportReview(leidoConReservas(), ctx('es'));
+
+    assert.ok(html.includes('value="san_diego_airport" selected'), 'el de la llegada, reconocido (D105)');
+    assert.strictEqual(veces(html, 'value="san_diego_airport" selected'), 1, 'el regreso NO lo hereda');
+    assert.strictEqual(veces(html, 'name="meetingPointId"'), 2);
+    assert.ok(html.includes(translate('es', 'coordinator.import.note.meetingPointMissing')));
+  });
+
+  test('el tipo de vehículo se elige de una lista; la marca y el modelo llegan partidos', () => {
+    const html = renderImportReview(leidoConReservas(), ctx('es'));
+
+    assert.strictEqual(veces(html, 'name="vehicleType"'), 2);
+    for (const tipo of VEHICLE_TYPES) {
+      assert.ok(html.includes(`value="${tipo}"`), `la carrocería ${tipo} se puede elegir`);
+    }
+    assert.ok(!html.includes('value="Kia Seltos"'), 'el nombre comercial no se cuela al enum');
+    assert.ok(html.includes('value="Kia"') && html.includes('value="Seltos"'));
+    assert.ok(html.includes(translate('es', 'coordinator.import.note.vehicleTypeMissing')));
+  });
+
+  test('el teléfono llega con la lada que le pusimos nosotros, y lo dice', () => {
+    const html = renderImportReview(leidoConReservas(), ctx('es'));
+
+    assert.ok(html.includes('value="+52 664 163 1965"'));
+    assert.ok(html.includes(translate('es', 'coordinator.import.note.countryCodeAssumed')(
+      { code: 'countryCodeAssumed', from: '664 163 1965', to: '+52 664 163 1965' },
+    )), 'un número de EE.UU. mal prefijado manda al chofer a un WhatsApp que no existe');
+  });
+
+  test('una recogida anterior al check-in se dice, no se corrige', () => {
+    const html = renderImportReview(leidoConReservas(), ctx('es'));
+
+    assert.ok(html.includes(translate('es', 'coordinator.import.note.pickupBeforeCheckIn')(
+      { code: 'pickupBeforeCheckIn', from: '2026-07-30', to: '2026-07-29' },
+    )));
+  });
+
+  test('un documento sin tabla de transporte no pinta ningún traslado', () => {
+    const html = renderImportReview(leido(), ctx('es'));
+
+    assert.ok(!html.includes('data-role="import-transfer"'));
+  });
+});
+
+describe('renderImportReview — el Guest del hotel se contrasta con el paciente (D102)', () => {
+  const OTRO = HOTEL.map((f) => (f[0] === 'Guest' ? ['Guest', 'Amy Kusonah'] : f));
+
+  test('un huésped distinto se avisa junto a la casilla que confirma el nombre', () => {
+    const html = renderImportReview(leidoConReservas([OTRO, TRANSPORTE, FILAS]), ctx('es'));
+
+    const texto = translate('es', 'coordinator.import.note.guestMismatch')(
+      { code: 'guestMismatch', from: 'Amy Kusonah', to: 'Paula Rivera' },
+    );
+    assert.ok(html.includes(texto), 'es el guard que le faltó al documento de Amy (D84)');
+    assert.ok(
+      html.indexOf(texto) < html.indexOf('data-role="import-lodging"'),
+      'arriba, junto a la confirmación del nombre: es una decisión sobre quién es el paciente',
+    );
+  });
+
+  test('un huésped que sí es el paciente no genera ruido', () => {
+    const html = renderImportReview(leidoConReservas(), ctx('es'));
+
+    assert.ok(!html.includes('guestMismatch'), 'ni el código crudo ni su texto');
+  });
+});
+
+describe('buildImportPayload — el hospedaje y los traslados viajan con las citas (D107)', () => {
+  const FORMA = {
+    patientFirstName: 'Paula',
+    lang: 'es',
+    rows: [{
+      startsAt: '2026-07-30T07:30', durationMin: '30', serviceName: 'BLOOD WORK',
+      locationId: 'floor_10', prep: '', doctor: '', details: '',
+    }],
+    lodging: {
+      hotel: ' Quartz Hotel & Spa ', reservationCode: 'QZ-99871',
+      checkIn: '2026-07-30T15:00', checkOut: '2026-08-01T12:00',
+      roomType: 'Junior suite', nights: '2', occupancy: '2 adults', total: '$3,164.00 MXN',
+      breakfastIncluded: false, recoveryRoom: true,
+    },
+    transfers: [{
+      kind: 'arrival', scheduledAt: '2026-07-29T09:00', meetingPointId: 'san_diego_airport',
+      flightNumber: 'AM 672', driverName: ' Juan Ibarra ', driverPhone: '+52 664 163 1965',
+      vehicleType: 'suv', vehicleMake: 'Kia', vehicleModel: 'Seltos', vehicleColor: '',
+      vehiclePlate: 'AUE105A', notes: 'Llega media hora antes.',
+    }],
+  };
+
+  test('el hospedaje sale con las fechas ya en ISO de Tijuana', () => {
+    const { lodging } = buildImportPayload(FORMA);
+
+    assert.strictEqual(lodging.hotel, 'Quartz Hotel & Spa', 'recortado');
+    assert.strictEqual(lodging.checkIn, '2026-07-30T15:00-07:00');
+    assert.strictEqual(lodging.checkOut, '2026-08-01T12:00-07:00');
+    assert.strictEqual(lodging.roomType, 'Junior suite');
+    assert.strictEqual(lodging.occupancy, '2 adults');
+    assert.strictEqual(lodging.total, '$3,164.00 MXN', 'verbatim: convertirlo a número pierde la moneda');
+  });
+
+  test('las noches viajan como entero y las casillas como booleanos', () => {
+    const { lodging } = buildImportPayload(FORMA);
+
+    assert.strictEqual(lodging.nights, 2);
+    assert.strictEqual(lodging.breakfastIncluded, false);
+    assert.strictEqual(lodging.recoveryRoom, true);
+  });
+
+  test('unas noches en blanco no se vuelven cero', () => {
+    const { lodging } = buildImportPayload({ ...FORMA, lodging: { ...FORMA.lodging, nights: '' } });
+
+    assert.strictEqual(lodging.nights, '', 'el servidor lo lee como "no dijo", no como "cero noches"');
+  });
+
+  test('el traslado se rearma con sus sub-objetos, como los espera el servidor', () => {
+    const { transfers } = buildImportPayload(FORMA);
+
+    assert.strictEqual(transfers.length, 1);
+    assert.deepStrictEqual(transfers[0], {
+      kind: 'arrival',
+      scheduledAt: '2026-07-29T09:00-07:00',
+      meetingPointId: 'san_diego_airport',
+      flightNumber: 'AM 672',
+      driver: { name: 'Juan Ibarra', phone: '+52 664 163 1965' },
+      vehicle: { type: 'suv', make: 'Kia', model: 'Seltos', color: '', plate: 'AUE105A' },
+      notes: 'Llega media hora antes.',
+    });
+  });
+
+  test('una hora que el control no supo dar viaja como null, para que el servidor la rechace', () => {
+    const { lodging, transfers } = buildImportPayload({
+      ...FORMA,
+      lodging: { ...FORMA.lodging, checkIn: '' },
+      transfers: [{ ...FORMA.transfers[0], scheduledAt: '' }],
+    });
+
+    assert.strictEqual(lodging.checkIn, null, 'ni se omite ni se inventa (D75)');
+    assert.strictEqual(transfers[0].scheduledAt, null);
+  });
+
+  test('un documento sin reservas no manda hospedaje, y manda la lista de traslados vacía', () => {
+    const cuerpo = buildImportPayload({ patientFirstName: 'Paula', lang: 'es', rows: FORMA.rows });
+
+    assert.ok(!('lodging' in cuerpo), 'una llave presente y vacía haría que el servidor exija el hotel');
+    assert.deepStrictEqual(cuerpo.transfers, []);
   });
 });
 

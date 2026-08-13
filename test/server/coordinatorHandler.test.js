@@ -840,4 +840,154 @@ describe('POST /import — la importación del itinerario', () => {
     const { deps: d } = deps();
     assert.equal((await handleCoordinatorRequest(pedir('/import'), d)).status, 405);
   });
+
+  // Etapa L — El mismo documento trae ahora hotel y traslados. Siguen siendo
+  // UNA escritura todo o nada (D107): si el traslado de regreso no pasa, no
+  // se crea ni la visita. La alternativa —visita con citas y sin traslado—
+  // es indistinguible de una importación completa hasta que el paciente se
+  // queda esperando en el aeropuerto.
+  const HOSPEDAJE = {
+    hotel: 'Hotel Inventado & Spa',
+    checkIn: '2026-03-10T15:00:00.000-07:00',
+    checkOut: '2026-03-12T12:00:00.000-07:00',
+    roomType: 'STDB | Standard Double',
+    nights: 2,
+    occupancy: '2 adults, 2 children',
+    total: '$1,234.00 MXN',
+  };
+
+  const TRASLADOS = [
+    {
+      kind: 'arrival',
+      scheduledAt: '2026-03-10T09:00:00.000-07:00',
+      meetingPointId: 'san_diego_airport',
+      flightNumber: 'az1950h',
+      driver: { name: 'Nombre Inventado', phone: '+526640000000' },
+      vehicle: { type: 'suv', plate: 'xyz123a' },
+    },
+    {
+      kind: 'departure',
+      scheduledAt: '2026-03-12T17:00:00.000-07:00',
+      meetingPointId: 'quartz',
+      driver: { name: 'Nombre Inventado', phone: '+526640000000' },
+    },
+  ];
+
+  test('el itinerario completo —visita, citas, hotel y traslados— en un solo 201', async () => {
+    const { deps: d } = deps();
+    const res = await importar(d, {
+      visit: VISITA, appointments: CITAS, lodging: HOSPEDAJE, transfers: TRASLADOS,
+    });
+
+    assert.equal(res.status, 201);
+    const { record } = await res.json();
+    assert.equal(record.lodging.hotel, 'Hotel Inventado & Spa');
+    assert.equal(record.lodging.total, '$1,234.00 MXN');
+    assert.equal(record.lodging.nights, 2);
+    assert.deepEqual(record.transfers.map((t) => t.kind), ['arrival', 'departure']);
+    assert.equal(record.transfers[0].flightNumber, 'AZ1950H');
+  });
+
+  test('lo importado queda GUARDADO, no solo devuelto', async () => {
+    const { deps: d, store } = deps();
+    const { record } = await (await importar(d, {
+      visit: VISITA, appointments: CITAS, lodging: HOSPEDAJE, transfers: TRASLADOS,
+    })).json();
+
+    const guardado = await store.getVisit(record.visit.id);
+    assert.equal(guardado.lodging.hotel, 'Hotel Inventado & Spa');
+    assert.equal(guardado.transfers.length, 2);
+  });
+
+  test('el hotel y los traslados son opcionales: cuatro de los cinco documentos no los traen', async () => {
+    const { deps: d } = deps();
+    const res = await importar(d, { visit: VISITA, appointments: CITAS });
+    assert.equal(res.status, 201);
+    const { record } = await res.json();
+    assert.equal(record.lodging, null);
+    assert.deepEqual(record.transfers ?? [], []);
+  });
+
+  test('el hotel y los traslados quedan firmados por la sesión, nunca por el cuerpo', async () => {
+    const { deps: d } = deps({ guardia: { cuenta: { username: 'beti.ramirez', name: 'Beatriz' } } });
+    const { record } = await (await importar(d, {
+      visit: VISITA,
+      appointments: CITAS,
+      lodging: { ...HOSPEDAJE, updatedBy: 'alguien.más' },
+      transfers: TRASLADOS.map((t) => ({ ...t, createdBy: 'alguien.más' })),
+    })).json();
+
+    assert.equal(record.lodging.updatedBy, 'beti.ramirez');
+    for (const t of record.transfers) assert.equal(t.createdBy, 'beti.ramirez');
+  });
+
+  test('si un traslado falla, NO se crea la visita ni nada más', async () => {
+    const { deps: d, store } = deps();
+    const traslados = TRASLADOS.map((t) => ({ ...t }));
+    traslados[1].meetingPointId = 'un_punto_que_no_existe';
+
+    const res = await importar(d, {
+      visit: VISITA, appointments: CITAS, lodging: HOSPEDAJE, transfers: traslados,
+    });
+
+    assert.equal(res.status, 422);
+    assert.deepEqual(await store.listVisits(), [], 'no debe quedar ni la visita vacía');
+  });
+
+  test('si el hospedaje falla, tampoco', async () => {
+    const { deps: d, store } = deps();
+    const res = await importar(d, {
+      visit: VISITA, appointments: CITAS, lodging: { ...HOSPEDAJE, hotel: '' },
+    });
+
+    assert.equal(res.status, 422);
+    assert.equal((await res.json()).errors.lodging.hotel, 'required');
+    assert.deepEqual(await store.listVisits(), []);
+  });
+
+  test('los errores de las TRES partes vienen juntos, en un solo viaje', async () => {
+    const { deps: d } = deps();
+    const citas = CITAS.map((c) => ({ ...c }));
+    citas[0].locationId = 'inventada';
+    const traslados = TRASLADOS.map((t) => ({ ...t }));
+    traslados[1].kind = 'redondo';
+
+    const res = await importar(d, {
+      visit: { ...VISITA, patientFirstName: '' },
+      appointments: citas,
+      lodging: { ...HOSPEDAJE, checkOut: HOSPEDAJE.checkIn },
+      transfers: traslados,
+    });
+
+    assert.equal(res.status, 422);
+    const { errors } = await res.json();
+    assert.equal(errors.patientFirstName, 'required');
+    assert.deepEqual(errors.appointments, [{ index: 0, errors: { locationId: 'unknown' } }]);
+    assert.deepEqual(errors.lodging, { checkOut: 'order' });
+    assert.deepEqual(errors.transfers, [{ index: 1, errors: { kind: 'unknown' } }]);
+  });
+
+  test('un hospedaje o unos traslados que no son lo que dicen ser dan 422, no 500', async () => {
+    const { deps: d, store } = deps();
+    for (const cuerpo of [
+      { lodging: 'un hotel' },
+      { lodging: [] },
+      { transfers: 'dos' },
+      { transfers: [null] },
+      { transfers: [{}] },
+    ]) {
+      const res = await importar(d, { visit: VISITA, appointments: CITAS, ...cuerpo });
+      assert.equal(res.status, 422, `${JSON.stringify(cuerpo)} debería ser 422`);
+    }
+    assert.deepEqual(await store.listVisits(), []);
+  });
+
+  test('una lista de traslados VACÍA no es un error: es un documento sin transporte', async () => {
+    // `addTransfers` rechaza la lista vacía, y con razón: nadie importa cero
+    // traslados a propósito. Pero aquí la llave viene del intérprete, que
+    // devuelve [] cuando el Word no traía tabla de transporte.
+    const { deps: d } = deps();
+    const res = await importar(d, { visit: VISITA, appointments: CITAS, transfers: [] });
+    assert.equal(res.status, 201);
+  });
 });

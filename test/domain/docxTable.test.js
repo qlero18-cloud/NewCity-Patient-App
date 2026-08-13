@@ -7,7 +7,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { docxTableRows, docxParagraphsOutsideTables } from '../../src/domain/docxTable.js';
+import { docxTables, docxTableRows, docxParagraphsOutsideTables } from '../../src/domain/docxTable.js';
 
 // Ayuda para escribir los casos sin ahogarse en XML. Devuelve un
 // word/document.xml mínimo pero con la forma real que produce Word.
@@ -203,5 +203,52 @@ describe('docxParagraphsOutsideTables — el encabezado, que vive fuera de la ta
     const xml = doc(tabla(fila(celda(run('8:00AM')))));
     assert.deepStrictEqual(docxParagraphsOutsideTables(xml), []);
     assert.deepStrictEqual(docxParagraphsOutsideTables(null), []);
+  });
+});
+
+// Etapa L (D99) — El documento real de check-up NO trae una tabla: trae
+// cinco (hotel, transporte, día 1, día 2, y una vacía al final).
+// docxTableRows las aplanaba en una sola lista de 52 filas y el intérprete
+// de itinerarios convertía 19 renglones de hotel y transporte en citas
+// médicas. El límite entre tablas es información, y este es el módulo que
+// la estaba tirando.
+describe('docxTables — el límite entre tablas de Word es un dato, no ruido', () => {
+  const HOTEL = tabla(
+    fila(celda(run('ACCOMMODATION DETAILS'))),
+    fila(celda(run('Hotel')), celda(run('Quartz Hotel &amp; Spa'))),
+  );
+  const DIA = tabla(
+    fila(celda(run('TIME')), celda(run('BLOOD SAMPLE AND TESTS')), celda(run('INSTRUCTIONS'))),
+    fila(celda(run('8:00AM')), celda(run('BLOOD WORK')), celda(run('FASTING 8-12 HOURS'))),
+  );
+
+  test('dos tablas salen como dos listas, no como una sola de cuatro filas', () => {
+    const tablas = docxTables(doc(HOTEL + DIA));
+
+    assert.strictEqual(tablas.length, 2);
+    assert.deepStrictEqual(tablas[0], [['ACCOMMODATION DETAILS'], ['Hotel', 'Quartz Hotel & Spa']]);
+    assert.deepStrictEqual(tablas[1], [
+      ['TIME', 'BLOOD SAMPLE AND TESTS', 'INSTRUCTIONS'],
+      ['8:00AM', 'BLOOD WORK', 'FASTING 8-12 HOURS'],
+    ]);
+  });
+
+  test('una tabla vacía se devuelve vacía, no se descarta: el documento real trae una al final', () => {
+    const tablas = docxTables(doc(HOTEL + tabla(fila(celda(run(''))))));
+
+    assert.strictEqual(tablas.length, 2);
+    assert.deepStrictEqual(tablas[1], [['']]);
+  });
+
+  test('sin tablas devuelve una lista vacía, y una entrada que no es texto también', () => {
+    assert.deepStrictEqual(docxTables(doc('<w:p><w:r><w:t>solo texto</w:t></w:r></w:p>')), []);
+    assert.deepStrictEqual(docxTables(null), []);
+    assert.deepStrictEqual(docxTables(undefined), []);
+  });
+
+  test('docxTableRows sigue devolviendo exactamente el aplanado de docxTables', () => {
+    const xml = doc(HOTEL + DIA);
+
+    assert.deepStrictEqual(docxTableRows(xml), docxTables(xml).flat());
   });
 });

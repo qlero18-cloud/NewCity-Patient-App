@@ -1090,6 +1090,11 @@ const STRINGS = {
       checkOut: 'Check-out',
       breakfastIncluded: 'Desayuno incluido',
       recoveryRoom: 'Habitación recovery',
+      // Etapa L (D101) — los cuatro que venían en el Word y se tiraban.
+      roomType: 'Tipo de habitación',
+      nights: 'Noches',
+      occupancy: 'Ocupación',
+      total: 'Total',
       yes: 'Sí',
       no: 'No',
     },
@@ -1261,6 +1266,8 @@ const STRINGS = {
         langLabel: 'Idioma del paciente',
         langPlaceholder: 'Elige el idioma',
         locationPlaceholder: 'Elige la ubicación',
+        meetingPointPlaceholder: 'Elige el punto de encuentro',
+        vehicleTypePlaceholder: 'Elige el tipo',
         counts: (leidas, importables, atencion) => `${leidas} filas leídas · ${importables} se importarán · ${atencion} necesitan tu atención`,
         skippedNote: (n) => `Otras ${n} filas son encabezados o vienen vacías y no se muestran.`,
         tableCaption: 'Todo lo de esta tabla se puede corregir antes de importar.',
@@ -1296,6 +1303,31 @@ const STRINGS = {
           prepTooLong: 'La preparación es demasiado larga. Recórtala.',
           detailsTooLong: 'Los sub-estudios son demasiado largos. Recórtalos.',
           orphanDetail: 'Esta fila continúa una cita que no existe.',
+          // Etapa L — los del intérprete de reservas. Cada uno nombra el
+          // renglón del Word del que salió: la coordinadora tiene el
+          // documento abierto al lado y "no pudimos leerlo" a secas la deja
+          // buscando cuál de doce campos es.
+          templateBlank: (n) => `El documento dejó “${n.text}” sin llenar: no se importa nada ahí.`,
+          unknownLabel: (n) => `No supimos a qué campo va este renglón: ${n.text}`,
+          valueTooLong: (n) => `“${n.text}” es demasiado largo. Recórtalo.`,
+          valueUnreadable: (n) => `No pudimos leer ${n.from}: ${n.text}`,
+          noYear: 'El documento no trae el año, así que la fecha quedó vacía.',
+          dateUnreadable: (n) => `No pudimos leer la fecha: ${n.text}`,
+          timeAssumed: (n) => `Hora supuesta en ${n.from}: ${n.to}. El documento no la dice.`,
+          timeMissing: (n) => `El documento no dice la hora de ${n.text}.`,
+          dateMissing: 'El documento no dice cuándo es este traslado.',
+          nightsMismatch: (n) => `El documento dice ${n.from} noches, pero entre las fechas hay ${n.to}.`,
+          guestMismatch: (n) => `El hotel está a nombre de ${n.from} y el itinerario dice ${n.to}.`,
+          roundTrip: 'Viaje redondo: se proponen dos traslados, llegada y regreso.',
+          roundTripIncomplete: 'Dice viaje redondo, pero solo trae una fecha.',
+          transferTypeUnknown: (n) => `No reconocimos el tipo de traslado: ${n.text}`,
+          meetingPointUnknown: (n) => `No reconocimos el punto de encuentro: ${n.text}`,
+          meetingPointMissing: 'Falta el punto de encuentro: el documento no lo dice.',
+          countryCodeAssumed: (n) => `Le pusimos lada al teléfono: ${n.from} → ${n.to}. Confírmala.`,
+          phoneUnreadable: (n) => `No pudimos leer el teléfono: ${n.text}`,
+          vehicleSplit: (n) => `“${n.text}” lo partimos en marca y modelo.`,
+          vehicleTypeMissing: 'Falta el tipo de vehículo: elígelo, no lo deducimos del nombre comercial.',
+          pickupBeforeCheckIn: (n) => `La recogida es el ${n.to}, antes del check-in del ${n.from}.`,
         },
         warning: {
           dateUnreadable: (w) => `No pudimos leer la fecha del encabezado: ${w.text}`,
@@ -1327,6 +1359,13 @@ const STRINGS = {
         checkOutLabel: 'Check-out',
         breakfastLabel: 'Desayuno incluido',
         recoveryLabel: 'Habitación recovery',
+        // Etapa L (D101). El total se teclea con moneda y todo —"$3,164.00
+        // MXN"— porque se guarda verbatim: un campo numérico obligaría a
+        // tirar el "MXN" y a que alguien adivine después en qué moneda es.
+        roomTypeLabel: 'Tipo de habitación',
+        nightsLabel: 'Noches',
+        occupancyLabel: 'Ocupación',
+        totalLabel: 'Total (con moneda)',
         save: 'Guardar hospedaje',
         saved: 'Hospedaje guardado.',
         error: {
@@ -1505,6 +1544,10 @@ const STRINGS = {
       checkOut: 'Check-out',
       breakfastIncluded: 'Breakfast included',
       recoveryRoom: 'Recovery room',
+      roomType: 'Room type',
+      nights: 'Nights',
+      occupancy: 'Occupancy',
+      total: 'Total',
       yes: 'Yes',
       no: 'No',
     },
@@ -1631,6 +1674,8 @@ const STRINGS = {
         langLabel: 'Patient language',
         langPlaceholder: 'Choose a language',
         locationPlaceholder: 'Choose a location',
+        meetingPointPlaceholder: 'Choose a meeting point',
+        vehicleTypePlaceholder: 'Choose a type',
         counts: (read, importable, attention) => `${read} rows read · ${importable} will be imported · ${attention} need your attention`,
         skippedNote: (n) => `Another ${n} rows are headers or blank and are not shown.`,
         tableCaption: 'Everything in this table can be corrected before importing.',
@@ -1666,6 +1711,27 @@ const STRINGS = {
           prepTooLong: 'The preparation text is too long. Shorten it.',
           detailsTooLong: 'The sub-studies text is too long. Shorten it.',
           orphanDetail: 'This row continues an appointment that does not exist.',
+          templateBlank: (n) => `The document left “${n.text}” unfilled: nothing is imported there.`,
+          unknownLabel: (n) => `We could not tell which field this row belongs to: ${n.text}`,
+          valueTooLong: (n) => `“${n.text}” is too long. Shorten it.`,
+          valueUnreadable: (n) => `We could not read ${n.from}: ${n.text}`,
+          noYear: 'The document has no year, so the date came out empty.',
+          dateUnreadable: (n) => `We could not read the date: ${n.text}`,
+          timeAssumed: (n) => `Assumed time for ${n.from}: ${n.to}. The document does not say.`,
+          timeMissing: (n) => `The document does not give a time for ${n.text}.`,
+          dateMissing: 'The document does not say when this transfer happens.',
+          nightsMismatch: (n) => `The document says ${n.from} nights, but the dates are ${n.to} apart.`,
+          guestMismatch: (n) => `The hotel is booked under ${n.from} and the itinerary says ${n.to}.`,
+          roundTrip: 'Round trip: we propose two transfers, arrival and departure.',
+          roundTripIncomplete: 'It says round trip, but only one date is given.',
+          transferTypeUnknown: (n) => `We did not recognize the transfer type: ${n.text}`,
+          meetingPointUnknown: (n) => `We did not recognize the meeting point: ${n.text}`,
+          meetingPointMissing: 'Meeting point missing: the document does not say.',
+          countryCodeAssumed: (n) => `We added a country code to the phone: ${n.from} → ${n.to}. Confirm it.`,
+          phoneUnreadable: (n) => `We could not read the phone number: ${n.text}`,
+          vehicleSplit: (n) => `We split “${n.text}” into make and model.`,
+          vehicleTypeMissing: 'Vehicle type missing: pick it — we do not infer it from the brand name.',
+          pickupBeforeCheckIn: (n) => `Pickup is on ${n.to}, before the ${n.from} check-in.`,
         },
         warning: {
           dateUnreadable: (w) => `We could not read the date in the header: ${w.text}`,
@@ -1697,6 +1763,10 @@ const STRINGS = {
         checkOutLabel: 'Check-out',
         breakfastLabel: 'Breakfast included',
         recoveryLabel: 'Recovery room',
+        roomTypeLabel: 'Room type',
+        nightsLabel: 'Nights',
+        occupancyLabel: 'Occupancy',
+        totalLabel: 'Total (with currency)',
         save: 'Save lodging',
         saved: 'Lodging saved.',
         error: {
@@ -2196,6 +2266,13 @@ const transferPoints = [
   punto('tij_terminal', 'Aeropuerto de Tijuana (TIJ) · Llegadas', 'Tijuana Airport (TIJ) · Arrivals', { unconfirmed: true }),
   punto('cbx', 'Cross Border Xpress (CBX)', 'Cross Border Xpress (CBX)', { unconfirmed: true }),
   punto('san_ysidro', 'Garita San Ysidro', 'San Ysidro Port of Entry', { unconfirmed: true }),
+  // Etapa L (D105) — El itinerario real de Word dice "Meeting point: San
+  // Diego Airport" y no había dónde ponerlo: sin esta línea el intérprete
+  // deja el punto vacío y la coordinadora lo teclea a mano en cada
+  // importación, que es justo lo que D40 y D70 evitan. Sigue `unconfirmed`
+  // como los otros tres cruces: el documento no dice en qué terminal ni en
+  // qué acera recoge el chofer.
+  punto('san_diego_airport', 'Aeropuerto de San Diego (SAN)', 'San Diego Airport (SAN)', { unconfirmed: true }),
   punto('quartz', 'Quartz Hotel & Spa', 'Quartz Hotel & Spa'),
   punto('lobby_torre', 'Lobby Torre Médica · Acceso general', 'Medical Tower Lobby · General Access'),
 ];
@@ -4530,6 +4607,19 @@ const PLAZA_CSS = `
 
 
 
+// Etapa L (D101). Los cuatro campos que trae el Word son opcionales: el
+// hotel se aparta antes de saber la tarifa, y un expediente guardado antes
+// de esta etapa no tiene ninguna de las cuatro llaves. Un renglón con la
+// etiqueta y nada al lado se lee como un error de la app, así que se omite
+// entero — mismo criterio que renglonTraslado en transfer.js.
+//
+// La prueba es contra vacío/nulo y NO contra "falsy" a propósito: `nights:
+// 0` es un número que alguien capturó, no un hueco.
+function renglonEstancia(label, valor) {
+  if (valor === '' || valor === null || valor === undefined) return '';
+  return `<p class="nc-stay-row"><span>${escapeHtml(label)}</span> ${escapeHtml(String(valor))}</p>`;
+}
+
 function renderStayScreen(ctx) {
   const { lodging, now, lang, t } = ctx;
   if (!lodging) return '';
@@ -4550,8 +4640,12 @@ function renderStayScreen(ctx) {
       ${renderCard(`
         <p class="nc-stay-row"><span>${escapeHtml(t('stay.checkIn'))}</span> ${escapeHtml(checkInLabel)}</p>
         <p class="nc-stay-row"><span>${escapeHtml(t('stay.checkOut'))}</span> ${escapeHtml(checkOutLabel)}</p>
+        ${renglonEstancia(t('stay.nights'), lodging.nights)}
+        ${renglonEstancia(t('stay.roomType'), lodging.roomType)}
+        ${renglonEstancia(t('stay.occupancy'), lodging.occupancy)}
         <p class="nc-stay-row"><span>${escapeHtml(t('stay.breakfastIncluded'))}</span> ${escapeHtml(yesNo(lodging.breakfastIncluded))}</p>
         <p class="nc-stay-row"><span>${escapeHtml(t('stay.recoveryRoom'))}</span> ${escapeHtml(yesNo(lodging.recoveryRoom))}</p>
+        ${renglonEstancia(t('stay.total'), lodging.total)}
       `)}
     </section>
   `;

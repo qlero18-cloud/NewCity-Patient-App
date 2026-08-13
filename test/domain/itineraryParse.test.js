@@ -17,6 +17,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseItinerary } from '../../src/domain/itineraryParse.js';
 import { locations } from '../../src/data/locations.js';
+import { transferPoints } from '../../src/data/transferPoints.js';
 
 // El encabezado completo de los documentos reales, con datos inventados. Se
 // reproduce entero —y no solo las dos líneas útiles— porque el intérprete
@@ -659,5 +660,238 @@ describe('parseItinerary — conteos y pureza', () => {
       assert.strictEqual(r.patientName, '');
     }
     assert.deepStrictEqual(parseItinerary().rows, []);
+  });
+});
+
+// Etapa L (D100) — Repartir cada tabla a su intérprete.
+//
+// El .docx real de un check-up trae CINCO tablas: hospedaje, transporte,
+// día 1, día 2 y una vacía al final. Aplanadas en una sola lista, 19
+// renglones de hotel y transporte salían como citas médicas: "Quartz Hotel
+// & Spa", "$3,164.00 MXN", "Juan Ibarra". Y peor, en silencio: una fila de
+// dos columnas con la primera vacía se pega a los `details` de la cita
+// anterior, que es la regla que hace funcionar los sub-estudios del
+// laboratorio.
+//
+// El reparto ocurre ANTES de clasificar filas, por el título de la primera
+// fila de cada tabla. Es lo único que garantiza que una fila de hotel nunca
+// llegue a `itinClassify`; un `kind` nuevo dentro de la clasificación no
+// serviría, porque ahí ya no se sabe de qué tabla venía la fila.
+describe('parseItinerary — cada tabla a su intérprete (D100)', () => {
+  const HOTEL = [
+    ['ACCOMMODATION DETAILS'],
+    ['Hotel', 'Hotel Inventado & Spa'],
+    ['Check-in', 'July 27th'],
+    ['Total', '$1,234.00 MXN'],
+  ];
+
+  const TRANSPORTE = [
+    ['TRANSPORTATION'],
+    ['Transfer type:', 'Round-trip'],
+    ['Driver name', 'Nombre Inventado'],
+    ['License plate', 'XYZ123A'],
+  ];
+
+  const DIA = [
+    CABECERA_COLUMNAS,
+    ['8:00AM', 'BLOOD WORK', 'COMPASS IMAGING & LAB'],
+    ['', 'URINALYSIS', ''],
+  ];
+
+  const VACIA = [['']];
+
+  function leerTablas(tables, fechas = 'July 27th – 28th, 2026 – 7:30 AM.') {
+    return parseItinerary({ tables, headings: encabezado('Paciente Prueba', fechas), locations });
+  }
+
+  test('la tabla de hospedaje no produce ni una sola cita', () => {
+    const r = leerTablas([HOTEL, DIA]);
+    assert.deepStrictEqual(citas(r).map((f) => f.serviceName), ['BLOOD WORK']);
+  });
+
+  test('la de transporte tampoco: ni el chofer ni las placas son un estudio', () => {
+    const r = leerTablas([TRANSPORTE, DIA]);
+    assert.deepStrictEqual(citas(r).map((f) => f.serviceName), ['BLOOD WORK']);
+  });
+
+  test('y ninguna de las dos se pega a los detalles de la cita anterior', () => {
+    // El caso silencioso: una fila de reserva cuya primera celda va vacía
+    // entraba por la regla de "sigue la cita anterior" y contaminaba el
+    // expediente sin que nadie lo viera en la pantalla de revisión.
+    const conCeldaVacia = [['ACCOMMODATION DETAILS'], ['', 'Hotel Inventado & Spa'], ['Nights', '2']];
+    const r = leerTablas([DIA, conCeldaVacia]);
+    const sangre = cita(r, 'BLOOD WORK');
+    assert.strictEqual(sangre.details, 'URINALYSIS');
+    assert.ok(!/Hotel Inventado/.test(JSON.stringify(r.rows)), 'el hotel se coló en las filas del itinerario');
+  });
+
+  test('la tabla vacía del final se tolera y no deja huella', () => {
+    const r = leerTablas([DIA, VACIA]);
+    assert.deepStrictEqual(citas(r).map((f) => f.serviceName), ['BLOOD WORK']);
+    assert.deepStrictEqual(r.rows, leerTablas([DIA]).rows);
+  });
+
+  test('una tabla sin título conocido sigue por el camino de siempre', () => {
+    // Los otros cuatro documentos no traen tablas de reserva: una sola tabla
+    // de itinerario tiene que importarse exactamente igual que antes.
+    const r = leerTablas([DIA]);
+    assert.deepStrictEqual(citas(r).map((f) => f.serviceName), ['BLOOD WORK']);
+    assert.strictEqual(cita(r, 'BLOOD WORK').details, 'URINALYSIS');
+  });
+
+  test('dos tablas de itinerario se leen seguidas, como los dos días del documento real', () => {
+    const dia2 = [
+      ['FRIDAY, JULY 28'],
+      CABECERA_COLUMNAS,
+      ['9:00AM', 'CARDIOLOGY CONSULTATION', '27TH FLOOR'],
+    ];
+    const r = leerTablas([HOTEL, TRANSPORTE, DIA, dia2]);
+    assert.deepStrictEqual(citas(r).map((f) => f.serviceName), ['BLOOD WORK', 'CARDIOLOGY CONSULTATION']);
+  });
+
+  test('los índices de las filas devueltas son contiguos desde cero', () => {
+    // La pantalla de revisión los usa de `data-index` y el servidor devuelve
+    // sus errores por posición: un hueco ahí manda el error a otra fila.
+    const r = leerTablas([HOTEL, DIA, TRANSPORTE]);
+    assert.strictEqual(r.rows.length, DIA.length);
+    assert.deepStrictEqual(r.rows.map((f) => f.index), r.rows.map((_, i) => i));
+  });
+
+  test('las filas de reserva se cuentan aparte, no se desaparecen del conteo', () => {
+    const r = leerTablas([HOTEL, DIA, TRANSPORTE]);
+    assert.strictEqual(r.counts.booking, HOTEL.length + TRANSPORTE.length);
+    assert.strictEqual(r.counts.read, HOTEL.length + DIA.length + TRANSPORTE.length);
+    assert.strictEqual(r.rows.length, DIA.length);
+  });
+
+  test('el título se reconoce en español, que es el otro idioma en el que escriben', () => {
+    const hospedaje = [['HOSPEDAJE'], ['Hotel', 'Hotel Inventado & Spa']];
+    const traslados = [['TRANSPORTE'], ['Chofer', 'Nombre Inventado']];
+    const r = leerTablas([hospedaje, traslados, DIA]);
+    assert.deepStrictEqual(citas(r).map((f) => f.serviceName), ['BLOOD WORK']);
+    assert.strictEqual(r.counts.booking, hospedaje.length + traslados.length);
+  });
+
+  test('sin `tables`, `rows` se sigue leyendo como una sola tabla', () => {
+    // 663 renglones de pruebas y cinco llamadas dependen de esta firma.
+    const rows = [...DIA];
+    assert.deepStrictEqual(leerTablas([rows]).rows, leer(rows, encabezado('Paciente Prueba', 'July 27th – 28th, 2026 – 7:30 AM.')).rows);
+  });
+
+  test('`tables` basura no revienta ni se lleva las filas de en medio', () => {
+    for (const basura of [null, 42, 'no soy tablas', {}]) {
+      const r = parseItinerary({ tables: basura, rows: DIA, headings: [], locations });
+      assert.strictEqual(r.rows.length, DIA.length, `falló con ${JSON.stringify(basura)}`);
+    }
+    const conHuecos = parseItinerary({ tables: [null, DIA, 'basura'], headings: [], locations });
+    assert.deepStrictEqual(citas(conHuecos).map((f) => f.serviceName), ['BLOOD WORK']);
+  });
+});
+
+// Etapa L — Lo que el reparto le entrega al intérprete de reservas.
+//
+// itineraryBooking.js ya está probado por su cuenta; lo que se prueba aquí
+// es la costura: que reciba el año y el nombre del ENCABEZADO —los dos
+// viven fuera de las tablas— y que no reciba la fila del título, que no es
+// una etiqueta y saldría marcada como desconocida en cada importación.
+describe('parseItinerary — las reservas salen leídas, no solo apartadas', () => {
+  const HOTEL = [
+    ['ACCOMMODATION DETAILS'],
+    ['Hotel', 'Hotel Inventado & Spa'],
+    ['Guest', 'Otra Persona'],
+    ['Check-in', 'July 27th'],
+    ['Check-out', 'July 29th'],
+  ];
+
+  const TRANSPORTE = [
+    ['TRANSPORTATION'],
+    ['Transfer type:', 'Round-trip'],
+    ['Pickup date and time', 'July 26th 9:00AM'],
+    ['Return date and time', 'July 29th 5:00PM'],
+    ['Meeting point', 'San Diego Airport'],
+    ['Driver phone', '664 000 0000'],
+  ];
+
+  const DIA = [
+    CABECERA_COLUMNAS,
+    ['8:00AM', 'BLOOD WORK', 'COMPASS IMAGING & LAB'],
+  ];
+
+  function leerTodo(tables, extra = {}) {
+    return parseItinerary({
+      tables,
+      headings: encabezado('Paciente Prueba', 'July 27th – 28th, 2026 – 7:30 AM.'),
+      locations,
+      transferPoints,
+      ...extra,
+    });
+  }
+
+  test('la tabla de hospedaje sale como una reserva, no como filas sueltas', () => {
+    const r = leerTodo([HOTEL, DIA]);
+    assert.strictEqual(r.lodging.input.hotel, 'Hotel Inventado & Spa');
+    assert.strictEqual(r.lodging.input.checkIn, '2026-07-27T15:00-07:00');
+  });
+
+  test('el año viene del encabezado: es el único lugar del documento donde está', () => {
+    const r = leerTodo([HOTEL, TRANSPORTE, DIA]);
+    assert.ok(r.lodging.input.checkIn.startsWith('2026-07-27'));
+    assert.ok(r.transfers[0].input.scheduledAt.startsWith('2026-07-26'));
+  });
+
+  test('el nombre del encabezado es contra quien se contrasta el huésped (D102)', () => {
+    const r = leerTodo([HOTEL, DIA]);
+    const n = r.lodging.notes.find((x) => x.code === 'guestMismatch');
+    assert.strictEqual(n.from, 'Otra Persona');
+    assert.strictEqual(n.to, 'Paciente Prueba');
+  });
+
+  test('la fila del título no se le pasa al intérprete como si fuera una etiqueta', () => {
+    // "ACCOMMODATION DETAILS" no es un campo. Si llega, sale marcada como
+    // etiqueta desconocida en TODAS las importaciones y la coordinadora
+    // aprende a ignorar el aviso, que es como se pierden los de verdad.
+    const r = leerTodo([HOTEL, TRANSPORTE, DIA]);
+    const desconocidas = [...r.lodging.notes, ...r.transfers[0].notes]
+      .filter((n) => n.code === 'unknownLabel').map((n) => n.text);
+    assert.deepStrictEqual(desconocidas, []);
+  });
+
+  test('"Round-trip" da los dos traslados y el punto sale del catálogo inyectado', () => {
+    const r = leerTodo([HOTEL, TRANSPORTE, DIA]);
+    assert.deepStrictEqual(r.transfers.map((t) => t.input.kind), ['arrival', 'departure']);
+    assert.strictEqual(r.transfers[0].input.meetingPointId, 'san_diego_airport');
+  });
+
+  test('sin catálogo inyectado no se inventa un punto: se deja vacío', () => {
+    const r = leerTodo([TRANSPORTE, DIA], { transferPoints: undefined });
+    assert.strictEqual(r.transfers[0].input.meetingPointId, '');
+  });
+
+  test('un documento sin tablas de reserva no trae reservas, y eso no es un error', () => {
+    // Los otros cuatro itinerarios reales son así.
+    const r = leerTodo([DIA]);
+    assert.strictEqual(r.lodging, null);
+    assert.deepStrictEqual(r.transfers, []);
+  });
+
+  test('lo marcado en las reservas cuenta como algo que pide tu atención', () => {
+    // Si el conteo solo mirara las citas, la pantalla diría "0 necesitan tu
+    // atención" con una recogida un día antes del check-in y un teléfono al
+    // que le pusimos la lada nosotros.
+    const r = leerTodo([HOTEL, TRANSPORTE, DIA]);
+    const marcados = 1 + r.transfers.filter((t) => t.needsAttention).length;
+    assert.strictEqual(r.counts.needsAttention, marcados);
+    assert.ok(r.lodging.needsAttention);
+    assert.ok(r.transfers.some((t) => t.notes.some((n) => n.code === 'pickupBeforeCheckIn')));
+  });
+
+  test('las citas marcadas siguen contando, no las reemplazan las reservas', () => {
+    const dudosa = [
+      CABECERA_COLUMNAS,
+      ['8:00AM', 'BLOOD WORK', 'UN LUGAR QUE NO EXISTE'],
+    ];
+    const solas = leerTodo([dudosa]).counts.needsAttention;
+    assert.ok(solas > 0, 'la cita con ubicación desconocida ya pedía atención por su cuenta');
+    assert.strictEqual(leerTodo([HOTEL, dudosa]).counts.needsAttention, solas + 1);
   });
 });

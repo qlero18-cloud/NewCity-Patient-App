@@ -149,6 +149,11 @@ Lodging
   checkOut           ISO
   breakfastIncluded  boolean
   recoveryRoom       boolean
+  roomType           string          opcional  "Junior Suite"
+  nights             number | null   entero; null = el documento no lo dice
+  occupancy          string          opcional  "2 adults, 2 children"
+  total              string          VERBATIM con moneda: "$3,164.00 MXN"
+                                     texto y no número a propósito (D101)
 
 Transfer                             traslado contratado (ida y/o vuelta)
   id                 string

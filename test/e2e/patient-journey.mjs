@@ -38,7 +38,7 @@ import { nextStep, groupByDay, isUpdated, isExpired, visiblePasses, timelineItem
 import { defaultOrigin, resolveRoute } from '../../src/domain/routing.js';
 import { routes } from '../../src/data/routes.js';
 import { locations } from '../../src/data/locations.js';
-import { TRANSFER_POINT_IDS } from '../../src/data/transferPoints.js';
+import { TRANSFER_POINT_IDS, transferPoints } from '../../src/data/transferPoints.js';
 import { fixtures } from '../../src/data/fixtures.js';
 import { createHighlighter } from '../../src/map/highlights.js';
 import { resolveInitialLang, translate } from '../../src/ui/i18n.js';
@@ -52,11 +52,15 @@ import { saveVisitCache, loadVisitCache, clearVisitCache } from '../../src/ui/vi
 import { visitUrl } from '../../src/ui/screens/coordinator/handoff.js';
 // Etapa I — la cadena de la importación, de punta a punta.
 import { readDocxDocumentXml } from '../../src/ui/docxFile.js';
-import { docxTableRows, docxParagraphsOutsideTables } from '../../src/domain/docxTable.js';
+// Etapa L — `docxTables` y no `docxTableRows`: es justo el cambio que
+// impide que las tablas de hotel y transporte se aplasten con las citas.
+import { docxTables, docxParagraphsOutsideTables } from '../../src/domain/docxTable.js';
 import { parseItinerary } from '../../src/domain/itineraryParse.js';
 import { toLocalInput } from '../../src/domain/time.js';
 import { buildImportPayload } from '../../src/ui/screens/coordinator/import.js';
 import { renderItineraryScreen } from '../../src/ui/screens/itinerary.js';
+import { renderStayScreen } from '../../src/ui/screens/stay.js';
+import { renderTransferScreen } from '../../src/ui/screens/transfer.js';
 import { documento, parrafo, tabla, docxDe, archivo } from '../helpers/docx.js';
 
 function step(n, description, fn) {
@@ -465,6 +469,43 @@ const DOC_XML = documento([
   parrafo('CHECK-UP ITINERARY'),
   parrafo('Patient: Bernardo Salas DOB: April 6th 1970 Phone Number: +1 555 0100'),
   parrafo('Scheduled Date: July 30 – 31, 2026 – 7:30 AM.'),
+  // Etapa L — las dos tablas que el documento ya traía y que hasta ahora se
+  // aplastaban con las citas: once renglones de hotel y once de transporte
+  // que llegaban al panel convertidos en citas médicas basura.
+  //
+  // El año NO está aquí: sale de "Scheduled Date: … 2026", arriba. El
+  // documento tampoco dice la hora de entrada ni la de salida del hotel.
+  tabla([
+    ['ACCOMMODATION DETAILS'],
+    ['Hotel', 'Quartz Hotel and Spa'],
+    ['Guest', 'Bernardo Salas'],
+    ['Confirmation number', 'QZ-88213'],
+    ['Check-in', 'July 29th'],
+    ['Check- out', 'July 31st'],
+    ['Nights', '2'],
+    ['Room type', 'Junior Suite'],
+    ['Occupancy', '2 adults'],
+    ['Total', '$3,164.00 MXN'],
+    ['Breakfast included', 'Yes'],
+    // D103 — casilla de plantilla que nadie llenó. Jamás se importa como sí.
+    ['Recovery room', '[Yes / No]'],
+  ]),
+  tabla([
+    ['TRANSPORTATION'],
+    ['Transfer type', 'Round-trip'],
+    ['Pickup date and time', 'July 29th 9:00PM'],
+    ['Return date and time', 'July 31st 4:00PM'],
+    ['Meeting point', 'San Diego Airport'],
+    ['Flight (optional)', 'AM 672'],
+    ['Driver name', 'Raul Medina'],
+    // Sin clave de país: diez dígitos que sin +52 mandarían el WhatsApp a
+    // otro país (D73, D106).
+    ['Driver phone', '664 200 1188'],
+    // Marca y modelo, no el enum del catálogo (D106).
+    ['Vehicle type', 'Kia Seltos'],
+    ['License plate', 'BCD456X'],
+    ['Additional notes', 'El chofer espera en la salida de equipaje con un letrero.'],
+  ]),
   tabla([
     ['TIME', 'STUDY', 'LOCATION'],
     ['THRUSDAY , JULY 30', '', ''],
@@ -478,18 +519,22 @@ const DOC_XML = documento([
     ['11:30AM', 'LUNCH BREAK'],
     ['1:00PM', 'OPHTALMOLOGY (2 HOURS)', '22TH FLOOR'],
   ]),
+  // La quinta tabla del documento real: vacía, resto de formato de Word.
+  // Se tolera sin dejar una fila ignorada en la pantalla de revisión.
+  tabla([['', '']]),
 ].join(''));
 
 let leido;
 
-await stepAsync(20, 'el .docx que ya escribe la coordinadora se lee y se entiende: typos corregidos, el piso correcto y la comida aparte', async () => {
+await stepAsync(20, 'el .docx que ya escribe la coordinadora se lee y se entiende: typos corregidos, el piso correcto, la comida aparte, y el hotel y el transporte como reservas y no como citas basura', async () => {
   const res = await readDocxDocumentXml(archivo(docxDe(DOC_XML)));
   assert.strictEqual(res.ok, true, `no se pudo leer el documento: ${JSON.stringify(res)}`);
 
   leido = parseItinerary({
-    rows: docxTableRows(res.xml),
+    tables: docxTables(res.xml),
     headings: docxParagraphsOutsideTables(res.xml),
     locations,
+    transferPoints,
   });
 
   // El nombre se lee pero NO se importa solo: la coordinadora lo confirma en
@@ -500,6 +545,22 @@ await stepAsync(20, 'el .docx que ya escribe la coordinadora se lee y se entiend
 
   assert.strictEqual(leido.counts.importable, 3, 'tres citas: la de URUNALYSIS cuelga de la primera, no es una cuarta');
   assert.strictEqual(leido.counts.meals, 1, 'LUNCH BREAK se ve pero no se importa');
+
+  // Etapa L, y es LO que cambia esta etapa: los veintidós renglones de
+  // hotel y transporte no son citas. Antes del reparto por título este
+  // documento producía diecinueve citas basura —"Quartz Hotel", "2
+  // adults", "$3,164.00 MXN", "BCD456X"— que la coordinadora tenía que
+  // borrar a mano, una por una, en cada importación.
+  assert.strictEqual(leido.counts.booking, 23, 'las dos tablas de reserva se leen aparte, no como citas');
+  const textoDeFilas = leido.rows.map((f) => `${f.serviceName} ${f.details} ${f.prep}`).join(' | ');
+  assert.ok(
+    !/Quartz|Seltos|BCD456X|3,164|Raul Medina|adults/.test(textoDeFilas),
+    // La otra mitad del riesgo, y la silenciosa: itineraryParse.js:390 pega
+    // toda fila sin hora a la cita anterior. Una tabla de hotel entrando
+    // por ahí contamina `details` sin avisar. Por eso se busca en las tres
+    // columnas y no solo en el nombre del servicio.
+    `ninguna fila de reserva puede haberse vuelto cita ni haberse pegado a una: ${textoDeFilas}`,
+  );
 
   const citas = leido.rows.filter((f) => f.kind === 'appointment');
   // D85 — el diccionario corrige, no adivina. Sin esto el paciente lee
@@ -521,7 +582,12 @@ await stepAsync(20, 'el .docx que ya escribe la coordinadora se lee y se entiend
   // nota. El intérprete jamás manda texto libre de ubicación al servidor.
   assert.strictEqual(citas[0].locationId, null);
   assert.ok(citas[0].notes.some((n) => n.code === 'locationUnknown'));
-  assert.strictEqual(leido.counts.needsAttention, 1, 'una fila pide intervención y el conteo lo dice');
+  // Cuatro: la fila sin ubicación, el hospedaje y los dos traslados. Las
+  // tres reservas piden intervención por lo que el documento NO dice —hora
+  // de entrada, clave de país, tipo de vehículo, punto de regreso— y ese es
+  // exactamente el trabajo que la pantalla de revisión le pone enfrente a
+  // la coordinadora en vez de resolverlo por su cuenta (D84).
+  assert.strictEqual(leido.counts.needsAttention, 4, 'lo que pide intervención se cuenta, y el conteo lo dice');
 
   // D86 — "(2 HOURS)" explícito gana; lo que no lo dice son 30 minutos
   // recortados por el hueco, marcados como supuestos.
@@ -531,15 +597,91 @@ await stepAsync(20, 'el .docx que ya escribe la coordinadora se lee y se entiend
   // THRUSDAY → THURSDAY: el typo estaba en la fila de día, y de esa fila
   // sale la fecha de todas las citas del bloque.
   assert.match(citas[0].startsAt, /^2026-07-30T07:30/);
+
+  // --- El hotel -------------------------------------------------------
+  const hotel = leido.lodging.input;
+  assert.strictEqual(hotel.hotel, 'Quartz Hotel and Spa');
+  assert.strictEqual(hotel.reservationCode, 'QZ-88213', '"Confirmation number" es el mismo campo que "Reservation code"');
+  // D101 — con su moneda. Convertirlo a 3164 deja al paciente leyendo una
+  // cifra que puede tomar por dólares.
+  assert.strictEqual(hotel.total, '$3,164.00 MXN');
+  assert.strictEqual(hotel.nights, 2);
+  assert.strictEqual(hotel.roomType, 'Junior Suite');
+  assert.strictEqual(hotel.occupancy, '2 adults');
+  assert.strictEqual(hotel.breakfastIncluded, true);
+  // D103 — "[Yes / No]" es una casilla de plantilla que nadie llenó.
+  assert.strictEqual(hotel.recoveryRoom, false);
+  assert.ok(leido.lodging.notes.some((n) => n.code === 'templateBlank'), 'y se dice que la casilla venía en blanco');
+
+  // El año sale del encabezado —la tabla del hotel no lo trae— y la hora no
+  // está en ninguna parte: se supone y se MARCA (D106).
+  assert.match(hotel.checkIn, /^2026-07-29T15:00/);
+  assert.match(hotel.checkOut, /^2026-07-31T12:00/);
+  assert.strictEqual(leido.lodging.notes.filter((n) => n.code === 'timeAssumed').length, 2);
+  // Guest == Patient: el cruce que faltó en el documento real que traía el
+  // nombre de otra paciente adentro (D102).
+  assert.ok(!leido.lodging.notes.some((n) => n.code === 'guestMismatch'));
+
+  // --- Los traslados --------------------------------------------------
+  // D104 — "Round-trip" no es un campo del modelo: son DOS registros.
+  assert.strictEqual(leido.transfers.length, 2);
+  const [llegadaDoc, regresoDoc] = leido.transfers;
+  assert.strictEqual(llegadaDoc.input.kind, 'arrival');
+  assert.strictEqual(regresoDoc.input.kind, 'departure');
+  assert.match(llegadaDoc.input.scheduledAt, /^2026-07-29T21:00/);
+  assert.match(regresoDoc.input.scheduledAt, /^2026-07-31T16:00/);
+
+  // D105 — el aeropuerto de San Diego no estaba en el catálogo y ahora sí.
+  assert.strictEqual(llegadaDoc.input.meetingPointId, 'san_diego_airport');
+  // Y el regreso NO hereda el punto de la ida: de dónde recogen al paciente
+  // para volver no lo dice el documento, y ponerlo solo sería escribir algo
+  // que nadie dijo. La coordinadora lo elige.
+  assert.strictEqual(regresoDoc.input.meetingPointId, '');
+  assert.ok(regresoDoc.notes.some((n) => n.code === 'meetingPointMissing'));
+  assert.strictEqual(regresoDoc.input.flightNumber, '', 'el vuelo de llegada tampoco es el de regreso');
+
+  // D106 — lo que se precarga marcado, no adivinado en silencio.
+  assert.strictEqual(llegadaDoc.input.driver.phone, '+52 664 200 1188');
+  assert.ok(llegadaDoc.notes.some((n) => n.code === 'countryCodeAssumed'));
+  assert.strictEqual(llegadaDoc.input.vehicle.make, 'Kia');
+  assert.strictEqual(llegadaDoc.input.vehicle.model, 'Seltos');
+  assert.strictEqual(llegadaDoc.input.vehicle.type, '', 'un Seltos es una SUV, pero deducirlo del nombre comercial es adivinar');
+  assert.ok(llegadaDoc.notes.some((n) => n.code === 'vehicleTypeMissing'));
 });
 
 let visitaImportada;
 
-await stepAsync(21, 'las tres citas y la visita entran al servidor en UNA sola escritura, con el nombre que confirmó la coordinadora', async () => {
+await stepAsync(21, 'la visita, las tres citas, el hotel y los dos traslados entran al servidor en UNA sola escritura, con el nombre que confirmó la coordinadora', async () => {
   const payload = buildImportPayload({
     // Confirmado a mano en la pantalla de revisión, no copiado en silencio.
     patientFirstName: 'Bernardo',
     lang: 'es',
+    // Etapa L — el hotel y los dos traslados salen de la misma pantalla y
+    // viajan en la MISMA petición. Las fechas van por `toLocalInput` porque
+    // eso es lo que hay dentro de un <input type="datetime-local">: el
+    // formulario no manda ISO con huso, manda hora local (D91).
+    lodging: {
+      ...leido.lodging.input,
+      checkIn: toLocalInput(leido.lodging.input.checkIn),
+      checkOut: toLocalInput(leido.lodging.input.checkOut),
+    },
+    transfers: leido.transfers.map((v) => ({
+      kind: v.input.kind,
+      scheduledAt: toLocalInput(v.input.scheduledAt),
+      // Los dos <select> que la coordinadora tuvo que tocar porque el
+      // documento no lo dice: de dónde recogen para el regreso, y qué clase
+      // de coche es un Seltos.
+      meetingPointId: v.input.meetingPointId || 'quartz',
+      vehicleType: 'suv',
+      flightNumber: v.input.flightNumber,
+      driverName: v.input.driver.name,
+      driverPhone: v.input.driver.phone,
+      vehicleMake: v.input.vehicle.make,
+      vehicleModel: v.input.vehicle.model,
+      vehicleColor: v.input.vehicle.color,
+      vehiclePlate: v.input.vehicle.plate,
+      notes: v.input.notes,
+    })),
     rows: leido.rows
       .filter((f) => f.kind === 'appointment')
       .map((f) => ({
@@ -557,6 +699,8 @@ await stepAsync(21, 'las tres citas y la visita entran al servidor en UNA sola e
   });
 
   assert.strictEqual(payload.appointments.length, 3, 'la comida no viaja al servidor');
+  assert.strictEqual(payload.transfers.length, 2);
+  assert.strictEqual(payload.lodging.total, '$3,164.00 MXN');
   // D83 — una sola petición. Diecinueve escrituras contra un saveVisit sin
   // compare-and-set multiplican por diecinueve la ventana en la que dos
   // coordinadoras se pisan, y una importación a medias se ve igual que una
@@ -574,6 +718,12 @@ await stepAsync(21, 'las tres citas y la visita entran al servidor en UNA sola e
 
   const expediente = store.getVisit(visitaImportada.id);
   assert.strictEqual(expediente.appointments.length, 3, 'el panel queda al día sin otra vuelta a la red');
+  // D107 — la misma escritura trajo las tres cosas.
+  assert.strictEqual(expediente.transfers.length, 2);
+  assert.strictEqual(expediente.lodging.hotel, 'Quartz Hotel and Spa');
+  assert.strictEqual(expediente.lodging.nights, 2, 'el entero se guarda como entero, no como "2"');
+  assert.strictEqual(expediente.transfers[1].meetingPointId, 'quartz', 'el punto que eligió la coordinadora, no uno heredado');
+  assert.strictEqual(expediente.transfers[0].vehicle.type, 'suv');
 });
 
 await stepAsync(22, 'el paciente abre su enlace y ve el itinerario completo: la preparación, el médico y el piso al que de verdad va', async () => {
@@ -627,5 +777,53 @@ await stepAsync(22, 'el paciente abre su enlace y ve el itinerario completo: la 
   assert.ok(!html.includes('LUNCH BREAK'), 'la comida no se importó, así que no puede aparecer en el itinerario');
 });
 
-console.log('\n22/22 pasos del recorrido pasaron (10 del paciente + 6 del tramo coordinadora→paciente + 3 de traslados + 3 de importación .docx).');
+await stepAsync(23, 'el hotel y los dos traslados del Word llegan al teléfono: el precio, las noches, el chofer y su WhatsApp', async () => {
+  const LA_VISPERA = '2026-07-29T12:00-07:00';
+  const cliente = clienteDelPaciente(LA_VISPERA);
+  const resuelto = await resolveVisitContext(visitaImportada.token, { api: cliente, cache: CACHE, now: LA_VISPERA });
+  assert.ok(resuelto, 'la visita importada tiene que abrir en el teléfono');
+
+  // El mismo hueco que el paso 18 encontró con los traslados: lo guardado en
+  // Blobs no llega al teléfono solo por estar guardado — visitHandler arma
+  // la respuesta y decide qué manda.
+  const hotel = resuelto.record.lodging;
+  assert.ok(hotel, 'el hospedaje importado tiene que viajar al paciente');
+  assert.strictEqual(hotel.total, '$3,164.00 MXN');
+  assert.strictEqual(hotel.roomType, 'Junior Suite');
+  assert.strictEqual(hotel.occupancy, '2 adults');
+  assert.strictEqual(hotel.nights, 2);
+  assert.strictEqual(resuelto.record.transfers.length, 2);
+
+  // Y que salga PINTADO. El cliente decidió que el paciente viera todo el
+  // bloque del hotel, precio incluido; esto es lo que comprueba que se ve.
+  const estancia = renderStayScreen({
+    lodging: hotel,
+    now: LA_VISPERA,
+    lang: 'es',
+    t: (path) => translate('es', path),
+  });
+  assert.ok(estancia.includes('$3,164.00 MXN'), 'el total se ve, con su moneda');
+  assert.ok(estancia.includes('Junior Suite'));
+  assert.ok(estancia.includes('2 adults'));
+  assert.ok(estancia.includes(translate('es', 'stay.nights')));
+  assert.ok(estancia.includes('QZ-88213'), 'y el código que el paciente enseña en la recepción');
+
+  const traslados = renderTransferScreen({
+    transfers: resuelto.record.transfers,
+    now: LA_VISPERA,
+    lang: 'es',
+    t: (path) => translate('es', path),
+  });
+  assert.ok(traslados.includes('Raul Medina'), 'el paciente sabe quién lo recoge');
+  assert.ok(traslados.includes('BCD456X'), 'y en qué coche: las placas son lo que compara en la banqueta');
+  // D106 de punta a punta: la lada que el intérprete propuso y la
+  // coordinadora confirmó es la que hace que el WhatsApp llegue a México y
+  // no a otro país.
+  assert.ok(traslados.includes('href="https://wa.me/526642001188"'), 'el WhatsApp del chofer sale con lada y sin espacios');
+  assert.ok(traslados.includes(translate('es', 'transfer.kind.arrival')));
+  assert.ok(traslados.includes(translate('es', 'transfer.kind.departure')), 'los dos traslados del viaje redondo, no uno');
+  assert.ok(!traslados.includes('2026-07-29T21:00'), 'el paciente no ve un ISO 8601');
+});
+
+console.log('\n23/23 pasos del recorrido pasaron (10 del paciente + 6 del tramo coordinadora→paciente + 3 de traslados + 4 de importación .docx).');
 console.log('Pendiente, fuera del alcance de este script: recorrido visual en navegador (incluidos los cinco .docx reales, fuera del repo) y prueba en teléfono real.');

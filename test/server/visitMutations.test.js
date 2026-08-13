@@ -30,8 +30,16 @@ import {
   revokeQpass,
   validateTransferInput,
   addTransfer,
+  addTransfers,
   editTransfer,
   cancelTransfer,
+  MAX_HOTEL,
+  MAX_RESERVATION_CODE,
+  MAX_ROOM_TYPE,
+  MAX_OCCUPANCY,
+  MAX_TOTAL,
+  MAX_NIGHTS,
+  MAX_IMPORT_TRANSFERS,
   MAX_DURATION_MIN,
   MAX_SERVICE_NAME,
   MAX_DRIVER_NAME,
@@ -954,6 +962,213 @@ describe('addAppointments — la importación es una sola escritura, todo o nada
     const copia = JSON.parse(JSON.stringify(entradas));
     addAppointments(r, entradas, ctxLote());
 
+    assert.deepEqual(entradas, copia);
+  });
+});
+
+// Etapa L — El hospedaje del .docx trae cuatro datos que el modelo no tenía.
+//
+// Y trae algo más incómodo: el TOTAL. El cliente pidió explícitamente que el
+// paciente lo vea, así que el precio de la habitación viaja al teléfono. Se
+// guarda VERBATIM (D101) — "$1,234.00 MXN" con su moneda— porque convertirlo
+// a 1234 pierde el "MXN", y un número sin moneda al lado de un paciente que
+// paga en dólares es peor que no tener precio.
+describe('los cuatro campos nuevos del hospedaje (D101)', () => {
+  const hospedaje = () => ({
+    hotel: 'Hotel Inventado & Spa',
+    checkIn: '2026-03-10T15:00:00.000-07:00',
+    checkOut: '2026-03-12T11:00:00.000-07:00',
+    roomType: 'STDB | Standard Double',
+    nights: 2,
+    occupancy: '2 adults, 2 children',
+    total: '$1,234.00 MXN',
+  });
+
+  test('los cuatro llegan al registro', () => {
+    const r = registro();
+    assert.equal(setLodging(r, hospedaje(), ctx()).ok, true);
+    assert.equal(r.lodging.roomType, 'STDB | Standard Double');
+    assert.equal(r.lodging.nights, 2);
+    assert.equal(r.lodging.occupancy, '2 adults, 2 children');
+    assert.equal(r.lodging.total, '$1,234.00 MXN');
+  });
+
+  test('el total se guarda tal cual, sin tocarle la moneda ni las comas', () => {
+    const r = registro();
+    setLodging(r, { ...hospedaje(), total: '$1,234.00 MXN' }, ctx());
+    assert.strictEqual(r.lodging.total, '$1,234.00 MXN');
+    assert.strictEqual(typeof r.lodging.total, 'string');
+  });
+
+  test('los cuatro son opcionales: el hotel se aparta antes de saber la tarifa', () => {
+    const r = registro();
+    const res = setLodging(r, {
+      hotel: 'Hotel Inventado & Spa',
+      checkIn: '2026-03-10T15:00:00.000-07:00',
+      checkOut: '2026-03-12T11:00:00.000-07:00',
+    }, ctx());
+    assert.equal(res.ok, true);
+    assert.deepEqual(
+      { roomType: r.lodging.roomType, occupancy: r.lodging.occupancy, total: r.lodging.total, nights: r.lodging.nights },
+      { roomType: '', occupancy: '', total: '', nights: null },
+    );
+  });
+
+  test('las noches son un entero, no lo que llegue', () => {
+    for (const malo of ['dos', 2.5, -1, {}, []]) {
+      const res = setLodging(registro(), { ...hospedaje(), nights: malo }, ctx());
+      assert.equal(res.ok, false, `aceptó nights=${JSON.stringify(malo)}`);
+      assert.equal(res.errors.nights, 'invalid');
+    }
+    assert.equal(setLodging(registro(), { ...hospedaje(), nights: '2' }, ctx()).ok, true, 'un formulario manda cadenas');
+  });
+
+  test('cada campo tiene su tope y pasarse es un error, no un recorte', () => {
+    // Recortar en silencio dejaría el total del hotel a la mitad de una
+    // cifra, que se ve como un precio perfectamente válido.
+    for (const [campo, tope] of [['roomType', MAX_ROOM_TYPE], ['occupancy', MAX_OCCUPANCY], ['total', MAX_TOTAL], ['hotel', MAX_HOTEL], ['reservationCode', MAX_RESERVATION_CODE]]) {
+      const res = setLodging(registro(), { ...hospedaje(), [campo]: 'x'.repeat(tope + 1) }, ctx());
+      assert.equal(res.ok, false, `${campo} sin tope`);
+      assert.equal(res.errors[campo], 'tooLong');
+      assert.equal(setLodging(registro(), { ...hospedaje(), [campo]: 'x'.repeat(tope) }, ctx()).ok, true, `${campo} rechazó su tope exacto`);
+    }
+  });
+
+  test('las noches también tienen cinturón: 400 noches es un dedazo', () => {
+    const res = setLodging(registro(), { ...hospedaje(), nights: MAX_NIGHTS + 1 }, ctx());
+    assert.equal(res.errors.nights, 'tooLong');
+    assert.equal(setLodging(registro(), { ...hospedaje(), nights: MAX_NIGHTS }, ctx()).ok, true);
+  });
+
+  test('un POST no puede meter campos que el modelo no tiene', () => {
+    const r = registro();
+    setLodging(r, { ...hospedaje(), visitId: 'v_otra', updatedBy: 'alguien más', precioSecreto: 9 }, ctx());
+    assert.equal(r.lodging.visitId, 'v_1');
+    assert.equal(r.lodging.updatedBy, POR);
+    assert.equal(r.lodging.precioSecreto, undefined);
+  });
+});
+
+// Etapa L (D107) — `addTransfers`, hermano plural de `addAppointments`.
+//
+// `addTransfer` inserta de a uno. Importar dos traslados con él serían dos
+// ciclos leer-modificar-escribir sobre un `saveVisit` sin compare-and-set, y
+// el segundo fallo dejaría medio itinerario guardado. Misma regla que D83:
+// todo o nada, y los errores de todas las filas de una sola vez.
+describe('addTransfers — todo o nada, como la importación de citas (D107)', () => {
+  function ctxLote(extra = {}) {
+    let n = 0;
+    return ctx({ newId: (p) => `${p}_${++n}`, ...extra });
+  }
+
+  const lote = () => ([
+    {
+      kind: 'arrival',
+      scheduledAt: '2026-03-10T09:00:00.000-07:00',
+      meetingPointId: 'san_diego_airport',
+      flightNumber: 'az1950h',
+      driver: { name: 'Nombre Inventado', phone: '+526640000000' },
+      vehicle: { type: '', make: 'Kia', model: 'Seltos', color: '', plate: 'xyz123a' },
+      notes: 'El chofer se pondrá en contacto contigo.',
+    },
+    {
+      kind: 'departure',
+      scheduledAt: '2026-03-12T17:00:00.000-07:00',
+      meetingPointId: 'quartz',
+      driver: { name: 'Nombre Inventado', phone: '+526640000000' },
+      vehicle: {},
+    },
+  ]);
+
+  test('agrega los dos en una sola pasada, en el orden recibido', () => {
+    const r = registro();
+    const res = addTransfers(r, lote(), ctxLote());
+
+    assert.equal(res.ok, true);
+    assert.deepEqual(r.transfers.map((t) => t.kind), ['arrival', 'departure']);
+    assert.deepEqual(r.transfers.map((t) => t.id), ['t_1', 't_2'], 'cada traslado con su id');
+    assert.deepEqual(res.transfers, r.transfers);
+  });
+
+  test('quedan firmados y normalizados igual que los capturados a mano', () => {
+    const r = registro();
+    addTransfers(r, lote(), ctxLote({ by: 'beti.ramirez' }));
+
+    for (const t of r.transfers) {
+      assert.equal(t.visitId, 'v_1');
+      assert.equal(t.status, 'scheduled');
+      assert.equal(t.createdBy, 'beti.ramirez');
+      assert.equal(t.createdAt, AHORA);
+    }
+    assert.equal(r.transfers[0].flightNumber, 'AZ1950H');
+    assert.equal(r.transfers[0].vehicle.plate, 'XYZ123A');
+  });
+
+  test('crea la llave `transfers` si el expediente no la traía', () => {
+    // createVisit no la inicializa y todos los lectores hacen `?? []`: los
+    // expedientes de antes de la Etapa G no tienen la llave.
+    const r = registro();
+    delete r.transfers;
+    assert.equal(addTransfers(r, lote(), ctxLote()).ok, true);
+    assert.equal(r.transfers.length, 2);
+  });
+
+  test('respeta los traslados que ya estaban, no los reemplaza', () => {
+    const r = registro();
+    addTransfer(r, lote()[0], ctx({ newId: () => 't_previo' }));
+    addTransfers(r, lote(), ctxLote());
+    assert.deepEqual(r.transfers.map((t) => t.id), ['t_previo', 't_1', 't_2']);
+  });
+
+  test('UNO malo tumba la importación entera y no deja nada a medias', () => {
+    const r = registro();
+    const entradas = lote();
+    entradas[1].meetingPointId = 'un_punto_que_no_existe';
+
+    const res = addTransfers(r, entradas, ctxLote());
+
+    assert.equal(res.ok, false);
+    assert.deepEqual(r.transfers ?? [], [], 'ni siquiera el primero, que era válido');
+    // Y ni siquiera la llave: un expediente sin traslados sigue sin traerla,
+    // igual que antes de intentar la importación.
+    assert.equal(Object.hasOwn(r, 'transfers'), false);
+  });
+
+  test('el error dice EN QUÉ traslado falló y por qué', () => {
+    const r = registro();
+    const entradas = lote();
+    entradas[0].driver.phone = '664 000 0000';
+    entradas[1].kind = 'redondo';
+
+    const res = addTransfers(r, entradas, ctxLote());
+
+    assert.deepEqual(res.errors, {
+      transfers: [
+        { index: 0, errors: { 'driver.phone': 'invalid' } },
+        { index: 1, errors: { kind: 'unknown' } },
+      ],
+    });
+  });
+
+  test('una lista vacía o que no es lista se rechaza', () => {
+    for (const malo of [[], null, undefined, 'dos', {}]) {
+      const res = addTransfers(registro(), malo, ctxLote());
+      assert.equal(res.ok, false, `aceptó ${JSON.stringify(malo)}`);
+      assert.equal(res.errors.transfers, 'required');
+    }
+  });
+
+  test('hay un tope de traslados por importación', () => {
+    const muchos = Array.from({ length: MAX_IMPORT_TRANSFERS + 1 }, () => lote()[0]);
+    const res = addTransfers(registro(), muchos, ctxLote());
+    assert.equal(res.ok, false);
+    assert.equal(res.errors.transfers, 'tooLong');
+  });
+
+  test('no muta las entradas que recibe', () => {
+    const entradas = lote();
+    const copia = JSON.parse(JSON.stringify(entradas));
+    addTransfers(registro(), entradas, ctxLote());
     assert.deepEqual(entradas, copia);
   });
 });

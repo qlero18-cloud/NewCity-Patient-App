@@ -393,3 +393,72 @@ describe('renderLodgingScreen — las fechas se capturan con el control nativo',
     assert.strictEqual(res.errors?.checkIn, 'noOffset');
   });
 });
+
+// Etapa L — los cuatro campos que la importación del .docx trae del hotel
+// (D101). Van también en el formulario manual y no solo en la revisión de
+// la importación, por una razón concreta y fea: setLodging reescribe el
+// registro ENTERO. Un formulario que solo conozca seis campos borra los
+// otros cuatro la primera vez que alguien entra a corregir el nombre del
+// hotel, sin decir nada. Es el mismo bug que la Etapa H arregló con las
+// fechas y el control nativo.
+describe('renderLodgingScreen — los cuatro campos que trae el Word (D101)', () => {
+  const COMPLETO = {
+    ...HOSPEDAJE,
+    roomType: 'Junior suite',
+    nights: 2,
+    occupancy: '2 adults, 1 child',
+    total: '$3,164.00 MXN',
+  };
+
+  for (const lang of ['es', 'en']) {
+    test(`[${lang}] el formulario los ofrece con su etiqueta`, async () => {
+      const { store, visit } = await panelConVisita({ lang });
+      const html = renderLodgingScreen(ctx(store, visit.id, lang));
+
+      for (const name of ['roomType', 'nights', 'occupancy', 'total']) {
+        assert.ok(html.includes(`name="${name}"`), `falta el campo ${name}`);
+      }
+      for (const key of ['roomTypeLabel', 'nightsLabel', 'occupancyLabel', 'totalLabel']) {
+        assert.ok(html.includes(translate(lang, `coordinator.lodging.${key}`)), `falta la etiqueta ${key}`);
+      }
+    });
+  }
+
+  test('un hospedaje importado se prellena completo, no a medias', async () => {
+    const { store, visit } = await panelConVisita();
+    await guardar(store, visit.id, COMPLETO);
+
+    const html = renderLodgingScreen(ctx(store, visit.id, 'es'));
+
+    assert.ok(html.includes('value="Junior suite"'));
+    assert.ok(html.includes('value="2"'), 'las noches');
+    assert.ok(html.includes('value="2 adults, 1 child"'));
+    assert.ok(html.includes('value="$3,164.00 MXN"'), 'el total con su moneda, verbatim');
+  });
+
+  test('guardar desde el formulario no borra lo que trajo el documento', async () => {
+    const { store, visit } = await panelConVisita();
+    await guardar(store, visit.id, COMPLETO);
+
+    // Lo que hace la pantalla al enviar: lee TODOS sus campos y los manda.
+    // Si el formulario no conociera los cuatro, este segundo guardado los
+    // dejaría vacíos y el paciente perdería el precio de su hotel.
+    const html = renderLodgingScreen(ctx(store, visit.id, 'es'));
+    const leer = (name) => new RegExp(`name="${name}"[^>]*value="([^"]*)"`).exec(html)?.[1] ?? '';
+
+    const reenvio = await store.setLodging(visit.id, {
+      ...HOSPEDAJE,
+      hotel: 'Hotel Prueba Suite (corregido)',
+      roomType: leer('roomType'),
+      nights: leer('nights'),
+      occupancy: leer('occupancy'),
+      total: leer('total'),
+    });
+
+    assert.ok(reenvio.ok, JSON.stringify(reenvio));
+    assert.strictEqual(reenvio.lodging.roomType, 'Junior suite');
+    assert.strictEqual(reenvio.lodging.nights, 2);
+    assert.strictEqual(reenvio.lodging.occupancy, '2 adults, 1 child');
+    assert.strictEqual(reenvio.lodging.total, '$3,164.00 MXN');
+  });
+});

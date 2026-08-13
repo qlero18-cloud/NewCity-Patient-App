@@ -31,6 +31,13 @@ export const transferPoints = [
   punto('tij_terminal', 'Aeropuerto de Tijuana (TIJ) · Llegadas', 'Tijuana Airport (TIJ) · Arrivals', { unconfirmed: true }),
   punto('cbx', 'Cross Border Xpress (CBX)', 'Cross Border Xpress (CBX)', { unconfirmed: true }),
   punto('san_ysidro', 'Garita San Ysidro', 'San Ysidro Port of Entry', { unconfirmed: true }),
+  // Etapa L (D105) — El itinerario real de Word dice "Meeting point: San
+  // Diego Airport" y no había dónde ponerlo: sin esta línea el intérprete
+  // deja el punto vacío y la coordinadora lo teclea a mano en cada
+  // importación, que es justo lo que D40 y D70 evitan. Sigue `unconfirmed`
+  // como los otros tres cruces: el documento no dice en qué terminal ni en
+  // qué acera recoge el chofer.
+  punto('san_diego_airport', 'Aeropuerto de San Diego (SAN)', 'San Diego Airport (SAN)', { unconfirmed: true }),
   punto('quartz', 'Quartz Hotel & Spa', 'Quartz Hotel & Spa'),
   punto('lobby_torre', 'Lobby Torre Médica · Acceso general', 'Medical Tower Lobby · General Access'),
 ];

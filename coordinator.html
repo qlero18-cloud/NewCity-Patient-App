@@ -783,6 +783,11 @@ const STRINGS = {
       checkOut: 'Check-out',
       breakfastIncluded: 'Desayuno incluido',
       recoveryRoom: 'Habitación recovery',
+      // Etapa L (D101) — los cuatro que venían en el Word y se tiraban.
+      roomType: 'Tipo de habitación',
+      nights: 'Noches',
+      occupancy: 'Ocupación',
+      total: 'Total',
       yes: 'Sí',
       no: 'No',
     },
@@ -954,6 +959,8 @@ const STRINGS = {
         langLabel: 'Idioma del paciente',
         langPlaceholder: 'Elige el idioma',
         locationPlaceholder: 'Elige la ubicación',
+        meetingPointPlaceholder: 'Elige el punto de encuentro',
+        vehicleTypePlaceholder: 'Elige el tipo',
         counts: (leidas, importables, atencion) => `${leidas} filas leídas · ${importables} se importarán · ${atencion} necesitan tu atención`,
         skippedNote: (n) => `Otras ${n} filas son encabezados o vienen vacías y no se muestran.`,
         tableCaption: 'Todo lo de esta tabla se puede corregir antes de importar.',
@@ -989,6 +996,31 @@ const STRINGS = {
           prepTooLong: 'La preparación es demasiado larga. Recórtala.',
           detailsTooLong: 'Los sub-estudios son demasiado largos. Recórtalos.',
           orphanDetail: 'Esta fila continúa una cita que no existe.',
+          // Etapa L — los del intérprete de reservas. Cada uno nombra el
+          // renglón del Word del que salió: la coordinadora tiene el
+          // documento abierto al lado y "no pudimos leerlo" a secas la deja
+          // buscando cuál de doce campos es.
+          templateBlank: (n) => `El documento dejó “${n.text}” sin llenar: no se importa nada ahí.`,
+          unknownLabel: (n) => `No supimos a qué campo va este renglón: ${n.text}`,
+          valueTooLong: (n) => `“${n.text}” es demasiado largo. Recórtalo.`,
+          valueUnreadable: (n) => `No pudimos leer ${n.from}: ${n.text}`,
+          noYear: 'El documento no trae el año, así que la fecha quedó vacía.',
+          dateUnreadable: (n) => `No pudimos leer la fecha: ${n.text}`,
+          timeAssumed: (n) => `Hora supuesta en ${n.from}: ${n.to}. El documento no la dice.`,
+          timeMissing: (n) => `El documento no dice la hora de ${n.text}.`,
+          dateMissing: 'El documento no dice cuándo es este traslado.',
+          nightsMismatch: (n) => `El documento dice ${n.from} noches, pero entre las fechas hay ${n.to}.`,
+          guestMismatch: (n) => `El hotel está a nombre de ${n.from} y el itinerario dice ${n.to}.`,
+          roundTrip: 'Viaje redondo: se proponen dos traslados, llegada y regreso.',
+          roundTripIncomplete: 'Dice viaje redondo, pero solo trae una fecha.',
+          transferTypeUnknown: (n) => `No reconocimos el tipo de traslado: ${n.text}`,
+          meetingPointUnknown: (n) => `No reconocimos el punto de encuentro: ${n.text}`,
+          meetingPointMissing: 'Falta el punto de encuentro: el documento no lo dice.',
+          countryCodeAssumed: (n) => `Le pusimos lada al teléfono: ${n.from} → ${n.to}. Confírmala.`,
+          phoneUnreadable: (n) => `No pudimos leer el teléfono: ${n.text}`,
+          vehicleSplit: (n) => `“${n.text}” lo partimos en marca y modelo.`,
+          vehicleTypeMissing: 'Falta el tipo de vehículo: elígelo, no lo deducimos del nombre comercial.',
+          pickupBeforeCheckIn: (n) => `La recogida es el ${n.to}, antes del check-in del ${n.from}.`,
         },
         warning: {
           dateUnreadable: (w) => `No pudimos leer la fecha del encabezado: ${w.text}`,
@@ -1020,6 +1052,13 @@ const STRINGS = {
         checkOutLabel: 'Check-out',
         breakfastLabel: 'Desayuno incluido',
         recoveryLabel: 'Habitación recovery',
+        // Etapa L (D101). El total se teclea con moneda y todo —"$3,164.00
+        // MXN"— porque se guarda verbatim: un campo numérico obligaría a
+        // tirar el "MXN" y a que alguien adivine después en qué moneda es.
+        roomTypeLabel: 'Tipo de habitación',
+        nightsLabel: 'Noches',
+        occupancyLabel: 'Ocupación',
+        totalLabel: 'Total (con moneda)',
         save: 'Guardar hospedaje',
         saved: 'Hospedaje guardado.',
         error: {
@@ -1198,6 +1237,10 @@ const STRINGS = {
       checkOut: 'Check-out',
       breakfastIncluded: 'Breakfast included',
       recoveryRoom: 'Recovery room',
+      roomType: 'Room type',
+      nights: 'Nights',
+      occupancy: 'Occupancy',
+      total: 'Total',
       yes: 'Yes',
       no: 'No',
     },
@@ -1324,6 +1367,8 @@ const STRINGS = {
         langLabel: 'Patient language',
         langPlaceholder: 'Choose a language',
         locationPlaceholder: 'Choose a location',
+        meetingPointPlaceholder: 'Choose a meeting point',
+        vehicleTypePlaceholder: 'Choose a type',
         counts: (read, importable, attention) => `${read} rows read · ${importable} will be imported · ${attention} need your attention`,
         skippedNote: (n) => `Another ${n} rows are headers or blank and are not shown.`,
         tableCaption: 'Everything in this table can be corrected before importing.',
@@ -1359,6 +1404,27 @@ const STRINGS = {
           prepTooLong: 'The preparation text is too long. Shorten it.',
           detailsTooLong: 'The sub-studies text is too long. Shorten it.',
           orphanDetail: 'This row continues an appointment that does not exist.',
+          templateBlank: (n) => `The document left “${n.text}” unfilled: nothing is imported there.`,
+          unknownLabel: (n) => `We could not tell which field this row belongs to: ${n.text}`,
+          valueTooLong: (n) => `“${n.text}” is too long. Shorten it.`,
+          valueUnreadable: (n) => `We could not read ${n.from}: ${n.text}`,
+          noYear: 'The document has no year, so the date came out empty.',
+          dateUnreadable: (n) => `We could not read the date: ${n.text}`,
+          timeAssumed: (n) => `Assumed time for ${n.from}: ${n.to}. The document does not say.`,
+          timeMissing: (n) => `The document does not give a time for ${n.text}.`,
+          dateMissing: 'The document does not say when this transfer happens.',
+          nightsMismatch: (n) => `The document says ${n.from} nights, but the dates are ${n.to} apart.`,
+          guestMismatch: (n) => `The hotel is booked under ${n.from} and the itinerary says ${n.to}.`,
+          roundTrip: 'Round trip: we propose two transfers, arrival and departure.',
+          roundTripIncomplete: 'It says round trip, but only one date is given.',
+          transferTypeUnknown: (n) => `We did not recognize the transfer type: ${n.text}`,
+          meetingPointUnknown: (n) => `We did not recognize the meeting point: ${n.text}`,
+          meetingPointMissing: 'Meeting point missing: the document does not say.',
+          countryCodeAssumed: (n) => `We added a country code to the phone: ${n.from} → ${n.to}. Confirm it.`,
+          phoneUnreadable: (n) => `We could not read the phone number: ${n.text}`,
+          vehicleSplit: (n) => `We split “${n.text}” into make and model.`,
+          vehicleTypeMissing: 'Vehicle type missing: pick it — we do not infer it from the brand name.',
+          pickupBeforeCheckIn: (n) => `Pickup is on ${n.to}, before the ${n.from} check-in.`,
         },
         warning: {
           dateUnreadable: (w) => `We could not read the date in the header: ${w.text}`,
@@ -1390,6 +1456,10 @@ const STRINGS = {
         checkOutLabel: 'Check-out',
         breakfastLabel: 'Breakfast included',
         recoveryLabel: 'Recovery room',
+        roomTypeLabel: 'Room type',
+        nightsLabel: 'Nights',
+        occupancyLabel: 'Occupancy',
+        totalLabel: 'Total (with currency)',
         save: 'Save lodging',
         saved: 'Lodging saved.',
         error: {
@@ -2485,6 +2555,66 @@ const locations = [
 
 const LOCATION_IDS = locations.map((l) => l.id);
 
+// --- src/data/transferPoints.js ---
+// Etapa G — puntos de encuentro de los traslados (aeropuerto ↔ hospital).
+//
+// Catálogo APARTE de src/data/locations.js, y no por gusto (D70): las 7
+// ubicaciones de allá tienen `mapPointId` y participan en el ruteo del mapa
+// (fase 02/04). Estos puntos están fuera del complejo y no se dibujan en
+// ningún plano; meterlos en `locations` obligaría a inventarles un
+// mapPointId que no existe y rompería las tres listas cruzadas que
+// test/data/fixtures.test.js verifica.
+//
+// NINGUNO de los tres puntos de cruce está confirmado por el cliente: no
+// sabemos si el chofer recoge en Llegadas de la terminal, del lado
+// mexicano de CBX o en la garita. Van `unconfirmed: true` — misma
+// convención que la farmacia y que todos los horarios— y la UI los pinta
+// con el distintivo [POR CONFIRMAR], nunca como dato real. Se corrige
+// editando SOLO este archivo. Entra como punto 8 de docs/PRD.md §15.
+//
+// `quartz` y `lobby_torre` repiten a propósito el id de la ubicación
+// equivalente en locations.js: es el mismo lugar físico. No se comparte el
+// objeto porque lo que se necesita aquí (un nombre para un <select>) no es
+// lo que se necesita allá (piso, horario y punto de mapa).
+
+// `punto` y no `loc`: build.py aplana todos los módulos de una entrada a un
+// solo scope al empaquetar, y locations.js ya declara `loc` arriba — dos
+// declaraciones top-level con el mismo nombre son un error de compilación
+// del bundle aunque nunca choquen como módulos ES sueltos.
+function punto(id, nameEs, nameEn, options = {}) {
+  return { id, name: { es: nameEs, en: nameEn }, ...options };
+}
+
+const transferPoints = [
+  punto('tij_terminal', 'Aeropuerto de Tijuana (TIJ) · Llegadas', 'Tijuana Airport (TIJ) · Arrivals', { unconfirmed: true }),
+  punto('cbx', 'Cross Border Xpress (CBX)', 'Cross Border Xpress (CBX)', { unconfirmed: true }),
+  punto('san_ysidro', 'Garita San Ysidro', 'San Ysidro Port of Entry', { unconfirmed: true }),
+  // Etapa L (D105) — El itinerario real de Word dice "Meeting point: San
+  // Diego Airport" y no había dónde ponerlo: sin esta línea el intérprete
+  // deja el punto vacío y la coordinadora lo teclea a mano en cada
+  // importación, que es justo lo que D40 y D70 evitan. Sigue `unconfirmed`
+  // como los otros tres cruces: el documento no dice en qué terminal ni en
+  // qué acera recoge el chofer.
+  punto('san_diego_airport', 'Aeropuerto de San Diego (SAN)', 'San Diego Airport (SAN)', { unconfirmed: true }),
+  punto('quartz', 'Quartz Hotel & Spa', 'Quartz Hotel & Spa'),
+  punto('lobby_torre', 'Lobby Torre Médica · Acceso general', 'Medical Tower Lobby · General Access'),
+];
+
+const TRANSFER_POINT_IDS = transferPoints.map((p) => p.id);
+
+// Los dos enum del traslado, aquí y no en src/server/: la pantalla del
+// panel los necesita para pintar sus <select> y el servidor para validar, y
+// D45 prohíbe que el servidor importe código de UI. src/data/ es el único
+// lugar que las dos mitades pueden leer sin que ninguna dependa de la otra.
+//
+// 'internal' es un traslado DENTRO del complejo (del hotel a la torre, por
+// ejemplo). Lo pidió el cliente como ida y vuelta al aeropuerto, pero el
+// enum lo admite desde ahora porque agregarlo después obligaría a migrar
+// los registros ya guardados.
+const TRANSFER_KINDS = ['arrival', 'departure', 'internal'];
+
+const VEHICLE_TYPES = ['sedan', 'suv', 'van', 'ambulance', 'other'];
+
 // --- src/domain/docxTable.js ---
 // Etapa I — De word/document.xml a filas, celdas y párrafos de texto.
 //
@@ -2590,19 +2720,51 @@ function docxTextOf(xml) {
   return parrafos.join(' ');
 }
 
-/**
- * Las filas de todas las tablas del documento, en orden, como texto.
- * Devuelve una fila por `<w:tr>` y una cadena por `<w:tc>` — sin rellenar
- * ni recortar: las filas reales traen 1, 2 o 3 celdas y esa diferencia es
- * información que el intérprete usa.
- */
-function docxTableRows(xml) {
-  if (typeof xml !== 'string') return [];
+// Las filas de UN `<w:tbl>` ya recortado.
+function docxRowsOf(xml) {
   const filas = [];
   for (const fila of xml.matchAll(DOCX_RE_TR)) {
     filas.push([...fila[1].matchAll(DOCX_RE_TC)].map((celda) => docxTextOf(celda[1])));
   }
   return filas;
+}
+
+/**
+ * Una lista de filas POR CADA `<w:tbl>` del documento, en orden.
+ *
+ * Etapa L (D99) — El límite entre tablas es dato, no ruido. El itinerario
+ * real trae cinco tablas: hotel, transporte, día 1, día 2 y una vacía. Al
+ * aplanarlas, el intérprete de itinerarios recibía las filas del hotel como
+ * si fueran renglones de la tabla de citas y convertía "Quartz Hotel & Spa"
+ * y "$3,164.00 MXN" en citas médicas. Peor: una fila de dos columnas cuya
+ * primera celda quede vacía se pega como continuación de la cita anterior
+ * (itineraryParse.js), y eso contamina un expediente sin avisar.
+ *
+ * Se anida `matchAll` dentro de `matchAll` sin miedo: el iterador clona el
+ * regex, así que el `lastIndex` del externo no se mueve. Sigue en pie el
+ * límite del encabezado: `[\s\S]*?` cortaría mal una tabla ANIDADA, y eso se
+ * arregla con un recorrido con pila, no parchando el patrón.
+ */
+function docxTables(xml) {
+  if (typeof xml !== 'string') return [];
+  // DOCX_RE_TBL no tiene grupo de captura —lo usa docxParagraphsOutsideTables
+  // para BORRAR tablas— así que la tabla entera es m[0], no m[1].
+  return [...xml.matchAll(DOCX_RE_TBL)].map((m) => docxRowsOf(m[0]));
+}
+
+/**
+ * Las filas de todas las tablas del documento, en orden, como texto.
+ * Devuelve una fila por `<w:tr>` y una cadena por `<w:tc>` — sin rellenar
+ * ni recortar: las filas reales traen 1, 2 o 3 celdas y esa diferencia es
+ * información que el intérprete usa.
+ *
+ * Sigue existiendo con la misma firma y el mismo resultado que antes de la
+ * Etapa L: la usan cinco sitios y una decena de aserciones. Quien necesite
+ * saber dónde terminaba cada tabla llama a `docxTables`.
+ */
+function docxTableRows(xml) {
+  if (typeof xml !== 'string') return [];
+  return docxRowsOf(xml);
 }
 
 /**
@@ -2960,6 +3122,524 @@ function formatDayLabel(iso, now, _lang) {
   return { es, en };
 }
 
+// --- src/domain/itineraryBooking.js ---
+// Etapa L — De las tablas de hospedaje y transporte del Word a una reserva
+// PROPUESTA.
+//
+// itineraryParse.js reparte las tablas del documento (D100) y le entrega a
+// este módulo las dos que no son itinerario. Aquí se emparejan etiquetas con
+// campos y NADA MÁS: no se guarda, no se valida contra el servidor y no se
+// decide. Lo que sale es una propuesta que la coordinadora corrige antes de
+// que exista un expediente (D84).
+//
+// Lo que este módulo NO hace, que es donde está el daño:
+//
+//   - No lee el reloj (INV-1). El año sale del encabezado del propio
+//     archivo; si no viene, las fechas quedan VACÍAS y marcadas. Una fecha
+//     rellenada con el año de hoy se ve igual de válida que una correcta.
+//   - No adivina el punto de encuentro. Si el texto no coincide con el
+//     catálogo, devuelve vacío y lo marca. Mandar texto libre al servidor es
+//     justo lo que D40 y D70 existen para impedir.
+//   - No convierte el total a número. "$1,234.00 MXN" se guarda verbatim
+//     (D101): pasarlo a 1234 pierde la moneda, y un precio sin moneda al
+//     lado de un paciente que paga en dólares es peor que no tener precio.
+//   - No guarda al huésped. `Guest` solo sirve para contrastarlo con el
+//     paciente en la pantalla de revisión (D102); la visita sigue guardando
+//     únicamente el nombre de pila (D61).
+//
+// Todo lo supuesto sale MARCADO en `notes`, con el antes y el después. Aquí
+// se suponen tres cosas —la hora del check-in, la lada del chofer y la
+// separación marca/modelo (D106)— y las tres tienen que poder leerse en
+// pantalla. El transporte además mete al expediente el nombre, el teléfono y
+// las placas de un TERCERO: si eso entra en silencio, nadie lo desmiente.
+//
+// Los nombres top-level van con prefijo BKG_/bkg porque build.py aplana
+// todos los módulos de un entry a un solo scope.
+
+
+// Los meses se repiten aquí en vez de importarse de itineraryParse.js a
+// propósito: ese módulo importa a este para repartir las tablas, y un ciclo
+// entre los dos rompería el empaquetado plano. La prueba recorre los doce.
+const BKG_MONTHS = 'JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER';
+const BKG_MONTH_INDEX = new Map(BKG_MONTHS.split('|').map((m, i) => [m, i]));
+
+// "July 27th", "December 31", "August 8th 9:00AM". El día ordinal es
+// opcional porque el documento lo escribe de las dos formas.
+const BKG_DATE_RE = new RegExp(`\\b(${BKG_MONTHS})\\.?\\s+(\\d{1,2})(?:ST|ND|RD|TH)?\\b`, 'i');
+
+// La hora tal como la escriben. El sufijo AM/PM es obligatorio, igual que en
+// el itinerario: un "17:00" suelto no aparece nunca en estos archivos y
+// adivinar el formato de una hora es adivinar a qué hora pasan por alguien.
+const BKG_TIME_RE = /\b(\d{1,2})(?::(\d{2}))?\s*\.?\s*([AP])\.?\s*M\.?/i;
+
+// Una casilla de plantilla sin llenar: "[Yes / No]", "[Single / Double]".
+// Vale para CUALQUIER campo, no solo para los dos que la traen hoy (D103).
+const BKG_TEMPLATE_RE = /^\[[^\]]*\/[^\]]*\]$/;
+
+const BKG_YES = new Set(['YES', 'SI', 'TRUE', 'X', 'INCLUDED', 'INCLUIDO', 'INCLUIDA']);
+const BKG_NO = new Set(['NO', 'FALSE', 'NONE', 'N A', 'NA', 'NINGUNO', 'NINGUNA', '-']);
+
+// Convención universal del hotel, no un dato del documento: por eso van
+// marcadas como supuestas. Las horas del traslado NO se suponen — ver abajo.
+const BKG_DEFAULT_CHECK_IN_MIN = 15 * 60;
+const BKG_DEFAULT_CHECK_OUT_MIN = 12 * 60;
+
+// Topes del servidor (src/server/visitMutations.js). Aquí no se recorta
+// nada: se marca y la coordinadora edita. Recortar en silencio dejaría el
+// total del hotel a la mitad de una cifra.
+const BKG_MAX = {
+  hotel: 120, reservationCode: 40, roomType: 120, occupancy: 120, total: 40,
+  driverName: 120, plate: 20, notes: 280,
+};
+
+// Marca comercial → carrocería del enum. Es un vocabulario de LECTURA, no el
+// enum: VEHICLE_TYPES vive en src/data/ y un módulo de dominio no lo importa
+// (misma razón por la que `locations` se inyecta). La prueba verifica que
+// todo lo que sale de aquí siga siendo un valor válido del enum.
+const BKG_VEHICLE_WORDS = new Map([
+  ['SEDAN', 'sedan'], ['SUV', 'suv'], ['VAN', 'van'], ['MINIVAN', 'van'],
+  ['AMBULANCE', 'ambulance'], ['AMBULANCIA', 'ambulance'],
+]);
+
+// Códigos que son puro aviso y no piden nada de la coordinadora. Todo lo
+// demás cuenta como "necesita tu atención".
+const BKG_INFO_CODES = new Set(['roundTrip']);
+
+// --- Texto -------------------------------------------------------------
+
+function bkgText(raw) {
+  return String(raw ?? '').replace(/\s+/g, ' ').trim();
+}
+
+// La etiqueta como la escribió la coordinadora, sin los dos puntos que unas
+// filas traen y otras no. Es lo que se le enseña en pantalla.
+function bkgLabel(raw) {
+  return bkgText(raw).replace(/\s*:\s*$/, '');
+}
+
+// La etiqueta reducida a lo que se puede comparar: "Flight (optional)" y
+// "Check- in" tienen que caer en el mismo campo que "Flight" y "Check-in".
+function bkgKey(label) {
+  return label.toUpperCase().replace(/\([^)]*\)/g, ' ').replace(/[^A-Z0-9]+/g, ' ').trim();
+}
+
+// Sin acentos ni puntuación, para comparar nombres escritos por personas
+// distintas: "Paciente Inventada" contra "PACIENTE  INVENTADA".
+function bkgFold(raw) {
+  return bkgText(raw).normalize('NFD').replace(/\p{Diacritic}/gu, '')
+    .toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+}
+
+function bkgNote(notes, code, extra) {
+  notes.push(extra === undefined ? { code } : { code, ...extra });
+}
+
+// --- Fechas ------------------------------------------------------------
+
+function bkgParseMinutes(texto) {
+  const m = BKG_TIME_RE.exec(texto);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2] ?? '0');
+  if (h < 1 || h > 12 || min > 59) return null;
+  const base = h === 12 ? 0 : h * 60;
+  return base + min + (/^P$/i.test(m[3]) ? 720 : 0);
+}
+
+// → { monthIndex, day, minutes|null } o null si no hay fecha legible.
+function bkgParseDate(texto) {
+  const m = BKG_DATE_RE.exec(texto);
+  if (!m) return null;
+  const day = Number(m[2]);
+  if (day < 1 || day > 31) return null;
+  return {
+    monthIndex: BKG_MONTH_INDEX.get(m[1].toUpperCase()),
+    day,
+    minutes: bkgParseMinutes(texto.slice(m.index + m[0].length)),
+  };
+}
+
+function bkgDayKey(year, monthIndex, day) {
+  return `${String(year).padStart(4, '0')}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function bkgIso(year, monthIndex, day, minutes) {
+  const hh = String(Math.floor(minutes / 60)).padStart(2, '0');
+  const mm = String(minutes % 60).padStart(2, '0');
+  return toIsoTijuana(`${bkgDayKey(year, monthIndex, day)}T${hh}:${mm}`);
+}
+
+// --- Lectura de una tabla de etiqueta y valor --------------------------
+
+// Cada fila del Word es `["Etiqueta", "valor"]`. Se devuelve un mapa de
+// clave normalizada a { label, value } y se marca lo que no se reconoce: una
+// fila que el documento sí traía y aquí se tira en silencio es un dato que
+// nadie va a echar de menos hasta que haga falta.
+function bkgReadRows(rows, conocidas, notes) {
+  const campos = new Map();
+  for (const bruto of Array.isArray(rows) ? rows : []) {
+    const celdas = (Array.isArray(bruto) ? bruto : []).map(bkgText);
+    const label = bkgLabel(celdas[0]);
+    if (label === '') continue;
+
+    const clave = conocidas.get(bkgKey(label));
+    if (clave === undefined) {
+      bkgNote(notes, 'unknownLabel', { text: label });
+      continue;
+    }
+
+    let value = celdas.slice(1).filter((c) => c !== '').join(' ');
+    if (BKG_TEMPLATE_RE.test(value)) {
+      bkgNote(notes, 'templateBlank', { text: label });
+      value = '';
+    }
+    campos.set(clave, { label, value });
+  }
+  return campos;
+}
+
+function bkgValue(campos, clave) {
+  return campos.get(clave)?.value ?? '';
+}
+
+// El valor, marcado si se pasa del tope del servidor. Nunca recortado.
+function bkgCapped(campos, clave, tope, notes) {
+  const campo = campos.get(clave);
+  if (campo === undefined) return '';
+  if (campo.value.length > tope) bkgNote(notes, 'valueTooLong', { text: campo.label });
+  return campo.value;
+}
+
+function bkgBool(campos, clave, notes) {
+  const campo = campos.get(clave);
+  if (campo === undefined || campo.value === '') return false;
+  const v = bkgFold(campo.value);
+  if (BKG_YES.has(v)) return true;
+  if (BKG_NO.has(v)) return false;
+  bkgNote(notes, 'valueUnreadable', { from: campo.label, text: campo.value });
+  return false;
+}
+
+// La fecha de un campo, con la hora que traiga o la que se le suponga.
+// `assumed` en null significa que la hora NO se supone: para una recogida,
+// las 00:00 mandarían al paciente a la banqueta del aeropuerto de madrugada.
+function bkgDateField(campos, clave, { year, assumed, notes }) {
+  const campo = campos.get(clave);
+  if (campo === undefined || campo.value === '') return null;
+
+  const fecha = bkgParseDate(campo.value);
+  if (!fecha) {
+    bkgNote(notes, 'dateUnreadable', { text: campo.value });
+    return { label: campo.label, iso: '', dayKey: '' };
+  }
+  if (year === null) {
+    bkgNote(notes, 'noYear');
+    return { label: campo.label, iso: '', dayKey: '' };
+  }
+
+  let minutes = fecha.minutes;
+  if (minutes === null) {
+    if (assumed === null) {
+      bkgNote(notes, 'timeMissing', { text: campo.label });
+      return { label: campo.label, iso: '', dayKey: bkgDayKey(year, fecha.monthIndex, fecha.day) };
+    }
+    minutes = assumed;
+    bkgNote(notes, 'timeAssumed', { from: campo.label, to: bkgClock(assumed) });
+  }
+
+  return {
+    label: campo.label,
+    monthIndex: fecha.monthIndex,
+    day: fecha.day,
+    minutes,
+    year,
+    iso: bkgIso(year, fecha.monthIndex, fecha.day, minutes),
+    dayKey: bkgDayKey(year, fecha.monthIndex, fecha.day),
+  };
+}
+
+function bkgClock(minutes) {
+  const h = Math.floor(minutes / 60);
+  const mm = String(minutes % 60).padStart(2, '0');
+  const doce = h % 12 === 0 ? 12 : h % 12;
+  return `${doce}:${mm} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+// --- Hospedaje ---------------------------------------------------------
+
+const BKG_LODGING_LABELS = new Map([
+  ['HOTEL', 'hotel'],
+  ['GUEST', 'guest'],
+  ['CHECK IN', 'checkIn'],
+  ['CHECKIN', 'checkIn'],
+  ['CHECK OUT', 'checkOut'],
+  ['CHECKOUT', 'checkOut'],
+  ['NIGHTS', 'nights'],
+  ['NOCHES', 'nights'],
+  ['OCCUPANCY', 'occupancy'],
+  ['OCUPACION', 'occupancy'],
+  ['ROOM TYPE', 'roomType'],
+  ['TIPO DE HABITACION', 'roomType'],
+  ['TOTAL', 'total'],
+  ['BREAKFAST INCLUDED', 'breakfastIncluded'],
+  ['BREAKFAST', 'breakfastIncluded'],
+  ['RECOVERY ROOM', 'recoveryRoom'],
+  ['RESERVATION CODE', 'reservationCode'],
+  ['CONFIRMATION NUMBER', 'reservationCode'],
+]);
+
+function bkgLodging(rows, { year, patientName }) {
+  const notes = [];
+  const campos = bkgReadRows(rows, BKG_LODGING_LABELS, notes);
+
+  const entrada = bkgDateField(campos, 'checkIn', { year, assumed: BKG_DEFAULT_CHECK_IN_MIN, notes });
+  let salida = bkgDateField(campos, 'checkOut', { year, assumed: BKG_DEFAULT_CHECK_OUT_MIN, notes });
+
+  // Cruce de año: el Word nunca dice el año y un check-out de enero contra
+  // un check-in de diciembre es la estancia de fin de año, no un viaje al
+  // pasado.
+  if (entrada?.iso && salida?.iso && salida.dayKey < entrada.dayKey) {
+    salida = {
+      ...salida,
+      year: salida.year + 1,
+      iso: bkgIso(salida.year + 1, salida.monthIndex, salida.day, salida.minutes),
+      dayKey: bkgDayKey(salida.year + 1, salida.monthIndex, salida.day),
+    };
+  }
+
+  const huesped = bkgValue(campos, 'guest');
+  if (huesped !== '' && bkgFold(huesped) !== bkgFold(patientName)) {
+    bkgNote(notes, 'guestMismatch', { from: huesped, to: bkgText(patientName) });
+  }
+
+  const nights = bkgNights(campos, entrada, salida, notes);
+
+  return bkgRecord({
+    hotel: bkgCapped(campos, 'hotel', BKG_MAX.hotel, notes),
+    reservationCode: bkgCapped(campos, 'reservationCode', BKG_MAX.reservationCode, notes),
+    checkIn: entrada?.iso ?? '',
+    checkOut: salida?.iso ?? '',
+    breakfastIncluded: bkgBool(campos, 'breakfastIncluded', notes),
+    recoveryRoom: bkgBool(campos, 'recoveryRoom', notes),
+    roomType: bkgCapped(campos, 'roomType', BKG_MAX.roomType, notes),
+    nights,
+    occupancy: bkgCapped(campos, 'occupancy', BKG_MAX.occupancy, notes),
+    total: bkgCapped(campos, 'total', BKG_MAX.total, notes),
+  }, notes);
+}
+
+function bkgNights(campos, entrada, salida, notes) {
+  const crudo = bkgValue(campos, 'nights');
+  const nights = /^\d{1,3}$/.test(crudo) ? Number(crudo) : null;
+  if (crudo !== '' && nights === null) {
+    bkgNote(notes, 'valueUnreadable', { from: campos.get('nights').label, text: crudo });
+  }
+  if (nights === null || !entrada?.dayKey || !salida?.dayKey) return nights;
+
+  const dias = Math.round((bkgUtcMs(salida) - bkgUtcMs(entrada)) / 86400000);
+  if (dias !== nights) bkgNote(notes, 'nightsMismatch', { from: nights, to: dias });
+  return nights;
+}
+
+function bkgUtcMs(fecha) {
+  return Date.UTC(fecha.year, fecha.monthIndex, fecha.day);
+}
+
+// --- Transporte --------------------------------------------------------
+
+const BKG_TRANSPORT_LABELS = new Map([
+  ['TRANSFER TYPE', 'type'],
+  ['TIPO DE TRASLADO', 'type'],
+  ['PICKUP DATE AND TIME', 'pickup'],
+  ['PICKUP', 'pickup'],
+  ['RETURN DATE AND TIME', 'return'],
+  ['RETURN', 'return'],
+  ['MEETING POINT', 'meetingPoint'],
+  ['PUNTO DE ENCUENTRO', 'meetingPoint'],
+  ['FLIGHT', 'flightNumber'],
+  ['VUELO', 'flightNumber'],
+  ['DRIVER NAME', 'driverName'],
+  ['CHOFER', 'driverName'],
+  ['DRIVER PHONE', 'driverPhone'],
+  ['TELEFONO DEL CHOFER', 'driverPhone'],
+  ['VEHICLE TYPE', 'vehicle'],
+  ['VEHICLE', 'vehicle'],
+  ['VEHICULO', 'vehicle'],
+  ['LICENSE PLATE', 'plate'],
+  ['PLACAS', 'plate'],
+  ['ADDITIONAL NOTES', 'notes'],
+  ['NOTES', 'notes'],
+  ['NOTAS', 'notes'],
+]);
+
+function bkgDeclaredKind(texto) {
+  if (/ROUND|REDONDO/i.test(texto)) return 'round';
+  if (/DEPART|RETURN|SALIDA|REGRESO/i.test(texto)) return 'departure';
+  if (/ARRIV|ONE\s*-?\s*WAY|LLEGADA|SENCILLO/i.test(texto)) return 'arrival';
+  return null;
+}
+
+// El teléfono del chofer llega sin clave de país y el servidor la exige: sin
+// `+`, transfer.js arma un `wa.me/` que manda el mensaje a otro país (D73).
+// Diez dígitos se precargan con +52 MARCADO; cualquier otra cosa se pasa tal
+// cual y se marca, porque suponerle lada a un número que no entendimos es
+// exactamente el error que esto evita.
+function bkgPhone(crudo, notes) {
+  if (crudo === '') return '';
+  if (crudo.startsWith('+')) return crudo;
+  if (/^[\d\s-]+$/.test(crudo) && crudo.replace(/\D/g, '').length === 10) {
+    const con = `+52 ${crudo}`;
+    bkgNote(notes, 'countryCodeAssumed', { from: crudo, to: con });
+    return con;
+  }
+  bkgNote(notes, 'phoneUnreadable', { text: crudo });
+  return crudo;
+}
+
+// "Kia Seltos" es marca y modelo, no la carrocería del enum. Un Seltos es
+// una SUV, pero deducirlo del nombre comercial es adivinar y el <select> de
+// la revisión está a un clic (D106).
+function bkgVehicle(texto, plate, notes) {
+  const vacio = { type: '', make: '', model: '', color: '', plate };
+  if (texto === '') return vacio;
+
+  const tipo = BKG_VEHICLE_WORDS.get(bkgFold(texto));
+  if (tipo !== undefined) return { ...vacio, type: tipo };
+
+  const partes = texto.split(' ');
+  bkgNote(notes, 'vehicleSplit', { text: texto });
+  bkgNote(notes, 'vehicleTypeMissing');
+  return { ...vacio, make: partes[0], model: partes.slice(1).join(' ') };
+}
+
+function bkgMatchPoint(texto, puntos) {
+  const objetivo = bkgFold(texto);
+  if (objetivo === '') return null;
+  for (const punto of Array.isArray(puntos) ? puntos : []) {
+    for (const nombre of [punto?.name?.es, punto?.name?.en]) {
+      const n = bkgFold(nombre);
+      if (n !== '' && (n === objetivo || n.includes(objetivo) || objetivo.includes(n))) return punto.id;
+    }
+  }
+  return null;
+}
+
+function bkgTransfers(rows, { year, transferPoints, checkInDay }) {
+  const comunes = [];
+  const campos = bkgReadRows(rows, BKG_TRANSPORT_LABELS, comunes);
+
+  const declarado = bkgDeclaredKind(bkgValue(campos, 'type'));
+  const tipoCrudo = bkgValue(campos, 'type');
+  if (tipoCrudo !== '' && declarado === null) {
+    bkgNote(comunes, 'transferTypeUnknown', { text: tipoCrudo });
+  }
+
+  const ida = bkgDateField(campos, 'pickup', { year, assumed: null, notes: comunes });
+  const vuelta = bkgDateField(campos, 'return', { year, assumed: null, notes: comunes });
+
+  // El punto de encuentro del documento es donde RECOGEN al paciente al
+  // llegar. De dónde lo levantan para volver no aparece en ninguna parte, y
+  // suponer "del hotel" es escribir en el expediente algo que nadie dijo.
+  const puntoTexto = bkgValue(campos, 'meetingPoint');
+  const puntoId = bkgMatchPoint(puntoTexto, transferPoints);
+  if (puntoTexto !== '' && puntoId === null) {
+    bkgNote(comunes, 'meetingPointUnknown', { text: puntoTexto });
+  }
+
+  const chofer = {
+    name: bkgCapped(campos, 'driverName', BKG_MAX.driverName, comunes),
+    phone: bkgPhone(bkgValue(campos, 'driverPhone'), comunes),
+  };
+  const vehiculo = bkgVehicle(
+    bkgValue(campos, 'vehicle'),
+    bkgCapped(campos, 'plate', BKG_MAX.plate, comunes).toUpperCase(),
+    comunes,
+  );
+  const notasTexto = bkgCapped(campos, 'notes', BKG_MAX.notes, comunes);
+  // El vuelo es el de LLEGADA: el documento trae un solo campo y ponerlo
+  // también en el regreso sería inventarle al paciente un vuelo de vuelta.
+  const vuelo = bkgValue(campos, 'flightNumber').toUpperCase();
+
+  const planes = [];
+  if (ida) planes.push({ kind: declarado === 'round' ? 'arrival' : (declarado ?? 'arrival'), fecha: ida, vuelo });
+  if (vuelta) planes.push({ kind: 'departure', fecha: vuelta, vuelo: '' });
+  if (planes.length === 0) {
+    planes.push({ kind: declarado === 'round' ? 'arrival' : (declarado ?? 'arrival'), fecha: null, vuelo });
+  }
+
+  return planes.map((plan) => {
+    const notes = [...comunes];
+    if (plan.fecha === null) bkgNote(notes, 'dateMissing');
+    if (declarado === 'round') {
+      bkgNote(notes, planes.length === 2 ? 'roundTrip' : 'roundTripIncomplete');
+    }
+    // El regreso no hereda el punto de la ida, y decirlo es el punto.
+    if (plan.kind === 'departure' || puntoId === null) {
+      if (puntoTexto === '' || plan.kind === 'departure') bkgNote(notes, 'meetingPointMissing');
+    }
+    if (plan.kind === 'arrival' && checkInDay !== '' && plan.fecha?.dayKey && plan.fecha.dayKey < checkInDay) {
+      bkgNote(notes, 'pickupBeforeCheckIn', { from: checkInDay, to: plan.fecha.dayKey });
+    }
+
+    return bkgRecord({
+      kind: plan.kind,
+      scheduledAt: plan.fecha?.iso ?? '',
+      meetingPointId: plan.kind === 'departure' ? '' : (puntoId ?? ''),
+      flightNumber: plan.vuelo,
+      driver: { ...chofer },
+      vehicle: { ...vehiculo },
+      notes: notasTexto,
+    }, notes);
+  });
+}
+
+// --- Salida ------------------------------------------------------------
+
+// `input` es exactamente lo que viaja al servidor; `notes` es lo que se le
+// enseña a la coordinadora. Separados a propósito: así ningún dato que solo
+// servía para marcar algo —el nombre del huésped, el texto del punto que no
+// reconocimos— se cuela al expediente por venir en el mismo objeto.
+function bkgRecord(input, notes) {
+  return {
+    input,
+    notes,
+    needsAttention: notes.some((n) => !BKG_INFO_CODES.has(n.code)),
+  };
+}
+
+/**
+ * Lee las tablas de reserva ya repartidas y devuelve lo que PROPONE guardar.
+ *
+ * @param {object} entrada
+ * @param {string[][]} entrada.lodgingRows   filas de la tabla de hospedaje,
+ *   sin la del título
+ * @param {string[][]} entrada.transportRows filas de la tabla de transporte
+ * @param {number|null} entrada.year         el año del encabezado; sin él,
+ *   las fechas salen vacías y marcadas
+ * @param {string} entrada.patientName       para contrastar contra `Guest`
+ * @param {object[]} entrada.transferPoints  catálogo de puntos de encuentro;
+ *   se inyecta, no se importa, igual que `locations` en itineraryParse.js
+ * @returns {{lodging: object|null, transfers: object[]}}
+ */
+function parseBooking({
+  lodgingRows, transportRows, year, patientName, transferPoints,
+} = {}) {
+  const anio = Number.isInteger(year) ? year : null;
+  const hospedaje = Array.isArray(lodgingRows) && lodgingRows.length > 0
+    ? bkgLodging(lodgingRows, { year: anio, patientName: bkgText(patientName) })
+    : null;
+
+  const transporte = Array.isArray(transportRows) && transportRows.length > 0
+    ? bkgTransfers(transportRows, {
+      year: anio,
+      transferPoints,
+      checkInDay: hospedaje?.input.checkIn ? hospedaje.input.checkIn.slice(0, 10) : '',
+    })
+    : [];
+
+  return { lodging: hospedaje, transfers: transporte };
+}
+
 // --- src/domain/itineraryParse.js ---
 // Etapa I — De las filas del itinerario de Word a citas PROPUESTAS.
 //
@@ -2989,6 +3669,10 @@ function formatDayLabel(iso, now, _lang) {
 // todos los módulos de un entry a un solo scope y dos homónimos serían un
 // error duro de empaquetado.
 
+
+// En un solo sentido: itineraryBooking.js NO importa de aquí. Un ciclo entre
+// los dos rompería el empaquetado plano de build.py, y por eso allá los doce
+// meses están repetidos en vez de compartidos.
 
 const ITIN_MONTHS = 'JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER';
 const ITIN_MONTH_INDEX = new Map(ITIN_MONTHS.split('|').map((m, i) => [m, i]));
@@ -3313,6 +3997,37 @@ function itinReadHeadings(headings, warnings) {
   return out;
 }
 
+// --- Reparto de tablas -------------------------------------------------
+//
+// D100 — El .docx de un check-up trae varias tablas y cada una es de un
+// tipo distinto. El reparto se decide por el TÍTULO de la primera fila y
+// ocurre antes de clasificar renglones, que es lo único que garantiza que
+// una fila de hotel no llegue nunca a `itinClassify`: ahí adentro ya no se
+// sabe de qué tabla venía la fila, y una de dos celdas con la primera vacía
+// se pega a los `details` de la cita anterior sin dejar rastro.
+//
+// Se piden las dos redacciones: los documentos de hoy están en inglés, pero
+// las coordinadoras escriben en los dos idiomas y el precio de no reconocer
+// el título son diecinueve citas basura.
+const ITIN_TBL_LODGING_RE = /\b(?:ACCOMMODATION|LODGING|HOSPEDAJE|ALOJAMIENTO)\b/i;
+const ITIN_TBL_TRANSPORT_RE = /\b(?:TRANSPORTATION|TRANSPORT|TRANSPORTE|TRASLADOS?)\b/i;
+
+function itinTableKind(tabla) {
+  const filas = tabla.filter((f) => Array.isArray(f));
+  // La tabla vacía del final del documento es un resto de formato de Word,
+  // no contenido: no se cuenta como leída ni deja una fila ignorada.
+  if (!filas.some((f) => f.some((c) => itinText(c) !== ''))) return 'empty';
+
+  // El título es una fila de una sola celda con texto. Exigirlo es lo que
+  // impide que una fila de itinerario cualquiera que mencione un traslado
+  // se lleve la tabla entera al intérprete equivocado.
+  const primera = (filas[0] ?? []).map((c) => itinText(c)).filter((c) => c !== '');
+  if (primera.length !== 1) return 'itinerary';
+  if (ITIN_TBL_LODGING_RE.test(primera[0])) return 'lodging';
+  if (ITIN_TBL_TRANSPORT_RE.test(primera[0])) return 'transport';
+  return 'itinerary';
+}
+
 // --- Clasificación de filas -------------------------------------------
 
 function itinBlankRow(index, raw, kind, notes) {
@@ -3390,15 +4105,28 @@ function itinClassify(index, raw, cells, notes, contexto) {
  * @param {object[]} entrada.locations   catálogo de ubicaciones; se inyecta,
  *   no se importa, igual que routing.js recibe sus rutas — así la prueba
  *   puede acotar el catálogo y este módulo no depende de src/data/.
+ * @param {object[]} entrada.transferPoints catálogo de puntos de encuentro,
+ *   inyectado por la misma razón; sin él, el punto se queda vacío en vez de
+ *   inventarse.
  * @returns {{patientName: string, packageName: string, days: string[],
- *   discarded: string[], warnings: object[], rows: object[], counts: object}}
+ *   discarded: string[], warnings: object[], rows: object[], counts: object,
+ *   lodging: object|null, transfers: object[]}}
  */
-function parseItinerary({ rows, headings, locations } = {}) {
+function parseItinerary({ tables, rows, headings, locations, transferPoints } = {}) {
   const warnings = [];
   const catalogo = Array.isArray(locations) ? locations : [];
   const cabecera = itinReadHeadings(headings, warnings);
 
+  // Sin `tables` se lee `rows` como una sola tabla: es la firma con la que
+  // ya llaman la pantalla de importación y el e2e, y sigue valiendo.
+  const lista = Array.isArray(tables) ? tables : [Array.isArray(rows) ? rows : []];
+
   const filas = [];
+  // `read` cuenta TODAS las filas de reserva, título incluido: es una fila
+  // del documento y la pantalla dice cuántas se leyeron. Las listas, en
+  // cambio, van sin el título — no es una etiqueta y saldría marcada como
+  // desconocida en cada importación.
+  const reservas = { lodging: [], transport: [], read: 0 };
   const usados = new Set(cabecera.days);
   let dayKey = cabecera.days[0] ?? null;
   let ultima = null;
@@ -3415,20 +4143,47 @@ function parseItinerary({ rows, headings, locations } = {}) {
     },
   };
 
-  for (const [index, bruto] of (Array.isArray(rows) ? rows : []).entries()) {
-    const raw = Array.isArray(bruto) ? bruto : [];
-    const notes = [];
-    const cells = raw.map((c) => itinApplyTypos(itinText(c), notes));
-    const fila = itinClassify(index, raw, cells, notes, contexto);
-    if (fila.kind === 'appointment' || fila.kind === 'meal') {
-      fila.dayKey = dayKey;
-      if (fila.kind === 'appointment') ultima = fila;
+  for (const cruda of lista) {
+    const tabla = Array.isArray(cruda) ? cruda : [];
+    const tipo = itinTableKind(tabla);
+    if (tipo === 'empty') continue;
+    if (tipo !== 'itinerary') {
+      const filasTabla = tabla.filter((f) => Array.isArray(f));
+      reservas.read += filasTabla.length;
+      reservas[tipo].push(...filasTabla.slice(1));
+      continue;
     }
-    filas.push(fila);
+
+    for (const bruto of tabla) {
+      const raw = Array.isArray(bruto) ? bruto : [];
+      const notes = [];
+      const cells = raw.map((c) => itinApplyTypos(itinText(c), notes));
+      // El índice es la posición dentro de las filas DEVUELTAS, no dentro del
+      // documento: la pantalla de revisión lo usa de `data-index` y el
+      // servidor devuelve sus errores por posición. Un hueco donde iba una
+      // tabla de hotel mandaría el error a la fila equivocada.
+      const fila = itinClassify(filas.length, raw, cells, notes, contexto);
+      if (fila.kind === 'appointment' || fila.kind === 'meal') {
+        fila.dayKey = dayKey;
+        if (fila.kind === 'appointment') ultima = fila;
+      }
+      filas.push(fila);
+    }
   }
 
   itinResolveTimes(filas, warnings);
   itinFinish(filas);
+
+  // El año y el nombre viven en el ENCABEZADO, fuera de las tablas: el
+  // intérprete de reservas no tiene forma de sacarlos por su cuenta, y sin
+  // el año no hay fecha (INV-1: aquí nadie lee el reloj).
+  const { lodging, transfers } = parseBooking({
+    lodgingRows: reservas.lodging,
+    transportRows: reservas.transport,
+    year: cabecera.year,
+    patientName: cabecera.patientName,
+    transferPoints,
+  });
 
   return {
     patientName: cabecera.patientName,
@@ -3437,7 +4192,9 @@ function parseItinerary({ rows, headings, locations } = {}) {
     discarded: cabecera.discarded,
     warnings,
     rows: filas.map(({ dayKey: _d, minutes: _m, rawTime: _r, ...resto }) => resto),
-    counts: itinCounts(filas),
+    counts: itinCounts(filas, reservas, lodging, transfers),
+    lodging,
+    transfers,
   };
 }
 
@@ -3515,13 +4272,24 @@ function itinFinish(filas) {
   }
 }
 
-function itinCounts(filas) {
+function itinCounts(filas, reservas, lodging, transfers) {
   const citas = filas.filter((f) => f.kind === 'appointment');
+  // `booking` va aparte y `read` las suma: las filas de hotel y transporte
+  // se leyeron de verdad, y desaparecerlas del conteo dejaría a la pantalla
+  // de revisión diciendo "31 filas leídas" sobre un documento de 52.
+  const booking = reservas.read;
+  // El hotel cuenta como UNO y cada traslado como UNO: son los bloques que
+  // la coordinadora revisa, no sus renglones. Si el conteo solo mirara las
+  // citas, la pantalla diría "0 necesitan tu atención" con una recogida un
+  // día antes del check-in y un teléfono al que le pusimos la lada nosotros.
+  const reservado = (lodging?.needsAttention ? 1 : 0)
+    + (transfers ?? []).filter((t) => t.needsAttention).length;
   return {
-    read: filas.length,
+    read: filas.length + booking,
     importable: citas.length,
+    booking,
     meals: filas.filter((f) => f.kind === 'meal').length,
-    needsAttention: citas.filter((f) => f.notes.some((n) => ITIN_ATTENTION_CODES.has(n.code))).length,
+    needsAttention: citas.filter((f) => f.notes.some((n) => ITIN_ATTENTION_CODES.has(n.code))).length + reservado,
   };
 }
 
@@ -3754,9 +4522,23 @@ async function readDocxDocumentXml(source) {
 
 
 
+
+
 const IMP_ACCEPT = '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const IMP_LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/;
 const IMP_OPCIONALES = ['prep', 'doctor', 'details'];
+// Los nombres de control que el submit lee de cada bloque de reserva. Uno
+// solo, compartido con el render de arriba: dos listas divergirían al
+// primer campo nuevo y el que faltara aquí se perdería en silencio.
+const IMP_LODGING_FIELDS = [
+  'hotel', 'reservationCode', 'checkIn', 'checkOut',
+  'roomType', 'nights', 'occupancy', 'total',
+];
+const IMP_TRANSFER_FIELDS = [
+  'kind', 'scheduledAt', 'meetingPointId', 'flightNumber',
+  'driverName', 'driverPhone',
+  'vehicleType', 'vehicleMake', 'vehicleModel', 'vehicleColor', 'vehiclePlate', 'notes',
+];
 
 function impTrim(v) {
   return typeof v === 'string' ? v.trim() : '';
@@ -3788,11 +4570,21 @@ function impNeedsAttention(fila) {
   return fila.notes.some((n) => ITIN_ATTENTION_CODES.has(n.code));
 }
 
+// Qué nota se pinta en rojo depende del intérprete que la emitió, y son
+// dos con criterios opuestos: el de citas marca lo excepcional
+// (ITIN_ATTENTION_CODES) y el de reservas marca TODO salvo lo puramente
+// informativo (BKG_INFO_CODES). Un solo conjunto para los dos dejaría en
+// gris "le pusimos lada nosotros", que es exactamente lo que hay que mirar.
+function impAtencion(nota, kind) {
+  if (kind === 'warning') return true;
+  if (kind === 'booking') return !BKG_INFO_CODES.has(nota.code);
+  return ITIN_ATTENTION_CODES.has(nota.code);
+}
+
 function impNotesHtml(notas, t, kind) {
   return notas
     .map((n) => {
-      const atencion = kind === 'warning' || ITIN_ATTENTION_CODES.has(n.code);
-      const clase = atencion ? 'nc-coord-import-note--attention' : 'nc-coord-import-note--fixed';
+      const clase = impAtencion(n, kind) ? 'nc-coord-import-note--attention' : 'nc-coord-import-note--fixed';
       return `<li class="nc-coord-import-note ${clase}">${escapeHtml(impNoteText({ ...n, kind }, t))}</li>`;
     })
     .join('');
@@ -3869,6 +4661,140 @@ function impSkippedRow(fila, t) {
   `;
 }
 
+// --- Etapa L — las dos secciones de reserva ----------------------------
+//
+// Misma disciplina que la tabla de citas, no una pantalla aparte: todo
+// editable, lo supuesto marcado en rojo, y nada enumerable tecleado. La
+// diferencia es la forma —un bloque de campos con etiqueta en vez de una
+// fila de tabla— porque son diez campos de UN hotel, no diez filas
+// comparables entre sí.
+
+function impCampo(label, control) {
+  return `
+    <label class="nc-coord-import-field">
+      <span class="nc-coord-import-field-label">${escapeHtml(label)}</span>
+      ${control}
+    </label>
+  `;
+}
+
+function impTexto(name, label, value = '', extra = '') {
+  return impCampo(
+    label,
+    `<input type="text" name="${name}" class="nc-coord-import-input" value="${escapeHtml(value ?? '')}"${extra} />`,
+  );
+}
+
+// El value NO es el ISO guardado: un datetime-local con el desplazamiento
+// adentro sale VACÍO y borraría la fecha sin avisar (D75, Etapa H).
+function impFechaHora(name, label, iso, extra = '') {
+  return impCampo(
+    label,
+    `<input type="datetime-local" name="${name}" class="nc-coord-import-input" value="${escapeHtml(toLocalInput(iso))}"${extra} />`,
+  );
+}
+
+function impCasilla(name, label, marcada) {
+  return `
+    <label class="nc-coord-import-check">
+      <input type="checkbox" name="${name}"${marcada ? ' checked' : ''} />
+      <span>${escapeHtml(label)}</span>
+    </label>
+  `;
+}
+
+function impEnumSelect(name, label, valores, prefijo, t, selected, vacia) {
+  // El <option> vacío va PRIMERO y seleccionado cuando no hubo
+  // coincidencia, por lo mismo que en la ubicación de una cita: sin él el
+  // navegador elige la primera opción del enum y el traslado se importaría
+  // con una carrocería que nadie decidió.
+  const opciones = valores
+    .map((v) => `<option value="${v}"${v === selected ? ' selected' : ''}>${escapeHtml(t(`${prefijo}.${v}`))}</option>`)
+    .join('');
+  const nada = vacia ? `<option value=""${selected ? '' : ' selected'}>${escapeHtml(vacia)}</option>` : '';
+  return impCampo(label, `<select name="${name}" class="nc-coord-import-input">${nada}${opciones}</select>`);
+}
+
+function impBloque(role, titulo, campos, record, t, extra = '') {
+  const atencion = record.needsAttention ? ' nc-coord-import-block--attention' : '';
+  return `
+    <fieldset data-role="${role}"${extra} class="nc-coord-import-block${atencion}">
+      <legend class="nc-coord-import-subtitle">${escapeHtml(titulo)}</legend>
+      <div class="nc-coord-import-grid">${campos}</div>
+      <ul class="nc-coord-import-notes">${impNotesHtml(record.notes, t, 'booking')}</ul>
+    </fieldset>
+  `;
+}
+
+function impLodging(lodging, t) {
+  if (!lodging) return '';
+  const v = lodging.input;
+  const l = (llave) => t(`coordinator.lodging.${llave}`);
+
+  return impBloque('import-lodging', l('title'), `
+    ${impTexto('hotel', l('hotelLabel'), v.hotel, ' required')}
+    ${impTexto('reservationCode', l('reservationCodeLabel'), v.reservationCode)}
+    ${impFechaHora('checkIn', l('checkInLabel'), v.checkIn, ' required')}
+    ${impFechaHora('checkOut', l('checkOutLabel'), v.checkOut, ' required')}
+    ${impTexto('roomType', l('roomTypeLabel'), v.roomType)}
+    ${impCampo(l('nightsLabel'), `<input type="number" name="nights" class="nc-coord-import-input" min="0" step="1" value="${escapeHtml(v.nights ?? '')}" />`)}
+    ${impTexto('occupancy', l('occupancyLabel'), v.occupancy)}
+    ${impTexto('total', l('totalLabel'), v.total)}
+    ${impCasilla('breakfastIncluded', l('breakfastLabel'), v.breakfastIncluded)}
+    ${impCasilla('recoveryRoom', l('recoveryLabel'), v.recoveryRoom)}
+  `, lodging, t);
+}
+
+function impTransfers(transfers, lang, t) {
+  if (!Array.isArray(transfers) || transfers.length === 0) return '';
+  const sinConfirmar = t('common.unconfirmedBadge');
+  const c = (llave) => t(`coordinator.transfers.${llave}`);
+
+  return transfers
+    .map((traslado, index) => {
+      const v = traslado.input;
+      // Sin coincidencia en el catálogo el <select> se queda en el
+      // placeholder y `required` frena el envío: el regreso NO hereda el
+      // punto de la llegada porque el documento no dice de dónde sale.
+      const vacio = v.meetingPointId
+        ? ''
+        : `<option value="" disabled selected>${escapeHtml(t('coordinator.import.meetingPointPlaceholder'))}</option>`;
+      const punto = impCampo(
+        c('meetingPointLabel'),
+        `<select name="meetingPointId" class="nc-coord-import-input" required>`
+        + `${vacio}${transferPointOptionsHtml(transferPoints, lang, v.meetingPointId, sinConfirmar)}</select>`,
+      );
+
+      const campos = `
+        ${impEnumSelect('kind', c('kindLabel'), TRANSFER_KINDS, 'transfer.kind', t, v.kind, '')}
+        ${impFechaHora('scheduledAt', c('scheduledAtLabel'), v.scheduledAt, ' required')}
+        ${punto}
+        ${impTexto('flightNumber', c('flightNumberLabel'), v.flightNumber)}
+        ${impTexto('driverName', c('driverNameLabel'), v.driver.name)}
+        ${impTexto('driverPhone', c('driverPhoneLabel'), v.driver.phone)}
+        ${impEnumSelect('vehicleType', c('vehicleTypeLabel'), VEHICLE_TYPES, 'transfer.vehicleType', t, v.vehicle.type, t('coordinator.import.vehicleTypePlaceholder'))}
+        ${impTexto('vehicleMake', c('vehicleMakeLabel'), v.vehicle.make)}
+        ${impTexto('vehicleModel', c('vehicleModelLabel'), v.vehicle.model)}
+        ${impTexto('vehicleColor', c('vehicleColorLabel'), v.vehicle.color)}
+        ${impTexto('vehiclePlate', c('plateLabel'), v.vehicle.plate)}
+        ${impCampo(c('notesLabel'), `<textarea name="notes" rows="2" class="nc-coord-import-input">${escapeHtml(v.notes ?? '')}</textarea>`)}
+      `;
+
+      return impBloque('import-transfer', t(`transfer.kind.${v.kind}`), campos, traslado, t, ` data-index="${index}"`);
+    })
+    .join('');
+}
+
+// El "el hotel está a nombre de otra persona" sube junto a la casilla que
+// confirma el nombre y no se queda abajo, en el bloque del hospedaje: es
+// una decisión sobre QUIÉN es el paciente, y ahí es donde se toma (D84).
+function impGuestMismatch(lodging, t) {
+  const nota = (lodging?.notes ?? []).find((n) => n.code === 'guestMismatch');
+  if (!nota) return '';
+  return `<p class="nc-coord-import-note nc-coord-import-note--attention" role="alert">${
+    escapeHtml(impNoteText({ ...nota, kind: 'booking' }, t))}</p>`;
+}
+
 function impDiscarded(discarded, t) {
   if (!Array.isArray(discarded) || discarded.length === 0) return '';
   const items = discarded
@@ -3931,6 +4857,7 @@ function renderImportReview(res, ctx = {}) {
           <span>${escapeHtml(t('coordinator.import.confirmNameLabel'))}</span>
         </label>
         <p class="nc-coord-import-hint">${escapeHtml(t('coordinator.import.confirmNameHint'))}</p>
+        ${impGuestMismatch(res.lodging, t)}
       </fieldset>
 
       ${impDiscarded(res.discarded, t)}
@@ -3940,6 +4867,9 @@ function renderImportReview(res, ctx = {}) {
       )}</p>
       ${saltadas > 0 ? `<p class="nc-coord-import-hint">${escapeHtml(t('coordinator.import.skippedNote')(saltadas))}</p>` : ''}
       ${avisos.length > 0 ? `<ul class="nc-coord-import-notes nc-coord-import-warnings" role="alert">${impNotesHtml(avisos, t, 'warning')}</ul>` : ''}
+
+      ${impLodging(res.lodging, t)}
+      ${impTransfers(res.transfers, lang, t)}
 
       <div class="nc-coord-import-scroll">
         <table class="nc-coord-import-table">
@@ -4007,7 +4937,9 @@ function impLocalPlus(local, minutos) {
  * servidor es la autoridad y tiene que poder contestar 422 sobre la fila
  * exacta (D75).
  */
-function buildImportPayload({ patientFirstName = '', lang = 'es', rows = [] } = {}) {
+function buildImportPayload({
+  patientFirstName = '', lang = 'es', rows = [], lodging = null, transfers = [],
+} = {}) {
   const appointments = rows.map((r) => {
     const minutos = Number.parseInt(r.durationMin, 10);
     const cita = {
@@ -4047,9 +4979,54 @@ function buildImportPayload({ patientFirstName = '', lang = 'es', rows = [] } = 
     endsAt = toIsoTijuana(fin);
   }
 
-  return {
+  const cuerpo = {
     visit: { patientFirstName: impTrim(patientFirstName), lang, startsAt, endsAt },
     appointments,
+    transfers: (transfers ?? []).map(impTransferPayload),
+  };
+  // La llave se OMITE cuando el documento no traía tabla de hotel. Mandarla
+  // vacía haría que el servidor conteste 422 exigiendo `hotel` en un
+  // itinerario que legítimamente no tiene hospedaje.
+  if (lodging) cuerpo.lodging = impLodgingPayload(lodging);
+  return cuerpo;
+}
+
+function impLodgingPayload(v) {
+  const noches = impTrim(String(v.nights ?? ''));
+  return {
+    hotel: impTrim(v.hotel),
+    reservationCode: impTrim(v.reservationCode),
+    checkIn: toIsoTijuana(impTrim(v.checkIn)) ?? null,
+    checkOut: toIsoTijuana(impTrim(v.checkOut)) ?? null,
+    roomType: impTrim(v.roomType),
+    // Vacío viaja vacío, no como 0: el servidor lo lee como "no dijo" y
+    // guarda null. Un 0 diría "cero noches", que es un dato distinto.
+    nights: noches === '' ? '' : Number(noches),
+    occupancy: impTrim(v.occupancy),
+    total: impTrim(v.total),
+    breakfastIncluded: v.breakfastIncluded === true,
+    recoveryRoom: v.recoveryRoom === true,
+  };
+}
+
+// Los once controles planos del formulario vuelven a los sub-objetos que
+// espera validateTransferInput. El armado vive aquí y no en el submit para
+// que se pueda probar sin DOM, igual que el de las citas.
+function impTransferPayload(v) {
+  return {
+    kind: impTrim(v.kind),
+    scheduledAt: toIsoTijuana(impTrim(v.scheduledAt)) ?? null,
+    meetingPointId: impTrim(v.meetingPointId),
+    flightNumber: impTrim(v.flightNumber),
+    driver: { name: impTrim(v.driverName), phone: impTrim(v.driverPhone) },
+    vehicle: {
+      type: impTrim(v.vehicleType),
+      make: impTrim(v.vehicleMake),
+      model: impTrim(v.vehicleModel),
+      color: impTrim(v.vehicleColor),
+      plate: impTrim(v.vehiclePlate),
+    },
+    notes: impTrim(v.notes),
   };
 }
 
@@ -4092,6 +5069,16 @@ function attachImportScreen(rootEl, ctx = {}) {
 
   function valor(nodo, nombre) {
     return nodo.querySelector(`[name="${nombre}"]`)?.value ?? '';
+  }
+
+  // Una casilla se lee por .checked y no por .value: un checkbox sin marcar
+  // igual devuelve "on" en .value, y "desayuno incluido" quedaría en true
+  // justo cuando el documento dijo que no.
+  function leerCampos(nodo, nombres, casillas = []) {
+    const out = {};
+    for (const n of nombres) out[n] = valor(nodo, n);
+    for (const n of casillas) out[n] = nodo.querySelector(`[name="${n}"]`)?.checked === true;
+    return out;
   }
 
   function pintarErroresDeFila(errors, filas) {
@@ -4141,9 +5128,14 @@ function attachImportScreen(rootEl, ctx = {}) {
         }
       }
 
+      const hotel = form.querySelector('[data-role="import-lodging"]');
+      const traslados = [...form.querySelectorAll('[data-role="import-transfer"]')];
+
       const res = await store.importItinerary(buildImportPayload({
         patientFirstName: valor(form, 'patientFirstName'),
         lang: valor(form, 'lang'),
+        lodging: hotel ? leerCampos(hotel, IMP_LODGING_FIELDS, ['breakfastIncluded', 'recoveryRoom']) : null,
+        transfers: traslados.map((fs) => leerCampos(fs, IMP_TRANSFER_FIELDS)),
         rows: filas.map((tr) => ({
           startsAt: valor(tr, 'startsAt'),
           durationMin: valor(tr, 'durationMin'),
@@ -4191,10 +5183,14 @@ function attachImportScreen(rootEl, ctx = {}) {
       return;
     }
 
+    // Etapa L — por TABLAS y no por filas aplanadas (D99): las de hotel y
+    // transporte se reparten a su propio intérprete por el título, y así
+    // dejan de convertirse en diecinueve citas médicas de basura.
     const res = parseItinerary({
-      rows: docxTableRows(lectura.xml),
+      tables: docxTables(lectura.xml),
       headings: docxParagraphsOutsideTables(lectura.xml),
       locations,
+      transferPoints,
     });
 
     // Un .docx legítimo del que no salió ni una cita es un documento con
@@ -4233,6 +5229,20 @@ const IMPORT_CSS = `
 .nc-coord-import-warnings { padding: 10px 12px 10px 30px; border-radius: 10px; border: 1px solid var(--nc-danger, #b3261e); color: var(--nc-danger, #b3261e); }
 .nc-coord-import-note--attention { color: var(--nc-danger, #b3261e); font-weight: 600; }
 .nc-coord-import-note--fixed { opacity: 0.75; }
+/* Etapa L — el hotel y cada traslado son un bloque de campos con etiqueta,
+   no una fila de tabla: son diez campos de UNA reserva, no diez cosas
+   comparables entre sí. La rejilla es auto-fit y no de columnas fijas
+   porque el panel va de 360px a 1200px (Etapa J) y este bloque tiene que
+   caber igual en los dos extremos. El tope de 900px es el mismo criterio
+   que .nc-coord-import-patient: estirar doce campos cortos a todo el ancho
+   se lee peor, no mejor. */
+.nc-coord-import-block { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--nc-card-border); border-radius: 12px; padding: 12px; max-width: 900px; }
+.nc-coord-import-block--attention { border-color: var(--nc-danger, #b3261e); background: color-mix(in srgb, var(--nc-danger, #b3261e) 6%, transparent); }
+.nc-coord-import-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 12px; }
+.nc-coord-import-field { display: flex; flex-direction: column; gap: 3px; }
+.nc-coord-import-field-label { font-size: 12px; opacity: 0.75; }
+.nc-coord-import-check { display: flex; align-items: center; gap: 8px; font-size: 13px; min-height: 44px; }
+.nc-coord-import-check input { width: 20px; height: 20px; }
 .nc-coord-import-scroll { overflow-x: auto; }
 .nc-coord-import-table { border-collapse: collapse; width: 100%; font-size: 13px; }
 .nc-coord-import-caption { text-align: left; font-size: 12px; opacity: 0.75; padding-bottom: 6px; }
@@ -4835,6 +5845,10 @@ const CAMPOS_HOSPEDAJE = {
   reservationCode: 'coordinator.lodging.reservationCodeLabel',
   checkIn: 'coordinator.lodging.checkInLabel',
   checkOut: 'coordinator.lodging.checkOutLabel',
+  roomType: 'coordinator.lodging.roomTypeLabel',
+  nights: 'coordinator.lodging.nightsLabel',
+  occupancy: 'coordinator.lodging.occupancyLabel',
+  total: 'coordinator.lodging.totalLabel',
 };
 
 // Puro y exportado: bajo la restricción de no simular DOM en node:test,
@@ -4954,6 +5968,10 @@ function renderLodgingScreen(ctx) {
           ${textField('reservationCode', lodging?.reservationCode, t('coordinator.lodging.reservationCodeLabel'))}
           ${dateTimeField('checkIn', lodging?.checkIn, t('coordinator.lodging.checkInLabel'), ventana)}
           ${dateTimeField('checkOut', lodging?.checkOut, t('coordinator.lodging.checkOutLabel'), ventana)}
+          ${textField('roomType', lodging?.roomType, t('coordinator.lodging.roomTypeLabel'))}
+          ${textField('nights', lodging?.nights, t('coordinator.lodging.nightsLabel'))}
+          ${textField('occupancy', lodging?.occupancy, t('coordinator.lodging.occupancyLabel'))}
+          ${textField('total', lodging?.total, t('coordinator.lodging.totalLabel'))}
           ${checkboxField('breakfastIncluded', !!lodging?.breakfastIncluded, t('coordinator.lodging.breakfastLabel'))}
           ${checkboxField('recoveryRoom', !!lodging?.recoveryRoom, t('coordinator.lodging.recoveryLabel'))}
         `)}
@@ -5008,6 +6026,13 @@ function attachLodgingScreen(rootEl, ctx) {
       reservationCode: fields.reservationCode.value,
       checkIn: fecha(fields.checkIn.value),
       checkOut: fecha(fields.checkOut.value),
+      // Etapa L (D101) — los cuatro del Word van SIEMPRE, aunque esta
+      // pantalla no los haya tocado: setLodging reescribe el registro
+      // entero y omitirlos aquí los borraría en silencio.
+      roomType: fields.roomType.value,
+      nights: fields.nights.value,
+      occupancy: fields.occupancy.value,
+      total: fields.total.value,
       breakfastIncluded: fields.breakfastIncluded.checked,
       recoveryRoom: fields.recoveryRoom.checked,
     };
@@ -5504,59 +6529,6 @@ const SIGNIN_CSS = `
 .nc-signin-intro { font-size: 13px; opacity: 0.75; margin: 0 0 4px; }
 .nc-signin-error { font-size: 13px; color: var(--nc-danger, #b3261e); margin: 0; }
 `;
-
-// --- src/data/transferPoints.js ---
-// Etapa G — puntos de encuentro de los traslados (aeropuerto ↔ hospital).
-//
-// Catálogo APARTE de src/data/locations.js, y no por gusto (D70): las 7
-// ubicaciones de allá tienen `mapPointId` y participan en el ruteo del mapa
-// (fase 02/04). Estos puntos están fuera del complejo y no se dibujan en
-// ningún plano; meterlos en `locations` obligaría a inventarles un
-// mapPointId que no existe y rompería las tres listas cruzadas que
-// test/data/fixtures.test.js verifica.
-//
-// NINGUNO de los tres puntos de cruce está confirmado por el cliente: no
-// sabemos si el chofer recoge en Llegadas de la terminal, del lado
-// mexicano de CBX o en la garita. Van `unconfirmed: true` — misma
-// convención que la farmacia y que todos los horarios— y la UI los pinta
-// con el distintivo [POR CONFIRMAR], nunca como dato real. Se corrige
-// editando SOLO este archivo. Entra como punto 8 de docs/PRD.md §15.
-//
-// `quartz` y `lobby_torre` repiten a propósito el id de la ubicación
-// equivalente en locations.js: es el mismo lugar físico. No se comparte el
-// objeto porque lo que se necesita aquí (un nombre para un <select>) no es
-// lo que se necesita allá (piso, horario y punto de mapa).
-
-// `punto` y no `loc`: build.py aplana todos los módulos de una entrada a un
-// solo scope al empaquetar, y locations.js ya declara `loc` arriba — dos
-// declaraciones top-level con el mismo nombre son un error de compilación
-// del bundle aunque nunca choquen como módulos ES sueltos.
-function punto(id, nameEs, nameEn, options = {}) {
-  return { id, name: { es: nameEs, en: nameEn }, ...options };
-}
-
-const transferPoints = [
-  punto('tij_terminal', 'Aeropuerto de Tijuana (TIJ) · Llegadas', 'Tijuana Airport (TIJ) · Arrivals', { unconfirmed: true }),
-  punto('cbx', 'Cross Border Xpress (CBX)', 'Cross Border Xpress (CBX)', { unconfirmed: true }),
-  punto('san_ysidro', 'Garita San Ysidro', 'San Ysidro Port of Entry', { unconfirmed: true }),
-  punto('quartz', 'Quartz Hotel & Spa', 'Quartz Hotel & Spa'),
-  punto('lobby_torre', 'Lobby Torre Médica · Acceso general', 'Medical Tower Lobby · General Access'),
-];
-
-const TRANSFER_POINT_IDS = transferPoints.map((p) => p.id);
-
-// Los dos enum del traslado, aquí y no en src/server/: la pantalla del
-// panel los necesita para pintar sus <select> y el servidor para validar, y
-// D45 prohíbe que el servidor importe código de UI. src/data/ es el único
-// lugar que las dos mitades pueden leer sin que ninguna dependa de la otra.
-//
-// 'internal' es un traslado DENTRO del complejo (del hotel a la torre, por
-// ejemplo). Lo pidió el cliente como ida y vuelta al aeropuerto, pero el
-// enum lo admite desde ahora porque agregarlo después obligaría a migrar
-// los registros ya guardados.
-const TRANSFER_KINDS = ['arrival', 'departure', 'internal'];
-
-const VEHICLE_TYPES = ['sedan', 'suv', 'van', 'ambulance', 'other'];
 
 // --- src/ui/screens/coordinator/transfers.js ---
 // Etapa G — Traslados: alta, edición y cancelación de los traslados de una

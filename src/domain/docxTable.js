@@ -102,19 +102,51 @@ function docxTextOf(xml) {
   return parrafos.join(' ');
 }
 
-/**
- * Las filas de todas las tablas del documento, en orden, como texto.
- * Devuelve una fila por `<w:tr>` y una cadena por `<w:tc>` — sin rellenar
- * ni recortar: las filas reales traen 1, 2 o 3 celdas y esa diferencia es
- * información que el intérprete usa.
- */
-export function docxTableRows(xml) {
-  if (typeof xml !== 'string') return [];
+// Las filas de UN `<w:tbl>` ya recortado.
+function docxRowsOf(xml) {
   const filas = [];
   for (const fila of xml.matchAll(DOCX_RE_TR)) {
     filas.push([...fila[1].matchAll(DOCX_RE_TC)].map((celda) => docxTextOf(celda[1])));
   }
   return filas;
+}
+
+/**
+ * Una lista de filas POR CADA `<w:tbl>` del documento, en orden.
+ *
+ * Etapa L (D99) — El límite entre tablas es dato, no ruido. El itinerario
+ * real trae cinco tablas: hotel, transporte, día 1, día 2 y una vacía. Al
+ * aplanarlas, el intérprete de itinerarios recibía las filas del hotel como
+ * si fueran renglones de la tabla de citas y convertía "Quartz Hotel & Spa"
+ * y "$3,164.00 MXN" en citas médicas. Peor: una fila de dos columnas cuya
+ * primera celda quede vacía se pega como continuación de la cita anterior
+ * (itineraryParse.js), y eso contamina un expediente sin avisar.
+ *
+ * Se anida `matchAll` dentro de `matchAll` sin miedo: el iterador clona el
+ * regex, así que el `lastIndex` del externo no se mueve. Sigue en pie el
+ * límite del encabezado: `[\s\S]*?` cortaría mal una tabla ANIDADA, y eso se
+ * arregla con un recorrido con pila, no parchando el patrón.
+ */
+export function docxTables(xml) {
+  if (typeof xml !== 'string') return [];
+  // DOCX_RE_TBL no tiene grupo de captura —lo usa docxParagraphsOutsideTables
+  // para BORRAR tablas— así que la tabla entera es m[0], no m[1].
+  return [...xml.matchAll(DOCX_RE_TBL)].map((m) => docxRowsOf(m[0]));
+}
+
+/**
+ * Las filas de todas las tablas del documento, en orden, como texto.
+ * Devuelve una fila por `<w:tr>` y una cadena por `<w:tc>` — sin rellenar
+ * ni recortar: las filas reales traen 1, 2 o 3 celdas y esa diferencia es
+ * información que el intérprete usa.
+ *
+ * Sigue existiendo con la misma firma y el mismo resultado que antes de la
+ * Etapa L: la usan cinco sitios y una decena de aserciones. Quien necesite
+ * saber dónde terminaba cada tabla llama a `docxTables`.
+ */
+export function docxTableRows(xml) {
+  if (typeof xml !== 'string') return [];
+  return docxRowsOf(xml);
 }
 
 /**

@@ -24,7 +24,10 @@ import {
   addAppointment,
   addAppointments,
   validateAppointmentInput,
+  validateLodgingInput,
+  validateTransferInput,
   MAX_IMPORT_APPOINTMENTS,
+  MAX_IMPORT_TRANSFERS,
   moveAppointment,
   editAppointment,
   cancelAppointment,
@@ -32,6 +35,7 @@ import {
   issueQpass,
   revokeQpass,
   addTransfer,
+  addTransfers,
   editTransfer,
   cancelTransfer,
 } from './visitMutations.js';
@@ -233,16 +237,55 @@ async function importarItinerario(request, deps) {
     if (fallas.length > 0) errors.appointments = fallas;
   }
 
-  // Los dos juntos y no la visita primero: corregir el nombre del paciente,
-  // reenviar, y recién entonces enterarse de que además había una fila mala
-  // es el viaje de ida y vuelta que hace abandonar una importación.
+  // Etapa L — El mismo documento trae ahora el hotel y los traslados, y los
+  // dos son OPCIONALES: cuatro de los cinco itinerarios reales no traen esas
+  // tablas. Ausentes se ignoran; presentes se validan aquí, antes de crear
+  // nada, por la misma razón que las citas.
+  const hospedaje = cuerpo.lodging;
+  if (hospedaje !== undefined && hospedaje !== null) {
+    const { ok, errors: motivos } = validateLodgingInput(hospedaje);
+    if (!ok) errors.lodging = motivos;
+  }
+
+  // Una lista VACÍA no es un error, a diferencia de `addTransfers`: la llave
+  // la arma el intérprete del .docx, que devuelve [] cuando el documento no
+  // traía tabla de transporte. Exigir al menos uno obligaría a la pantalla a
+  // borrar la llave, y una llave que a veces va y a veces no es como se
+  // cuelan los 500.
+  const traslados = cuerpo.transfers;
+  if (traslados !== undefined && traslados !== null) {
+    if (!Array.isArray(traslados)) errors.transfers = 'invalid';
+    else if (traslados.length > MAX_IMPORT_TRANSFERS) errors.transfers = 'tooLong';
+    else {
+      const fallas = [];
+      traslados.forEach((t, index) => {
+        const { ok, errors: motivos } = validateTransferInput(t);
+        if (!ok) fallas.push({ index, errors: motivos });
+      });
+      if (fallas.length > 0) errors.transfers = fallas;
+    }
+  }
+
+  // Los cuatro juntos y no la visita primero: corregir el nombre del
+  // paciente, reenviar, y recién entonces enterarse de que además había una
+  // fila mala es el viaje de ida y vuelta que hace abandonar una importación.
   if (Object.keys(errors).length > 0) return unprocessable(errors);
 
   const record = await deps.store.createVisit(cuerpo.visit, deps.now, deps.by);
-  const res = addAppointments(record, citas, { now: deps.now, by: deps.by, newId: deps.newId });
+  const ctx = { now: deps.now, by: deps.by, newId: deps.newId };
+  const res = addAppointments(record, citas, ctx);
   // No puede fallar —se acaba de validar lo mismo— pero si algún día las dos
   // validaciones se separan, esto lo dice en vez de guardar a medias.
   if (!res.ok) return unprocessable(res.errors);
+
+  if (hospedaje !== undefined && hospedaje !== null) {
+    const alta = setLodging(record, hospedaje, ctx);
+    if (!alta.ok) return unprocessable({ lodging: alta.errors });
+  }
+  if (Array.isArray(traslados) && traslados.length > 0) {
+    const alta = addTransfers(record, traslados, ctx);
+    if (!alta.ok) return unprocessable(alta.errors);
+  }
 
   await deps.store.saveVisit(record);
   return json(201, { record });
